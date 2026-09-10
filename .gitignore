@@ -4,3 +4,5 @@ bin/
 *.db.backup
 *.log
 *.o
+CLAUDE.local.md
+.claude/settings.local.json
