@@ -201,9 +201,9 @@ func TestIndependentSuccessorsAreAllShown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Total != 3 {
-		t.Fatalf("listing with superseded holds %d entries, want 3",
-			result.Total)
+	if len(result.Entries) != 3 || result.More {
+		t.Fatalf("listing with superseded holds %d entries and more %v, "+
+			"want 3 and no more", len(result.Entries), result.More)
 	}
 }
 

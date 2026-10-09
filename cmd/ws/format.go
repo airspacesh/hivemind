@@ -130,20 +130,18 @@ func printSearchResult(
 		}
 		return
 	}
+	if len(result.Entries) == 0 && offset > 0 {
+		fmt.Printf("No entries at offset %d.\n", offset)
+		return
+	}
 	if len(result.Entries) == 0 {
-		if result.Total > 0 {
-			fmt.Printf("No entries at offset %d (%d matched).\n",
-				offset, result.Total)
-		} else {
-			fmt.Println("No matching entries.")
-		}
+		fmt.Println("No matching entries.")
 		return
 	}
 	printEntryLines(result.Entries, order)
-	remaining := result.Total - offset - len(result.Entries)
-	if remaining > 0 {
-		fmt.Printf("--- %d more entries (use --offset %d to view older) ---\n",
-			remaining, offset+limit)
+	if result.More {
+		fmt.Printf("--- more entries (use --offset %d to view older) ---\n",
+			offset+limit)
 	}
 }
 

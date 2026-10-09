@@ -195,9 +195,12 @@ func (r EditEntryRequest) ChangesContent() bool {
 		len(r.Metadata) > 0
 }
 
+// SearchResult is a page of a listing. More says whether entries
+// follow the page. Listings do not count their matches, since a count
+// takes time in proportion to the workspace.
 type SearchResult struct {
 	Entries []ListedEntry `json:"entries"`
-	Total   int           `json:"total"`
+	More    bool          `json:"more"`
 }
 
 // ErrorCode says what kind of failure an error response reports, so a

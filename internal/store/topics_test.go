@@ -150,6 +150,37 @@ func idsOf(t *testing.T, store *Store, result api.SearchResult) []int64 {
 	return ids
 }
 
+// topicsPage lists a page of the topics view, walking at most maxWalks
+// paths up before ranking directly.
+func topicsPage(
+	t *testing.T,
+	store *Store,
+	access Access,
+	workspace int64,
+	filter Filter,
+	maxWalks int,
+) api.SearchResult {
+	t.Helper()
+	ctx := context.Background()
+	v, err := store.begin(ctx, access, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.tx.Rollback()
+	where, err := buildWhere(filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	where.clauses = append(where.clauses, `e.workspace_id = ?`)
+	where.args = append(where.args, workspace)
+	result, err := v.searchTopics(ctx, workspace, filter, `entries AS e`,
+		where, maxWalks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
 func TestTopicsMatchTheReference(t *testing.T) {
 	for seed := int64(1); seed <= 12; seed++ {
 		store := openTestStore(t)
@@ -164,29 +195,56 @@ func TestTopicsMatchTheReference(t *testing.T) {
 				for _, include := range []bool{false, true} {
 					want := referenceTopics(t, store, defaultID, typ,
 						include)
-					filter := Filter{View: ViewTopics, Limit: 500,
+					filter := Filter{View: ViewTopics,
 						IncludeSuperseded: include}
 					if typ != "" {
 						filter.Type = []FieldCond{{Value: typ}}
 					}
-					result, err := store.Search(context.Background(),
-						access, defaultID, filter)
-					if err != nil {
-						t.Fatal(err)
-					}
 					label := fmt.Sprintf("seed %d, access %v, type %q, "+
 						"include superseded %v", seed, access, typ, include)
-					if got := idsOf(t, store, result); !reflect.DeepEqual(
-						got, want) {
-						t.Fatalf("%s: topics = %v, want %v", label, got, want)
-					}
-					if result.Total != len(want) {
-						t.Fatalf("%s: total = %d, want %d", label,
-							result.Total, len(want))
-					}
+					checkTopicPages(t, store, access, defaultID, filter,
+						want, label)
 					checkWalkMatchesRanking(t, store, access, defaultID,
 						filter, label)
 				}
+			}
+		}
+	}
+}
+
+// checkTopicPages checks pages of the topics view against want, the
+// whole view in order, whether it walks activity, gives up walking
+// part way, or ranks directly from the start.
+func checkTopicPages(
+	t *testing.T,
+	store *Store,
+	access Access,
+	workspace int64,
+	filter Filter,
+	want []int64,
+	label string,
+) {
+	t.Helper()
+	for _, page := range []struct{ offset, limit int }{
+		{0, 500}, {0, 1}, {2, 3}, {max(0, len(want)-2), 2},
+		{len(want), 5},
+	} {
+		filter.Offset, filter.Limit = page.offset, page.limit
+		wantPage := want[min(page.offset, len(want)):min(
+			page.offset+page.limit, len(want))]
+		wantMore := len(want) > page.offset+page.limit
+		for _, maxWalks := range []int{topicWalks(filter), 3, 0} {
+			result := topicsPage(t, store, access, workspace, filter,
+				maxWalks)
+			got := idsOf(t, store, result)
+			if !reflect.DeepEqual(got, wantPage) &&
+				!(len(got) == 0 && len(wantPage) == 0) {
+				t.Fatalf("%s: page %+v walking %d = %v, want %v", label,
+					page, maxWalks, got, wantPage)
+			}
+			if result.More != wantMore {
+				t.Fatalf("%s: page %+v walking %d: more %v, want %v",
+					label, page, maxWalks, result.More, wantMore)
 			}
 		}
 	}
@@ -224,9 +282,12 @@ func checkWalkMatchesRanking(
 	if err != nil {
 		t.Fatal(err)
 	}
+	shows := func(ctx context.Context, id int64) (bool, error) {
+		return v.topicShown(ctx, workspace, id, `entries AS e`, where,
+			filter.IncludeSuperseded)
+	}
 	for _, count := range []int{1, 5, len(candidates)} {
-		walked, ok, err := v.walkTopics(ctx, workspace, candidates, count,
-			1<<30)
+		walked, ok, err := v.walkTopics(ctx, workspace, count, 1<<30, shows)
 		if err != nil || !ok {
 			t.Fatalf("%s: walking %d: ok %v, %v", label, count, ok, err)
 		}

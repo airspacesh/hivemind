@@ -308,7 +308,8 @@ func (s *Store) Search(
 	}
 	var result api.SearchResult
 	if filter.View == ViewTopics {
-		result, err = v.searchTopics(ctx, workspace, filter, from, where)
+		result, err = v.searchTopics(ctx, workspace, filter, from, where,
+			topicWalks(filter))
 	} else {
 		result, err = v.searchFlat(ctx, filter, from, where)
 	}
@@ -322,21 +323,13 @@ func (s *Store) Search(
 }
 
 // searchFlat lists a page of every matching entry, by its own change
-// or creation time, with how many entries match.
+// or creation time, and whether more follow.
 func (v view) searchFlat(
 	ctx context.Context, filter Filter, from string, where whereBuilder,
 ) (api.SearchResult, error) {
 	if !filter.IncludeSuperseded {
 		where.clauses = append(where.clauses, `NOT `+supersededClause)
 	}
-	var total int
-	if err := v.tx.QueryRowContext(ctx,
-		`SELECT count(*) FROM `+from+where.sql(), where.args...,
-	).Scan(&total); err != nil {
-		return api.SearchResult{}, fmt.Errorf(
-			"counting search results: %w", err)
-	}
-
 	orderKey := `e.modified_utc`
 	if filter.OrderByCreation {
 		orderKey = `e.created_utc`
@@ -355,7 +348,7 @@ func (v view) searchFlat(
 		ORDER BY page.sort_key DESC, page.id DESC, metadata.key`,
 		entryColumns, orderKey, from, where.sql(),
 	)
-	pageArgs := append(where.args, filter.Limit, filter.Offset)
+	pageArgs := append(where.args, filter.Limit+1, filter.Offset)
 	rows, err := v.tx.QueryContext(ctx, pageQuery, pageArgs...)
 	if err != nil {
 		return api.SearchResult{}, fmt.Errorf(
@@ -365,6 +358,8 @@ func (v view) searchFlat(
 	if err != nil {
 		return api.SearchResult{}, err
 	}
+	more := len(entries) > filter.Limit
+	entries = entries[:min(len(entries), filter.Limit)]
 	if err := v.attachLinks(ctx, entries); err != nil {
 		return api.SearchResult{}, err
 	}
@@ -372,7 +367,7 @@ func (v view) searchFlat(
 	if err != nil {
 		return api.SearchResult{}, err
 	}
-	return api.SearchResult{Entries: listed, Total: total}, nil
+	return api.SearchResult{Entries: listed, More: more}, nil
 }
 
 func (v view) scanSearchRows(rows *sql.Rows) ([]api.Entry, error) {

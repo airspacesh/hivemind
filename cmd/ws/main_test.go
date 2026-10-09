@@ -569,7 +569,7 @@ func TestUncertainWritesAreReportedNotRepeated(t *testing.T) {
 // listing answers a search with entries changed at the given times.
 func listing(times ...time.Time) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		result := api.SearchResult{Total: len(times)}
+		var result api.SearchResult
 		for i, when := range times {
 			result.Entries = append(result.Entries, api.ListedEntry{
 				Entry: api.Entry{Ref: api.Ref{Prefix: "e", ID: int64(i + 1)},

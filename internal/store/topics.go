@@ -3,7 +3,9 @@ package store
 import (
 	"cmp"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -15,13 +17,15 @@ import (
 // activity anywhere in their trees. Working that out for every tree
 // costs time in proportion to the workspace, so the view reads
 // activity newest first instead, and maps each change to the top-level
-// entries above it until it has the page. When few entries match, it
-// ranks them directly, which costs time in proportion to their trees.
+// entry above it until it has the page. When few top-level entries
+// match, that walk runs long, so after a while the view finds every
+// match and ranks their trees directly instead.
 
 const (
-	// rankDirectlyBelow is the candidate count under which ranking each
-	// candidate's tree costs less than reading activity.
-	rankDirectlyBelow = 512
+	// walksBeforeRanking and walksPerEntry bound the paths up the walk
+	// follows for a page, before ranking directly costs less.
+	walksBeforeRanking = 1024
+	walksPerEntry      = 32
 	// firstActivityWindow is how far back the first read of activity
 	// reaches. Each later window doubles while windows come back
 	// sparse.
@@ -96,34 +100,74 @@ func (v view) topicCandidates(
 	if err := rows.Close(); err != nil {
 		return nil, fmt.Errorf("listing top-level entries: %w", err)
 	}
-	if len(superseded) == 0 {
-		return candidates, nil
+	withCurrent, err := v.currentUnder(ctx, workspace, superseded)
+	if err != nil {
+		return nil, err
 	}
+	candidates = append(candidates, withCurrent...)
+	slices.Sort(candidates)
+	return candidates, nil
+}
 
-	rows, err = v.tx.QueryContext(ctx, `
+// currentUnder lists which of the given entries of a workspace have a
+// current entry under them.
+func (v view) currentUnder(
+	ctx context.Context, workspace int64, ids []int64,
+) ([]int64, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := v.tx.QueryContext(ctx, `
 		WITH RECURSIVE `+treeCTE("down")+`
 		SELECT DISTINCT down.root_id FROM down JOIN entries AS e
 			ON e.workspace_id = down.workspace_id AND e.id = down.entry_id
 		WHERE NOT (e.workspace_id = ? AND e.id = down.root_id)
 			AND NOT `+supersededClause,
-		workspace, idsJSON(superseded), workspace)
+		workspace, idsJSON(ids), workspace)
 	if err != nil {
 		return nil, fmt.Errorf("finding current entries under "+
 			"superseded ones: %w", err)
 	}
 	defer rows.Close()
+	var found []int64
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		candidates = append(candidates, id)
+		found = append(found, id)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	return found, rows.Err()
+}
+
+// topicShown reports whether the view shows a top-level entry: whether
+// it matches the search, and is current or has a current entry under
+// it.
+func (v view) topicShown(
+	ctx context.Context,
+	workspace int64,
+	id int64,
+	from string,
+	where whereBuilder,
+	includeSuperseded bool,
+) (bool, error) {
+	where.clauses = append(slices.Clone(where.clauses), `e.id = ?`)
+	where.args = append(slices.Clone(where.args), id)
+	var superseded bool
+	err := v.tx.QueryRowContext(ctx, `
+		SELECT `+supersededClause+` FROM `+from+where.sql(), where.args...,
+	).Scan(&superseded)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
 	}
-	slices.Sort(candidates)
-	return candidates, nil
+	if err != nil {
+		return false, fmt.Errorf("matching a top-level entry: %w", err)
+	}
+	if !superseded || includeSuperseded {
+		return true, nil
+	}
+	withCurrent, err := v.currentUnder(ctx, workspace, []int64{id})
+	return len(withCurrent) > 0, err
 }
 
 // rankTopics orders top-level entries of a workspace by the latest
@@ -227,23 +271,24 @@ func (v view) changeSpan(
 // the latest activity in its tree, so the entries come out in the
 // view's order.
 type topicWalk struct {
-	view       view
-	workspace  int64
-	candidates map[int64]bool
+	view view
+	// shows reports whether the view shows a top-level entry.
+	shows func(ctx context.Context, id int64) (bool, error)
 	// walked holds every entry whose path up has been followed. A
 	// later, older change to it, or a path up that meets it, reaches a
 	// top-level entry already considered.
-	walked map[Key]bool
-	found  map[int64]bool
-	ranked []int64
+	walked     map[Key]bool
+	considered map[int64]bool
+	ranked     []int64
 	// walksLeft bounds the paths up the walk may follow before ranking
 	// directly is the cheaper way.
 	walksLeft int
 }
 
 // reach follows a changed entry's path up to its top-level entry, and
-// adds that to sameTime if it is a candidate not yet found. It reports
-// false when the walk has run out of paths to follow.
+// adds that to sameTime if the view shows it and it was not considered
+// before. It reports false when the walk has run out of paths to
+// follow.
 func (w *topicWalk) reach(
 	ctx context.Context, entry Key, sameTime *[]int64,
 ) (bool, error) {
@@ -267,22 +312,29 @@ func (w *topicWalk) reach(
 		w.walked[node] = true
 	}
 	top := path[len(path)-1].ID
-	if w.candidates[top] && !w.found[top] {
-		w.found[top] = true
+	if w.considered[top] {
+		return true, nil
+	}
+	w.considered[top] = true
+	shown, err := w.shows(ctx, top)
+	if err != nil {
+		return false, err
+	}
+	if shown {
 		*sameTime = append(*sameTime, top)
 	}
 	return true, nil
 }
 
-// walkTopics ranks the first count candidates by reading changes
-// newest first. It reports false when it would follow more than
-// maxWalks paths up, where ranking directly costs less.
+// walkTopics ranks the first count top-level entries the view shows,
+// by reading changes newest first. It reports false when it would
+// follow more than maxWalks paths up.
 func (v view) walkTopics(
 	ctx context.Context,
 	workspace int64,
-	candidates []int64,
 	count int,
 	maxWalks int,
+	shows func(ctx context.Context, id int64) (bool, error),
 ) ([]int64, bool, error) {
 	earliest, latest, err := v.changeSpan(ctx, workspace)
 	if err != nil {
@@ -300,18 +352,14 @@ func (v view) walkTopics(
 		return nil, false, err
 	}
 	w := topicWalk{
-		view: v, workspace: workspace,
-		candidates: map[int64]bool{}, walked: map[Key]bool{},
-		found: map[int64]bool{}, walksLeft: maxWalks,
-	}
-	for _, id := range candidates {
-		w.candidates[id] = true
+		view: v, shows: shows, walked: map[Key]bool{},
+		considered: map[int64]bool{}, walksLeft: maxWalks,
 	}
 
 	to := ""
 	window := firstActivityWindow
 	from := newest.Add(-window)
-	for len(w.ranked) < count {
+	for {
 		if from.Before(floor) {
 			from = floor
 		}
@@ -349,46 +397,48 @@ func (v view) walkTopics(
 		}
 		from = from.Add(-window)
 	}
-	return w.ranked, true, nil
 }
 
-// searchTopics lists a page of the topics view, with how many entries
-// the view holds.
+// searchTopics lists a page of the topics view, and whether more
+// follow. It walks activity for at most maxWalks paths up, then ranks
+// every match directly.
 func (v view) searchTopics(
 	ctx context.Context,
 	workspace int64,
 	filter Filter,
 	from string,
 	where whereBuilder,
+	maxWalks int,
 ) (api.SearchResult, error) {
-	candidates, err := v.topicCandidates(ctx, workspace, from, where,
-		filter.IncludeSuperseded)
+	count := filter.Offset + filter.Limit + 1
+	shows := func(ctx context.Context, id int64) (bool, error) {
+		return v.topicShown(ctx, workspace, id, from, where,
+			filter.IncludeSuperseded)
+	}
+	ranked, walked, err := v.walkTopics(ctx, workspace, count, maxWalks,
+		shows)
 	if err != nil {
 		return api.SearchResult{}, err
 	}
-	count := filter.Offset + filter.Limit
-	var ranked []int64
-	walked := false
-	if len(candidates) >= rankDirectlyBelow {
-		ranked, walked, err = v.walkTopics(ctx, workspace, candidates,
-			count, 2*len(candidates))
+	if !walked {
+		candidates, err := v.topicCandidates(ctx, workspace, from, where,
+			filter.IncludeSuperseded)
 		if err != nil {
 			return api.SearchResult{}, err
 		}
-	}
-	if !walked {
 		if ranked, err = v.rankTopics(ctx, workspace, candidates); err != nil {
 			return api.SearchResult{}, err
 		}
 	}
 
 	result := api.SearchResult{
-		Entries: []api.ListedEntry{}, Total: len(candidates),
+		Entries: []api.ListedEntry{},
+		More:    len(ranked) > filter.Offset+filter.Limit,
 	}
 	if filter.Offset >= len(ranked) {
 		return result, nil
 	}
-	page := ranked[filter.Offset:min(count, len(ranked))]
+	page := ranked[filter.Offset:min(filter.Offset+filter.Limit, len(ranked))]
 	entries := make([]api.Entry, len(page))
 	for i, id := range page {
 		if entries[i], err = v.getEntry(ctx, Key{workspace, id}); err != nil {
@@ -399,6 +449,13 @@ func (v view) searchTopics(
 		return api.SearchResult{}, err
 	}
 	return result, nil
+}
+
+// topicWalks is how many paths up the topics view follows for a page
+// before it ranks every match directly.
+func topicWalks(filter Filter) int {
+	return walksBeforeRanking +
+		walksPerEntry*(filter.Offset+filter.Limit+1)
 }
 
 // joinedFrom is the FROM clause of a search: every entry, or with

@@ -139,10 +139,15 @@ func TestSearchContentPagingAndMetadata(t *testing.T) {
 		Limit:   2,
 		Offset:  1,
 	})
-	if result.Total != 3 {
-		t.Fatalf("total = %d, want 3", result.Total)
+	if result.More {
+		t.Fatal("more after the last of 3 matches")
 	}
 	assertEntryRefs(t, result.Entries, entries.second.Ref, entries.first.Ref)
+	if first := runSearch(t, entries.store, Filter{
+		Content: []FieldCond{{Value: "*DUCKLINGS*"}}, Limit: 2,
+	}); !first.More {
+		t.Fatal("no more after the first 2 of 3 matches")
+	}
 	if got := result.Entries[1].Metadata["jira"]; got != "QUACK-1" {
 		t.Fatalf("paged metadata jira = %q, want QUACK-1", got)
 	}

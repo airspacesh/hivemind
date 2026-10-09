@@ -136,8 +136,9 @@ func TestTopicsKeepASupersededRootOnlyAsContext(t *testing.T) {
 		[]api.Ref{successor.Ref}) {
 		t.Fatal("the context root is not labelled as superseded")
 	}
-	if all := topics(t, store, Filter{IncludeSuperseded: true}); all.Total != 3 {
-		t.Fatalf("topics with superseded = %d, want 3", all.Total)
+	if all := topics(t, store, Filter{IncludeSuperseded: true}); len(
+		all.Entries) != 3 {
+		t.Fatalf("topics with superseded = %d, want 3", len(all.Entries))
 	}
 	if got := treeText(readTree(t, store, withChild.Ref, false, 30)); got !=
 		"replaced topic, "+child.Subject {
