@@ -137,7 +137,8 @@ func (builder *whereBuilder) addKeys(conditions []FieldCond) error {
 		}
 		clause := `EXISTS (
 			SELECT 1 FROM entry_metadata AS key_meta
-			WHERE key_meta.entry_id = e.id AND key_meta.key GLOB ?
+			WHERE key_meta.workspace_id = e.workspace_id
+				AND key_meta.entry_id = e.id AND key_meta.key GLOB ?
 		)`
 		if condition.Negate {
 			clause = `NOT ` + clause
@@ -180,7 +181,8 @@ func (builder *whereBuilder) addMetadata(conditions []MetaCond) error {
 		}
 		clause := `EXISTS (
 			SELECT 1 FROM entry_metadata AS pair_meta
-			WHERE pair_meta.entry_id = e.id
+			WHERE pair_meta.workspace_id = e.workspace_id
+				AND pair_meta.entry_id = e.id
 				AND pair_meta.key GLOB ?
 				AND pair_meta.value_lower GLOB ?
 		)`

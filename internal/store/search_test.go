@@ -268,3 +268,28 @@ func TestSearchByOrigin(t *testing.T) {
 	})
 	assertEntryRefs(t, got.Entries, second.Ref)
 }
+
+// Entries share numbers across workspaces, so metadata filters must
+// match only the metadata of the entry in the searched workspace.
+func TestSearchMetadataStaysInItsWorkspace(t *testing.T) {
+	store := openTestStore(t)
+	inDefault := mustAdd(t, store, "note", "in default", "",
+		map[string]string{"project": "pond"})
+	addTo(t, store, "personal", api.AddEntryRequest{
+		Type: "note", Subject: "in personal",
+		Metadata: map[string]string{"project": "secret", "jira": "QUACK-9"},
+	})
+
+	for _, filter := range []Filter{
+		{Meta: []MetaCond{{Key: "project", Value: "secret"}}},
+		{Meta: []MetaCond{{Key: "jira", Value: "*"}}},
+		{Key: []FieldCond{{Value: "jira"}}},
+	} {
+		result := runSearch(t, store, filter)
+		assertEntryRefs(t, result.Entries)
+	}
+	result := runSearch(t, store, Filter{
+		Meta: []MetaCond{{Negate: true, Key: "jira", Value: "*"}},
+	})
+	assertEntryRefs(t, result.Entries, inDefault.Ref)
+}
