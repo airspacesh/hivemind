@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/Sothatsit/work-stream/internal/api"
+	"github.com/airspacesh/workstream/internal/api"
 )
 
 const (
@@ -42,9 +42,59 @@ type Filter struct {
 	OriginDir           []FieldCond
 	OriginClaudeSession []FieldCond
 
-	OrderByCreation bool
-	Limit           int
-	Offset          int
+	View View
+	// Under limits the search to an entry and its descendants, when set.
+	Under             *Key
+	OrderByCreation   bool
+	IncludeSuperseded bool
+	Limit             int
+	Offset            int
+}
+
+// View chooses which entries a search lists, and in what order.
+type View int
+
+const (
+	// ViewFlat lists every matching entry by its own change time.
+	ViewFlat View = iota
+	// ViewTopics lists the top-level entries of a workspace by the
+	// latest change anywhere in their trees. An entry whose parent is
+	// in another workspace is top-level in its own. A superseded entry
+	// stays while a current entry is under it, as context for it.
+	ViewTopics
+)
+
+// topicsCTEs name each entry's top-level entry in the workspace as
+// tree(workspace_id, entry_id, root_id), and each top-level entry's
+// activity, and whether a current entry is under it, as
+// roots(id, activity_utc, has_current_descendant). They take the
+// workspace id as their two arguments, and walk down only into
+// entries the request can read.
+func topicsCTEs(access Access) string {
+	return `tree(workspace_id, entry_id, root_id) AS (
+	SELECT e.workspace_id, e.id, e.id FROM entries AS e
+	WHERE e.workspace_id = ? AND NOT EXISTS (
+		SELECT 1 FROM entry_links AS p
+		WHERE p.source_workspace_id = e.workspace_id
+			AND p.source_id = e.id AND p.name = 'parent'
+			AND p.target_workspace_id = e.workspace_id
+	)
+	UNION ALL
+	SELECT l.source_workspace_id, l.source_id, tree.root_id
+	FROM entry_links AS l JOIN tree
+		ON l.target_workspace_id = tree.workspace_id
+		AND l.target_id = tree.entry_id
+	WHERE l.name = 'parent' AND ` +
+		access.readableSQL("l.source_workspace_id") + `
+),
+roots(id, activity_utc, has_current_descendant) AS (
+	SELECT tree.root_id, max(` + activityExpr + `),
+		coalesce(max(NOT (e.workspace_id = ? AND e.id = tree.root_id)
+			AND NOT ` + supersededClause + `), 0)
+	FROM tree JOIN entries AS e
+		ON e.workspace_id = tree.workspace_id AND e.id = tree.entry_id
+	GROUP BY tree.root_id
+)`
 }
 
 type whereBuilder struct {
@@ -238,8 +288,11 @@ func lowerASCII(value string) string {
 	return string(folded)
 }
 
+// Search lists the entries of a workspace that match a filter.
 func (s *Store) Search(
 	ctx context.Context,
+	access Access,
+	workspace int64,
 	filter Filter,
 ) (api.SearchResult, error) {
 	if conditionCount(filter) > MaxSearchConditions {
@@ -259,85 +312,121 @@ func (s *Store) Search(
 			"%w: offset must not be negative", ErrInvalidFilter,
 		)
 	}
+	if filter.View == ViewTopics && filter.OrderByCreation {
+		return api.SearchResult{}, fmt.Errorf(
+			"%w: ordering by creation applies to the flat view only",
+			ErrInvalidFilter,
+		)
+	}
 	where, err := buildWhere(filter)
 	if err != nil {
 		return api.SearchResult{}, err
 	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+
+	var ctes []string
+	var cteArgs []any
+	from := `entries AS e`
+	orderKey := `e.modified_utc`
+	if filter.OrderByCreation {
+		orderKey = `e.created_utc`
+	}
+	visible := `NOT ` + supersededClause
+	if filter.View == ViewTopics {
+		ctes = append(ctes, topicsCTEs(access))
+		cteArgs = append(cteArgs, workspace, workspace)
+		from = `entries AS e JOIN roots ON roots.id = e.id`
+		orderKey = `roots.activity_utc`
+		visible = `(NOT ` + supersededClause +
+			` OR roots.has_current_descendant)`
+	}
+	if filter.Under != nil {
+		ctes = append(ctes, subtreeCTE("under", access))
+		cteArgs = append(cteArgs, filter.Under.Workspace, filter.Under.ID)
+		where.clauses = append(where.clauses, `EXISTS (
+			SELECT 1 FROM under
+			WHERE under.workspace_id = e.workspace_id AND under.id = e.id
+		)`)
+	}
+	if !filter.IncludeSuperseded {
+		where.clauses = append(where.clauses, visible)
+	}
+	where.clauses = append(where.clauses, `e.workspace_id = ?`)
+	where.args = append(where.args, workspace)
+	with := `WITH RECURSIVE `
+	if len(ctes) > 0 {
+		with += strings.Join(ctes, ",\n") + ",\n"
+	}
+	args := append(append([]any{}, cteArgs...), where.args...)
+
+	v, err := s.begin(ctx, access, true)
 	if err != nil {
 		return api.SearchResult{}, fmt.Errorf("starting search: %w", err)
 	}
-	defer tx.Rollback()
+	defer v.tx.Rollback()
 
+	if filter.Under != nil {
+		if err := v.checkEntryExists(ctx, *filter.Under); err != nil {
+			return api.SearchResult{}, err
+		}
+	}
 	var total int
-	countQuery := `SELECT count(*) FROM entries AS e` + where.sql()
-	if err := tx.QueryRowContext(
-		ctx, countQuery, where.args...,
+	countQuery := with + `counted AS (SELECT e.id FROM ` + from +
+		where.sql() + `) SELECT count(*) FROM counted`
+	if err := v.tx.QueryRowContext(
+		ctx, countQuery, args...,
 	).Scan(&total); err != nil {
-		return api.SearchResult{}, fmt.Errorf("counting search results: %w", err)
+		return api.SearchResult{}, fmt.Errorf(
+			"counting search results: %w", err)
 	}
 
-	orderColumn := "modified_utc"
-	if filter.OrderByCreation {
-		orderColumn = "created_utc"
-	}
-	pageQuery := fmt.Sprintf(`
-		WITH page AS (
-			SELECT e.id, e.created_utc, e.modified_utc,
-				e.type, e.subject, e.body,
-				e.origin_user, e.origin_host, e.origin_dir,
-				e.origin_claude_session
-			FROM entries AS e%s
-			ORDER BY e.%s DESC, e.id DESC
+	pageQuery := with + fmt.Sprintf(`page AS (
+			SELECT %s, %s AS sort_key
+			FROM %s%s
+			ORDER BY sort_key DESC, e.id DESC
 			LIMIT ? OFFSET ?
 		)
-		SELECT page.id, page.created_utc, page.modified_utc,
-			page.type, page.subject, page.body,
-			page.origin_user, page.origin_host, page.origin_dir,
-			page.origin_claude_session,
-			metadata.key, metadata.value
+		SELECT page.*, metadata.key, metadata.value
 		FROM page
 		LEFT JOIN entry_metadata AS metadata
-			ON metadata.entry_id = page.id
-		ORDER BY page.%s DESC, page.id DESC, metadata.key`,
-		where.sql(), orderColumn, orderColumn,
+			ON metadata.workspace_id = page.workspace_id
+			AND metadata.entry_id = page.id
+		ORDER BY page.sort_key DESC, page.id DESC, metadata.key`,
+		entryColumns, orderKey, from, where.sql(),
 	)
-	pageArgs := append([]any{}, where.args...)
-	pageArgs = append(pageArgs, filter.Limit, filter.Offset)
-	rows, err := tx.QueryContext(ctx, pageQuery, pageArgs...)
+	pageArgs := append(args, filter.Limit, filter.Offset)
+	rows, err := v.tx.QueryContext(ctx, pageQuery, pageArgs...)
 	if err != nil {
-		return api.SearchResult{}, fmt.Errorf("reading search results: %w", err)
+		return api.SearchResult{}, fmt.Errorf(
+			"reading search results: %w", err)
 	}
-	entries, err := scanSearchRows(rows)
+	entries, err := v.scanSearchRows(rows)
 	if err != nil {
 		return api.SearchResult{}, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := v.attachLinks(ctx, entries); err != nil {
+		return api.SearchResult{}, err
+	}
+	listed, err := v.listEntries(ctx, entries)
+	if err != nil {
+		return api.SearchResult{}, err
+	}
+	if err := v.tx.Commit(); err != nil {
 		return api.SearchResult{}, fmt.Errorf("finishing search: %w", err)
 	}
-	return api.SearchResult{Entries: entries, Total: total}, nil
+	return api.SearchResult{Entries: listed, Total: total}, nil
 }
 
-func scanSearchRows(rows *sql.Rows) ([]api.Entry, error) {
+func (v view) scanSearchRows(rows *sql.Rows) ([]api.Entry, error) {
 	defer rows.Close()
 	var entries []api.Entry
 	for rows.Next() {
-		var entry api.Entry
-		var created, modified string
+		var sortKey string
 		var key, value sql.NullString
-		if err := rows.Scan(
-			&entry.ID, &created, &modified,
-			&entry.Type, &entry.Subject, &entry.Body,
-			&entry.Origin.User, &entry.Origin.Host,
-			&entry.Origin.Dir, &entry.Origin.ClaudeSession,
-			&key, &value,
-		); err != nil {
+		entry, err := v.scanEntry(rows, &sortKey, &key, &value)
+		if err != nil {
 			return nil, fmt.Errorf("reading search result: %w", err)
 		}
-		if err := setEntryTimes(&entry, created, modified); err != nil {
-			return nil, err
-		}
-		if len(entries) == 0 || entries[len(entries)-1].ID != entry.ID {
+		if len(entries) == 0 || entries[len(entries)-1].Ref != entry.Ref {
 			entry.Metadata = map[string]string{}
 			entries = append(entries, entry)
 		}

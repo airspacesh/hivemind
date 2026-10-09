@@ -1,0 +1,100 @@
+package api
+
+import (
+	"fmt"
+	"regexp"
+	"strconv"
+)
+
+// Ref names an entry by its workspace prefix and its number within
+// that workspace, like e12.
+type Ref struct {
+	Prefix string
+	ID     int64
+}
+
+// MessageRef names a message by its entry and its number within that
+// entry's chat, like e40-m3.
+type MessageRef struct {
+	Entry  Ref
+	Number int64
+}
+
+// The numbers allow at most 18 digits, so every one fits an int64.
+var (
+	prefixPattern     = regexp.MustCompile(`^[a-z]+$`)
+	refPattern        = regexp.MustCompile(`^([a-z]+)([1-9][0-9]{0,17})$`)
+	messageRefPattern = regexp.MustCompile(
+		`^([a-z]+)([1-9][0-9]{0,17})-m([1-9][0-9]{0,17})$`)
+)
+
+// ValidatePrefix checks that a workspace prefix is one or more
+// lowercase letters.
+func ValidatePrefix(prefix string) error {
+	if !prefixPattern.MatchString(prefix) {
+		return fmt.Errorf("invalid prefix %q: use one or more lowercase "+
+			"letters", prefix)
+	}
+	return nil
+}
+
+func ParseRef(text string) (Ref, error) {
+	match := refPattern.FindStringSubmatch(text)
+	if match == nil {
+		return Ref{}, fmt.Errorf("invalid entry id %q: want a prefix "+
+			"and a number, like e12", text)
+	}
+	id, err := strconv.ParseInt(match[2], 10, 64)
+	if err != nil {
+		return Ref{}, fmt.Errorf("invalid entry id %q: %w", text, err)
+	}
+	return Ref{Prefix: match[1], ID: id}, nil
+}
+
+func (r Ref) String() string {
+	return r.Prefix + strconv.FormatInt(r.ID, 10)
+}
+
+// MarshalText and UnmarshalText let a Ref travel in JSON as its text,
+// through encoding.TextMarshaler and encoding.TextUnmarshaler.
+func (r Ref) MarshalText() ([]byte, error) {
+	if r.ID <= 0 || ValidatePrefix(r.Prefix) != nil {
+		return nil, fmt.Errorf("invalid entry ref %+v", r)
+	}
+	return []byte(r.String()), nil
+}
+
+func (r *Ref) UnmarshalText(text []byte) error {
+	parsed, err := ParseRef(string(text))
+	if err != nil {
+		return err
+	}
+	*r = parsed
+	return nil
+}
+
+func ParseMessageRef(text string) (MessageRef, error) {
+	match := messageRefPattern.FindStringSubmatch(text)
+	if match == nil {
+		return MessageRef{}, fmt.Errorf("invalid message id %q: want an "+
+			"entry id, -m, and a number, like e40-m3", text)
+	}
+	id, err := strconv.ParseInt(match[2], 10, 64)
+	if err != nil {
+		return MessageRef{}, fmt.Errorf("invalid message id %q: %w",
+			text, err)
+	}
+	number, err := strconv.ParseInt(match[3], 10, 64)
+	if err != nil {
+		return MessageRef{}, fmt.Errorf("invalid message id %q: %w",
+			text, err)
+	}
+	return MessageRef{
+		Entry:  Ref{Prefix: match[1], ID: id},
+		Number: number,
+	}, nil
+}
+
+func (m MessageRef) String() string {
+	return m.Entry.String() + "-m" + strconv.FormatInt(m.Number, 10)
+}

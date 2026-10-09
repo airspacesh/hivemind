@@ -1,0 +1,266 @@
+package store
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/airspacesh/workstream/internal/api"
+)
+
+func mustPost(
+	t *testing.T, store *Store, entry api.Ref, body string,
+) api.Message {
+	t.Helper()
+	message, err := store.Post(context.Background(), store.mustKey(entry),
+		api.PostMessageRequest{Body: body, Origin: api.Origin{User: "duck"}})
+	if err != nil {
+		t.Fatalf("posting to %s: %v", entry, err)
+	}
+	return message
+}
+
+func readChat(
+	t *testing.T, store *Store, entry api.Ref, since int64, limit int,
+) api.ChatPage {
+	t.Helper()
+	page, err := store.Messages(context.Background(), store.mustKey(entry),
+		since, limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return page
+}
+
+// chatText shows a page as its message ids and bodies, its cursor and
+// how many messages remain.
+func chatText(page api.ChatPage) string {
+	var text []string
+	for _, message := range page.Messages {
+		text = append(text, message.Ref().String()+":"+message.Body)
+	}
+	return fmt.Sprintf("%s cursor=%d remaining=%d",
+		strings.Join(text, " "), page.Cursor, page.Remaining)
+}
+
+func TestMessageNumbersCountFromOnePerEntry(t *testing.T) {
+	store := openTestStore(t)
+	first := mustAdd(t, store, "note", "first", "", nil)
+	second := mustAdd(t, store, "note", "second", "", nil)
+	private := addTo(t, store, "personal",
+		api.AddEntryRequest{Type: "note", Subject: "private"})
+
+	var got []string
+	for _, entry := range []api.Ref{first.Ref, second.Ref, first.Ref,
+		private.Ref, first.Ref} {
+		got = append(got, mustPost(t, store, entry, "hi").Ref().String())
+	}
+	want := []string{"e1-m1", "e2-m1", "e1-m2", "p1-m1", "e1-m3"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("issued %v, want %v", got, want)
+	}
+}
+
+func TestConcurrentPostsGetUniqueNumbersCountingFromOne(t *testing.T) {
+	store := openTestStore(t)
+	first := mustAdd(t, store, "note", "first", "", nil)
+	second := mustAdd(t, store, "note", "second", "", nil)
+
+	const perEntry = 10
+	var wg sync.WaitGroup
+	refs := make(chan string, 2*perEntry)
+	for i := range 2 * perEntry {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			entry := []api.Ref{first.Ref, second.Ref}[i%2]
+			message, err := store.Post(context.Background(),
+				store.mustKey(entry), api.PostMessageRequest{Body: "hi"})
+			if err != nil {
+				t.Errorf("posting: %v", err)
+				return
+			}
+			refs <- message.Ref().String()
+		}()
+	}
+	wg.Wait()
+	close(refs)
+	seen := map[string]bool{}
+	for ref := range refs {
+		if seen[ref] {
+			t.Fatalf("%s was issued twice", ref)
+		}
+		seen[ref] = true
+	}
+	for _, entry := range []string{"e1", "e2"} {
+		for n := 1; n <= perEntry; n++ {
+			if ref := fmt.Sprintf("%s-m%d", entry, n); !seen[ref] {
+				t.Fatalf("%s was never issued: %v", ref, seen)
+			}
+		}
+	}
+}
+
+func TestChatReadsPageAfterTheCursor(t *testing.T) {
+	store := openTestStore(t)
+	entry := mustAdd(t, store, "note", "thread", "", nil)
+	if got := chatText(readChat(t, store, entry.Ref, 0, 2)); got !=
+		" cursor=0 remaining=0" {
+		t.Fatalf("empty chat = %q", got)
+	}
+	for i := 1; i <= 5; i++ {
+		mustPost(t, store, entry.Ref, fmt.Sprint(i))
+	}
+
+	for _, test := range []struct {
+		since int64
+		limit int
+		want  string
+	}{
+		{0, 2, "e1-m1:1 e1-m2:2 cursor=2 remaining=3"},
+		{2, 2, "e1-m3:3 e1-m4:4 cursor=4 remaining=1"},
+		{4, 2, "e1-m5:5 cursor=5 remaining=0"},
+		{5, 2, " cursor=5 remaining=0"},
+		{9, 2, " cursor=9 remaining=0"},
+	} {
+		got := chatText(readChat(t, store, entry.Ref, test.since,
+			test.limit))
+		if got != test.want {
+			t.Fatalf("since %d limit %d = %q, want %q", test.since,
+				test.limit, got, test.want)
+		}
+	}
+
+	latest, err := store.LatestMessages(context.Background(),
+		store.mustKey(entry.Ref), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := chatText(latest); got !=
+		"e1-m3:3 e1-m4:4 e1-m5:5 cursor=5 remaining=0" {
+		t.Fatalf("latest 3 = %q", got)
+	}
+	if _, err := store.Messages(context.Background(),
+		Key{Workspace: workspaceID(t, store, "default"), ID: 99},
+		0, 2); !errors.Is(err, ErrEntryNotFound) {
+		t.Fatalf("reading a missing entry's chat = %v", err)
+	}
+}
+
+func TestEditsKeepTheirPlaceAndAreNotReadAgain(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	entry := mustAdd(t, store, "note", "thread", "", nil)
+	question := mustPost(t, store, entry.Ref, "question")
+	mustPost(t, store, entry.Ref, "answer")
+	cursor := readChat(t, store, entry.Ref, 0, 20).Cursor
+
+	edited, changed, err := store.EditMessage(ctx, store.mustKey(entry.Ref),
+		question.Number, "question, edited")
+	if err != nil || !changed {
+		t.Fatalf("edit = %v, %v", changed, err)
+	}
+	if !edited.Created.Equal(question.Created) ||
+		!edited.Modified.After(question.Modified) {
+		t.Fatalf("edited times = %v, %v", edited.Created, edited.Modified)
+	}
+	if got := chatText(readChat(t, store, entry.Ref, cursor, 20)); got !=
+		" cursor=2 remaining=0" {
+		t.Fatalf("read after an edit = %q, want nothing new", got)
+	}
+	if got := chatText(readChat(t, store, entry.Ref, 0, 20)); got !=
+		"e1-m1:question, edited e1-m2:answer cursor=2 remaining=0" {
+		t.Fatalf("full read = %q, want the edit in its place", got)
+	}
+
+	if _, changed, err := store.EditMessage(ctx, store.mustKey(entry.Ref),
+		question.Number, "question, edited"); err != nil || changed {
+		t.Fatalf("repeating an edit = %v, %v; want no change", changed, err)
+	}
+	if _, _, err := store.EditMessage(ctx, store.mustKey(entry.Ref), 9,
+		"text"); !errors.Is(err, ErrMessageNotFound) {
+		t.Fatalf("editing a missing message = %v", err)
+	}
+}
+
+func TestOverviewGroupsTheNewestMessagesByEntry(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	a := mustAdd(t, store, "note", "a", "", nil)
+	b := mustAdd(t, store, "note", "b", "", nil)
+	c := mustAdd(t, store, "note", "c", "", nil)
+	private := addTo(t, store, "personal",
+		api.AddEntryRequest{Type: "note", Subject: "private"})
+	first := mustPost(t, store, a.Ref, "a1")
+	mustPost(t, store, b.Ref, "b1")
+	mustPost(t, store, a.Ref, "a2")
+	mustPost(t, store, c.Ref, "c1")
+	mustPost(t, store, private.Ref, "private")
+	mustPost(t, store, b.Ref, "b2")
+	if _, _, err := store.EditMessage(ctx, store.mustKey(a.Ref),
+		first.Number, "a1 edited"); err != nil {
+		t.Fatal(err)
+	}
+
+	overview, err := store.Overview(ctx, workspaceID(t, store, "default"), 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, chat := range overview.Chats {
+		line := chat.Entry.Ref.String() + " " + chat.Entry.Subject + ":"
+		for _, message := range chat.Messages {
+			line += " " + message.Body
+		}
+		got = append(got, line)
+	}
+	want := []string{"e1 a: a2", "e3 c: c1", "e2 b: b1 b2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("overview = %q, want %q", got, want)
+	}
+}
+
+func TestOverwrittenTextLeavesNoCopyInTheDatabase(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store := openStoreAt(t, filepath.Join(dir, "ws.db"), testBusyTimeout)
+	entry := mustAdd(t, store, "note", "SUBJECTMARK "+
+		strings.Repeat("x", 100), "", nil)
+	message := mustPost(t, store, entry.Ref, "EDITEDAWAYMARK "+
+		strings.Repeat("x", 200))
+	subject := "short"
+	if _, err := store.Edit(ctx, everyAccess(store),
+		store.mustKey(entry.Ref),
+		api.EditEntryRequest{Subject: &subject}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.EditMessage(ctx, store.mustKey(entry.Ref),
+		message.Number, "short"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"ws.db", "ws.db-wal"} {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, mark := range []string{"SUBJECTMARK", "EDITEDAWAYMARK"} {
+			if bytes.Contains(data, []byte(mark)) {
+				t.Fatalf("%s still holds overwritten text %s", name, mark)
+			}
+		}
+	}
+}

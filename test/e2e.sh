@@ -1,10 +1,20 @@
 #!/bin/bash
-# End-to-end smoke test for the CLI, HTTP API, and store together.
+# End-to-end test of the ws and forum clients, the HTTP API and the
+# store together, against scratch servers on loopback.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Start from a clean environment, so no live config, workspace,
+# timeout or secret reaches the scratch servers or clients.
+for name in $(compgen -e); do
+    if [[ "$name" == WORKSTREAM_* || "$name" == FORUM_* ||
+        "$name" == WORK_STREAM_* ]]; then
+        unset "$name"
+    fi
+done
 test_dir="$(mktemp -d)"
-server_pid=""
+server_pids=()
 test_secret="quack-test-secret"
 
 # Read the versions from the source rather than mirroring them, so a
@@ -12,59 +22,88 @@ test_secret="quack-test-secret"
 version_file="$repo/internal/version/version.go"
 api_version="$(sed -nE \
     's/^[[:space:]]*API[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' \
-    "$version_file")"
+    -- "$version_file")"
 software_version="$(sed -nE \
     's/^[[:space:]]*Software[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' \
-    "$version_file")"
+    -- "$version_file")"
 if [[ -z "$api_version" || -z "$software_version" ]]; then
     echo "could not read the versions from $version_file" >&2
     exit 1
 fi
 
 cleanup() {
-    if [[ -n "$server_pid" ]]; then
-        kill "$server_pid" 2>/dev/null || true
-        wait "$server_pid" 2>/dev/null || true
-    fi
+    for pid in "${server_pids[@]}"; do
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    done
     rm -rf "$test_dir"
 }
 trap cleanup EXIT
 
 "$repo/scripts/build.sh" >/dev/null
+(cd "$repo" && CGO_ENABLED=0 go build -o "$test_dir/bin/forum" \
+    -ldflags "-X main.programName=forum -X main.envPrefix=FORUM -X main.defaultConfigPath=~/.config/forum/config.yml" \
+    ./cmd/ws)
+# Only now, after Go has used the real home for its caches, does the
+# home move, so the clients find no real config.
+export HOME="$test_dir/home"
+mkdir -p "$HOME"
 
-WORK_STREAM_SECRET="$test_secret" \
-    "$repo/bin/ws-server" --data "$test_dir" --port 0 \
-    >"$test_dir/server.log" 2>&1 &
-server_pid=$!
-
-port=""
-ready=false
-for _ in $(seq 1 50); do
-    if ! kill -0 "$server_pid" 2>/dev/null; then
-        cat "$test_dir/server.log" >&2
-        exit 1
-    fi
-    port="$(sed -nE \
-        's/.*listening on .*:([0-9]+) .*/\1/p' \
-        "$test_dir/server.log" | tail -1)"
-    if [[ -n "$port" ]] && curl -fsS \
-        -H "Work-Stream-API-Version: $api_version" \
-        -H "Authorization: Bearer $test_secret" \
-        "http://localhost:$port/api/status" >/dev/null 2>&1; then
-        ready=true
-        break
-    fi
-    sleep 0.1
-done
-if [[ "$ready" != true ]]; then
-    cat "$test_dir/server.log" >&2
+# start_server <name> <workspaces yaml> starts a scratch server on a
+# free loopback port, with its log at $test_dir/<name>.log, and sets
+# server_url.
+start_server() {
+    local name="$1" workspaces="$2"
+    local config="$test_dir/$name-server.yml" log="$test_dir/$name.log"
+    printf 'data: %s\nlisten: 127.0.0.1:0\nworkspaces:\n%s\n' \
+        "$test_dir/$name-data" "$workspaces" >"$config"
+    chmod 600 "$config"
+    "$repo/bin/ws-server" --config "$config" >"$log" 2>&1 &
+    server_pids+=("$!")
+    local port
+    for _ in $(seq 1 50); do
+        port="$(sed -nE 's/.*listening on 127\.0\.0\.1:([0-9]+) .*/\1/p' \
+            -- "$log")"
+        if [[ -n "$port" ]] && curl -fsS \
+            -H "Workstream-API-Version: $api_version" \
+            "http://127.0.0.1:$port/api/status" >/dev/null 2>&1; then
+            server_url="http://127.0.0.1:$port"
+            return
+        fi
+        sleep 0.1
+    done
+    cat "$log" >&2
     exit 1
-fi
+}
 
-export WORK_STREAM_ADDRESS="localhost"
-export WORK_STREAM_PORT="$port"
-export WORK_STREAM_SECRET="$test_secret"
-ws() { "$repo/bin/ws" "$@"; }
+start_server main "  default:
+    prefix: e
+  personal:
+    prefix: p
+    auth:
+      secret: $test_secret"
+main_url="$server_url"
+start_server remote "  remote:
+    prefix: r"
+remote_url="$server_url"
+
+# No workspace here sets a prefix, so every id is resolved by asking
+# the servers in turn.
+ws_config="$test_dir/ws.yml"
+cat >"$ws_config" <<EOF
+workspaces:
+  default:
+    server: $main_url
+  personal:
+    server: $main_url
+    auth:
+      secret: $test_secret
+  remote:
+    server: $remote_url/
+EOF
+chmod 600 "$ws_config"
+ws() { WORKSTREAM_CONFIG="$ws_config" "$repo/bin/ws" "$@"; }
+forum() { "$test_dir/bin/forum" "$@"; }
 
 failures=0
 check() {
@@ -99,103 +138,293 @@ check_status() {
     check "$desc" "$expected" "$actual"
 }
 
+added() { sed -n 's/^Added entry \[\([a-z]*[0-9]*\)\]\.$/\1/p'; }
+
+# Each build reads only its own config, and without one it explains
+# how to write one and does nothing else.
 check "version is offline" "ws $software_version" "$(ws --version)"
-ws status >/dev/null
+check "forum reports its version under its name" \
+    "forum $software_version" "$(forum --version)"
+check "ws without a config names its config path" \
+    "no config file at $HOME/.config/workstream/config.yml" \
+    "$("$repo/bin/ws" recent 2>&1 || true)"
+check "forum without a config names its config path" \
+    "no config file at $HOME/.config/forum/config.yml, so forum is not set up" \
+    "$(WORKSTREAM_CONFIG="$ws_config" forum recent 2>&1 || true)"
+check "forum names the config its override gives" \
+    "no config file at $test_dir/elsewhere.yml" \
+    "$(FORUM_CONFIG="$test_dir/elsewhere.yml" forum recent 2>&1 ||
+        true)"
+check_equal "ws reads its config and lists the workspaces in order" \
+    "default (default): prefix e on $main_url
+personal: prefix p on $main_url, with a secret
+remote: prefix r on $remote_url" "$(ws list-workspaces)"
+check "status checks every workspace" "remote: prefix r on $remote_url" \
+    "$(ws status)"
 
-check_status "secret is required" "401" \
-    -H "Work-Stream-API-Version: $api_version" \
-    "http://localhost:$port/api/status"
-check_status "API version is required" "400" \
-    -H "Authorization: Bearer $test_secret" \
-    "http://localhost:$port/api/status"
+check_status "the API version is required" "400" \
+    "$main_url/api/workspaces"
+check_status "a protected workspace needs its secret" "401" \
+    -H "Workstream-API-Version: $api_version" \
+    "$main_url/api/workspaces/personal/entries"
 check_status "old routes are absent" "404" \
-    -H "Work-Stream-API-Version: $api_version" \
-    -H "Authorization: Bearer $test_secret" \
-    "http://localhost:$port/entries"
+    -H "Workstream-API-Version: $api_version" "$main_url/api/entries"
 
-ws add todo "Find a Stock Image of a Duck" \
-    --project Duck-Pond >/dev/null # e1
-ws add note "Reviewed the duck PR" \
+# Search filters reach the server as given.
+ws add todo "Find a Stock Image of a Duck" --project Duck-Pond >/dev/null # e1
+ws add note "Reviewed the duck PR" --project pond \
     --meta pr=https://example.com/pr/7 --jira QUACK-1 >/dev/null # e2
-ws add note "Handle [duck]? literally" >/dev/null # e3
-
+ws add note "Handle [duck]? literally" --project pond >/dev/null # e3
 check_equal "GLOB reaches the server" "e1" \
     "$(ws search --subject '*stock*' --id-only)"
 check_equal "GLOB is ASCII case-insensitive" "e2" \
     "$(ws search --jira 'quack-*' --id-only)"
 check_equal "prose filters match part of the value" "e1" \
-    "$(ws search --subject Stock --id-only)"
+    "$(ws search Stock --id-only)"
 check_equal "enum-like filters do not match a prefix" "" \
     "$(ws search --type not --id-only)"
 check_equal "a wildcard widens an enum-like filter" "e3
 e2" "$(ws search --type 'not*' --id-only)"
-check_equal "positional wildcards reach the server unescaped" "e1" \
-    "$(ws search '*Stock*' --id-only)"
-check_equal "positional without wildcards matches anywhere" "e1" \
-    "$(ws search Stock --id-only)"
 check_equal "bracket class matches a literal wildcard" "e3" \
     "$(ws search '[?]' --id-only)"
-check_equal "metadata pair keeps key and value together" "" \
-    "$(ws search --meta 'pr=QUACK-*' --id-only)"
 check_equal "negation reaches the server" "e1" \
     "$(ws search --no-type note --id-only)"
 
-ws edit e3 --type decision >/dev/null
+# Edits.
+ws edit e3 --type decision --no-recent >/dev/null
 check_equal "a retyped entry is found under its new type" "e3" \
     "$(ws search --type decision --id-only)"
-
-ws edit e3 --jira QUACK-2 --meta pr=https://example.com/pr/9 >/dev/null
-check_equal "edit adds metadata through a shorthand" "e3" \
-    "$(ws search --jira QUACK-2 --id-only)"
-ws edit e2 --jira QUACK-9 >/dev/null
-check_equal "edit overwrites an existing metadata value" "" \
-    "$(ws search --jira QUACK-1 --id-only)"
-ws edit e2 --jira "" >/dev/null
-check_equal "an empty value removes the metadata" "e3" \
+ws edit e2 --jira "" --no-recent >/dev/null
+check_equal "an empty value removes the metadata" "" \
     "$(ws search --key jira --id-only)"
-check "creating with an empty value is refused" "has no value" \
-    "$(ws add note "empty meta" --confluence "" 2>&1 || true)"
-
-# Removals only shrink an entry, so more of them than the pair limit
-# is not too many.
-removals=()
-for index in $(seq 1 17); do
-    removals+=(--meta "gone$index=")
-done
-check "removing more keys than the pair limit is allowed" "Edited entry" \
-    "$(ws edit e3 "${removals[@]}" 2>&1 || true)"
-
-ws edit e1 --body "The Long Form Detail" >/dev/null
-check_equal "content searches subject or body" "e1" \
-    "$(ws search --content '*long form*' --id-only)"
-check_equal "an empty pattern matches only an empty value" "" \
-    "$(ws search --subject '' --id-only)"
-check_equal "an empty body pattern finds the entries without one" "e3
-e2" "$(ws search --body '' --order-by-creation --id-only)"
+check "the project can change but not be removed" "not removed" \
+    "$(ws edit e1 --project "" 2>&1 || true)"
+ws edit e1 --body "The Long Form Detail" --no-recent >/dev/null
 check "entry shows the body" "The Long Form Detail" "$(ws entry e1)"
-check "list hides the body" "0" \
+check "a listing hides the body" "0" \
     "$(ws search Stock | grep -c 'Long Form Detail' || true)"
+after_add="$(ws add note "Fourth duck" --project pond)"
+check_equal "a change lists the other recent entries" "e1
+e2
+e3" "$(echo "$after_add" | sed -n 's/^\[\(e[0-9]*\)\].*/\1/p')"
 
-# Three entries exist here, so a change lists the other two.
-check_equal "--no-recent prints only the outcome" "Added entry [e4]." \
-    "$(ws add note "Fourth duck" --no-recent)"
-after_add="$(ws add note "Fifth duck")"
-check "a change lists the other recent entries" "Other recent entries:" \
-    "$after_add"
-check_equal "the listing leaves out the changed entry" "e4
-e1
-e3
-e2" "$(echo "$after_add" | sed -n 's/^\[\(e[0-9]*\)\].*/\1/p')"
-for index in $(seq 6 9); do
-    ws add note "Duck $index" --no-recent >/dev/null
+# Projects.
+check "add needs a project" "add needs --project" \
+    "$(ws add note "No project" 2>&1 || true)"
+check "the first entry in a project is noticed" \
+    'first entry in project "lake-shore"' \
+    "$(ws add note "Shore duck" --project lake-shore --no-recent)"
+check "list-projects lists each project" "lake-shore: 1 entries" \
+    "$(ws list-projects)"
+
+# Links: one parent, supersession hides the older entry, no loops.
+topic="$(ws add idea "Topic" --project links --no-recent | added)"
+old_note="$(ws add note "Old finding" --project links --parent "$topic" \
+    --no-recent | added)"
+fix_a="$(ws add note "Corrected finding" --project links \
+    --supersedes "$old_note" --link "see=$topic" --no-recent | added)"
+check "the older entry names its successor" "Superseded by $fix_a" \
+    "$(ws entry "$old_note")"
+check "the target shows who links to it" "$fix_a see this entry" \
+    "$(ws entry "$topic")"
+check_equal "a superseded entry is hidden by default" "" \
+    "$(ws search --project links --subject 'Old finding' --id-only)"
+check "a parent loop is refused" "loop" \
+    "$(ws edit "$topic" --parent "$old_note" 2>&1 || true)"
+ws edit "$fix_a" --unlink see --no-recent >/dev/null
+check_equal "unlinking by name removes the link" "" \
+    "$(ws entry "$topic" | grep 'see this entry' || true)"
+
+# Views and tree cuts.
+root="$(ws add idea "Count the ducklings" --project views --no-recent |
+    added)"
+pond_a="$(ws add note "Pond A counted" --project views --parent "$root" \
+    --no-recent | added)"
+recount="$(ws add note "Recount needed" --project views \
+    --parent "$pond_a" --no-recent | added)"
+for index in 1 2 3; do
+    ws add note "Recount $index" --project views --parent "$recount" \
+        --no-recent >/dev/null
 done
-check_equal "the listing stops at five" "5" \
-    "$(ws edit e1 --type note | grep -c '^\[e' || true)"
-check_equal "delete lists the other recent entries" "e1
-e9
-e8
-e7
-e6" "$(ws delete e5 | sed -n 's/^\[\(e[0-9]*\)\].*/\1/p')"
+pond_1="$(ws add note "Pond 1" --project views --parent "$root" \
+    --no-recent | added)"
+for index in 2 3; do
+    ws add note "Pond $index" --project views --parent "$root" \
+        --no-recent >/dev/null
+done
+check "a top-level entry counts what is below it" \
+    "Count the ducklings (+8 below)" "$(ws recent --project views)"
+check "search shows each hit's path" \
+    "in $root Count the ducklings > $pond_a Pond A counted" \
+    "$(ws search 'Recount needed' --project views)"
+check_equal "search under a subtree stays inside it" "4" \
+    "$(ws search --under "$recount" --id-only | wc -l | tr -d ' ')"
+check "the tree indents grandchildren" "    [$recount] (note)" \
+    "$(ws tree "$root")"
+tree_output="$(ws tree "$root" --limit 3)"
+check_equal "a tree cut at its limit marks where" "[$root] (idea)
+  [$pond_a] (note)
+    ... 4 more below $pond_a
+  [$pond_1] (note)
+  ... 2 more under $root" \
+    "$(echo "$tree_output" | sed -E 's/^( *(\[[a-z0-9]*\] \([a-z]*\)|\.\.\. .*)).*/\1/')"
+check_equal "tree cut markers carry no command hints" "" \
+    "$(echo "$tree_output" | grep -E '\.\.\..*(ws|tree|--)' || true)"
+check_equal "times on one day show the clock alone" "" \
+    "$(echo "$tree_output" | grep -E '[0-9]{2}/[0-9]{2}/[0-9]{4}' || true)"
+
+# Two workspaces on one server count their entries apart, and an id
+# picks its workspace.
+private="$(ws add note "Private PROTECTEDMARK" --project mine \
+    --workspace personal --link "see=$root" --no-recent | added)"
+check_equal "the second workspace counts from 1" "p1" "$private"
+check "an id picks its workspace" "Private PROTECTEDMARK" \
+    "$(ws entry p1)"
+check_equal "a workspace lists only its own entries" "p1" \
+    "$(ws recent --workspace personal --id-only)"
+
+# A second server: its ids resolve by asking the servers in turn, and a
+# link cannot reach across.
+remote="$(ws add note "Remote entry" --project remote --workspace remote \
+    --no-recent | added)"
+check_equal "the second server's workspace has its own prefix" "r1" \
+    "$remote"
+check "an id on the second server resolves" "Remote entry" \
+    "$(ws entry r1)"
+check "a link cannot join servers" "cannot join entries on different servers" \
+    "$(ws edit r1 --link "see=$root" 2>&1 || true)"
+check "an unknown prefix names the servers asked" \
+    "no configured server has a workspace with prefix x" \
+    "$(ws entry x1 2>&1 || true)"
+check "a missing entry is reported as missing" "entry not found: e999" \
+    "$(ws entry e999 2>&1 || true)"
+
+# An open workspace linked to a protected one shows the protected entry
+# as a bare id at most, through every path that crosses workspaces.
+ws add note "Protected child PROTECTEDMARK" --project mine \
+    --workspace personal --parent "$root" --no-recent >/dev/null # p2
+curl -fsS -X POST -H "Workstream-API-Version: $api_version" \
+    -H "Authorization: Bearer $test_secret" \
+    --data "{\"type\":\"note\",\"subject\":\"Open under protected\",\"metadata\":{\"project\":\"views\"},\"origin\":{},\"links\":[{\"name\":\"parent\",\"ref\":\"p1\"}]}" \
+    "$main_url/api/workspaces/default/entries" >/dev/null
+under_protected="$(ws search 'Open under protected' --id-only)"
+check "a protected parent shows as its bare id" "Path: p1" \
+    "$(ws entry "$under_protected")"
+check "a protected backlink shows as its bare id" "p1 see this entry" \
+    "$(ws entry "$root")"
+check "a link to an unreadable entry is refused" "link target not found" \
+    "$(ws add note "Probe" --project views --link see=p1 2>&1 || true)"
+ws chat send p2 "Protected message PROTECTEDMARK" >/dev/null
+ws chat send "$root" "Open message" >/dev/null
+open_views="$(ws entry "$root"; ws tree "$root"; ws search --under "$root"
+    ws recent; ws recent --flat; ws search "$under_protected"
+    ws entry "$under_protected"; ws chat recent; ws chat recent "$root")"
+check_equal "no protected content reaches the open workspace" "" \
+    "$(echo "$open_views" | grep PROTECTEDMARK || true)"
+check_equal "a tree leaves out the protected child" "" \
+    "$(ws tree "$root" | grep -E '\[p[0-9]+\]' || true)"
+
+# Chat.
+chat="$(ws add note "Chat thread" --project chat --no-recent | added)"
+check_equal "a send prints only the message id" "Sent [$chat-m1]." \
+    "$(ws chat send "$chat" "First QUESTIONMARK")"
+ws chat send "$chat" "Second" >/dev/null
+ws chat send "$chat" "Third" >/dev/null
+check "a read pages forward with a footer" \
+    "Next: ws chat read $chat --since 1 (2 more messages)" \
+    "$(ws chat read "$chat" --since 0 --limit 1)"
+check "the last page ends with the cursor" \
+    "Cursor: 3 (wait for more: ws chat wait $chat --since 3)" \
+    "$(ws chat read "$chat" --since 1)"
+check "an empty read keeps the cursor" "No messages after 3." \
+    "$(ws chat read "$chat" --since 3)"
+check_equal "chat recent shows the newest, oldest first" "[$chat-m2]
+[$chat-m3]" "$(ws chat recent "$chat" --limit 2 |
+    sed -n 's/^\(\[[a-z0-9-]*\]\).*/\1/p')"
+ws chat edit "$chat-m1" "First, edited" >/dev/null
+check "an edit stays in place" "[$chat-m1]" \
+    "$(ws chat read "$chat" --since 0 --limit 1)"
+check_equal "no read returns the old text" "" \
+    "$(ws chat read "$chat" --since 0 | grep QUESTIONMARK || true)"
+overview="$(ws chat recent)"
+check_equal "the overview lists the entry with the newest message last" \
+    "[$chat] (note) Chat thread" "$(echo "$overview" | grep '^\[' | tail -1)"
+# A send is not a read: read to 1, a peer sends 2, you send 3, and
+# reading on from 1 must still show the peer's message.
+race="$(ws add note "Cursor race" --project chat --no-recent | added)"
+ws chat send "$race" "Read first" >/dev/null
+ws chat send "$race" "From a peer" >/dev/null
+ws chat send "$race" "My own" >/dev/null
+check "reading on from the last read shows a message sent before yours" \
+    "[$race-m2]" "$(ws chat read "$race" --since 1)"
+(sleep 1.5 && ws chat send "$chat" "Woken" >/dev/null) &
+sender_pid=$!
+check "a wait returns when a message arrives" "[$chat-m4]" \
+    "$(ws chat wait "$chat" --since 3 --timeout 20s)"
+wait "$sender_pid"
+check "a wait ends at its timeout" "No messages after 4 within 1s." \
+    "$(ws chat wait "$chat" --since 4 --timeout 1s)"
+check "an entry shows its chat" "Chat: 4 messages, newest $chat-m4" \
+    "$(ws entry "$chat")"
+
+# The server log keeps no client text, and records each issued id.
+ws add note "Subject OLDSUBJECTMARK" --body "Body OLDBODYMARK" \
+    --project pond --no-recent >/dev/null
+ws search SEARCHMARK >/dev/null
+check_status "an unknown field is refused" "400" \
+    -X POST -H "Workstream-API-Version: $api_version" \
+    --data '{"type":"note","UNKNOWNFIELDMARK":1}' \
+    "$main_url/api/workspaces/default/entries"
+check_equal "the server log holds no client text" "" \
+    "$(grep -oE '[A-Z]*MARK' -- "$test_dir/main.log" || true)"
+check "the server log records each issued entry id" "issued $chat" \
+    "$(cat -- "$test_dir/main.log")"
+check "the server log records each issued message id" "issued $chat-m4" \
+    "$(cat -- "$test_dir/main.log")"
+
+# forum reads its own config, records what that config says, and
+# names itself in every command it suggests.
+mkdir -p "$HOME/.config/forum" "$test_dir/private-project"
+cat >"$HOME/.config/forum/config.yml" <<EOF
+workspaces:
+  default:
+    server: $main_url
+    metadata_capture: none
+EOF
+forum_entry="$(cd "$test_dir/private-project" &&
+    CLAUDE_CODE_SESSION_ID=private-session-id \
+        forum add note "Forum question" --project chat --no-recent | added)"
+check_equal "forum records the user alone" \
+    "\"origin\":{\"user\":\"$(id -un)\"}" \
+    "$(curl -fsS -H "Workstream-API-Version: $api_version" \
+        "$main_url/api/entries/$forum_entry" | grep -o '"origin":{[^}]*}')"
+forum chat send "$forum_entry" "Forum reply" >/dev/null
+check_equal "the private context never reached the server" "" \
+    "$(curl -fsS -H "Workstream-API-Version: $api_version" \
+        "$main_url/api/entries/$forum_entry/messages?since=0" |
+        grep -oE 'private-[a-z-]*|"host"|"dir"' || true)"
+check "forum help names forum" "  forum add <type> <subject>" \
+    "$(forum help)"
+check_equal "forum help never suggests ws" "" \
+    "$(forum help | grep -E "(^|[ '])ws " || true)"
+check "forum chat continues with forum" \
+    "Cursor: 1 (wait for more: forum chat wait $forum_entry --since 1)" \
+    "$(forum chat recent "$forum_entry")"
+check "forum entry points at forum chat" \
+    "see 'forum chat recent $forum_entry'" "$(forum entry "$forum_entry")"
+check "a forum usage error names forum" "usage: forum entry <ref>" \
+    "$(forum entry 2>&1 || true)"
+check "forum knows only its own workspaces" \
+    "no configured server has a workspace with prefix r" \
+    "$(forum entry r1 2>&1 || true)"
+cat >"$test_dir/forum-down.yml" <<EOF
+workspaces:
+  default:
+    server: http://127.0.0.1:1
+EOF
+check "an unreachable server is named" "request to http://127.0.0.1:1 failed" \
+    "$(FORUM_CONFIG="$test_dir/forum-down.yml" \
+        forum add note "Lost" --project chat 2>&1 || true)"
 
 echo
 if [[ "$failures" -gt 0 ]]; then

@@ -18,6 +18,7 @@ const (
 	MaxKeyLen     = 64
 	MaxValueLen   = 256
 	MaxMetadata   = 16
+	MaxLinks      = 32
 
 	MaxOriginUserLen          = 256
 	MaxOriginHostLen          = 256
@@ -59,22 +60,32 @@ func checkBody(value string) error {
 	return nil
 }
 
-// validateKey enforces the slug rules and the length cap on a metadata
-// key.
-func validateKey(key string) error {
-	if key == "" {
-		return fmt.Errorf("metadata key is required")
+// validateSlug enforces the slug rules and the length cap on a name
+// such as a metadata key.
+func validateSlug(field, name string) error {
+	if name == "" {
+		return fmt.Errorf("%s is required", field)
 	}
-	if err := checkLen("metadata key", key, MaxKeyLen); err != nil {
+	if err := checkLen(field, name, MaxKeyLen); err != nil {
 		return err
 	}
-	if !keyPattern.MatchString(key) {
+	if !keyPattern.MatchString(name) {
 		return fmt.Errorf(
-			"invalid metadata key %q: use lowercase letters, digits, and "+
+			"invalid %s %q: use lowercase letters, digits, and "+
 				"single dashes, starting with a letter (e.g. jira, build-id)",
-			key)
+			field, name)
 	}
 	return nil
+}
+
+func validateKey(key string) error {
+	return validateSlug("metadata key", key)
+}
+
+// ValidateWorkspace checks a workspace name, which follows the
+// metadata key rules.
+func ValidateWorkspace(name string) error {
+	return validateSlug("workspace", name)
 }
 
 // validateMeta checks one metadata pair for storage.
@@ -84,7 +95,7 @@ func validateMeta(key, value string) error {
 	}
 	if value == "" {
 		return fmt.Errorf(
-			"metadata %s has no value; on 'ws edit' an empty value "+
+			"metadata %s has no value. In an edit, an empty value "+
 				"removes the key", key)
 	}
 	if err := checkOneLine("metadata value", value); err != nil {
@@ -126,16 +137,49 @@ func validateMetadataEdits(md map[string]string) error {
 	return nil
 }
 
-// ValidateOrigin checks the provenance an entry carries. Host and dir
-// are required; the client always fills them. User and the Claude
-// session are optional. No field may contain control characters.
+func validateMessageBody(body string) error {
+	if body == "" {
+		return fmt.Errorf("a message needs text")
+	}
+	if err := checkBody(body); err != nil {
+		return err
+	}
+	return checkLen("message", body, MaxBodyLen)
+}
+
+func (r PostMessageRequest) Validate() error {
+	if err := validateMessageBody(r.Body); err != nil {
+		return err
+	}
+	return r.Origin.Validate()
+}
+
+func (r EditMessageRequest) Validate() error {
+	return validateMessageBody(r.Body)
+}
+
+func validateLink(link Link) error {
+	if err := validateSlug("link name", link.Name); err != nil {
+		return err
+	}
+	if link.Ref.ID == 0 {
+		return fmt.Errorf("link %s needs an entry id", link.Name)
+	}
+	return nil
+}
+
+func validateLinks(links []Link) error {
+	for _, link := range links {
+		if err := validateLink(link); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Validate checks the provenance an entry carries. Every field is
+// optional, and none may contain control characters.
 func (o Origin) Validate() error {
-	if o.Host == "" {
-		return fmt.Errorf("origin host is required")
-	}
-	if o.Dir == "" {
-		return fmt.Errorf("origin dir is required")
-	}
 	fields := []struct {
 		name  string
 		value string
@@ -186,14 +230,35 @@ func (r AddEntryRequest) Validate() error {
 	if err := validateMetadata(r.Metadata); err != nil {
 		return err
 	}
+	if _, ok := r.Metadata[ProjectKey]; !ok {
+		return fmt.Errorf("a project is required")
+	}
+	if len(r.Links) > MaxLinks {
+		return fmt.Errorf("too many links: %d (max %d)",
+			len(r.Links), MaxLinks)
+	}
+	if err := validateLinks(r.Links); err != nil {
+		return err
+	}
 	return r.Origin.Validate()
 }
 
 func (r EditEntryRequest) Validate() error {
-	if r.Type == nil && r.Subject == nil && r.Body == nil &&
-		len(r.Metadata) == 0 {
-		return fmt.Errorf(
-			"nothing to edit: provide type, subject, body and/or metadata")
+	if !r.ChangesContent() && len(r.AddLinks) == 0 &&
+		len(r.RemoveLinks) == 0 && len(r.RemoveLinkNames) == 0 {
+		return fmt.Errorf("nothing to edit: provide type, subject, " +
+			"body, metadata, or links")
+	}
+	if err := validateLinks(r.AddLinks); err != nil {
+		return err
+	}
+	if err := validateLinks(r.RemoveLinks); err != nil {
+		return err
+	}
+	for _, name := range r.RemoveLinkNames {
+		if err := validateSlug("link name", name); err != nil {
+			return err
+		}
 	}
 	if r.Type != nil {
 		if *r.Type == "" {
@@ -224,6 +289,9 @@ func (r EditEntryRequest) Validate() error {
 		if err := checkLen("body", *r.Body, MaxBodyLen); err != nil {
 			return err
 		}
+	}
+	if project, ok := r.Metadata[ProjectKey]; ok && project == "" {
+		return fmt.Errorf("the project can be changed but not removed")
 	}
 	return validateMetadataEdits(r.Metadata)
 }

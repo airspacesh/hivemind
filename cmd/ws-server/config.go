@@ -1,92 +1,174 @@
 package main
 
 import (
-	"flag"
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
+	"net"
+	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
-	"github.com/Sothatsit/work-stream/internal/config"
+	"gopkg.in/yaml.v3"
+
+	"github.com/airspacesh/workstream/internal/api"
 )
 
 const (
-	defaultPort       = "7139"
-	dataEnvironment   = "WORK_STREAM_DATA"
-	portEnvironment   = "WORK_STREAM_PORT"
-	secretEnvironment = "WORK_STREAM_SECRET"
+	defaultConfigPath = "config.yml"
+	defaultListen     = "127.0.0.1:7139"
+	defaultTimeout    = 5 * time.Second
 )
 
+// serverConfig is the server's config file. Every key it does not name
+// is an error.
 type serverConfig struct {
-	port    string
-	data    string
-	timeout time.Duration
-	secret  string
+	Data       string                     `yaml:"data"`
+	Listen     string                     `yaml:"listen"`
+	Timeout    time.Duration              `yaml:"timeout"`
+	Workspaces map[string]workspaceConfig `yaml:"workspaces"`
 }
 
-func parseConfig(
-	args []string, getenv func(string) string,
-) (serverConfig, error) {
-	flags := flag.NewFlagSet("ws-server", flag.ContinueOnError)
-	dataFlag := flags.String("data", "", "server data directory")
-	portFlag := flags.String("port", "", "listen port")
-	timeoutFlag := flags.String("timeout", "", "request timeout")
-	if err := flags.Parse(args); err != nil {
-		return serverConfig{}, err
-	}
-	if flags.NArg() != 0 {
-		return serverConfig{}, fmt.Errorf("unexpected argument %q", flags.Arg(0))
-	}
+type workspaceConfig struct {
+	Prefix string      `yaml:"prefix"`
+	Auth   *authConfig `yaml:"auth"`
+}
 
-	data := *dataFlag
-	if data == "" {
-		data = getenv(dataEnvironment)
-	}
-	if data == "" {
-		return serverConfig{}, fmt.Errorf(
-			"data directory is required; use --data or %s",
-			dataEnvironment,
-		)
-	}
-	if !filepath.IsAbs(data) {
-		return serverConfig{}, fmt.Errorf(
-			"data directory must be an absolute path: %q", data,
-		)
-	}
+type authConfig struct {
+	Secret string `yaml:"secret"`
+}
 
-	port := *portFlag
-	if port == "" {
-		port = getenv(portEnvironment)
+// workspaceNames lists the configured workspaces' names in order.
+func (c serverConfig) workspaceNames() []string {
+	var names []string
+	for name := range c.Workspaces {
+		names = append(names, name)
 	}
-	if port == "" {
-		port = defaultPort
-	}
+	slices.Sort(names)
+	return names
+}
 
-	timeout, err := config.ParseTimeout(
-		*timeoutFlag, getenv(config.TimeoutEnvironment),
-	)
-	if err != nil {
-		return serverConfig{}, err
+func (c serverConfig) workspaces() []api.Workspace {
+	var workspaces []api.Workspace
+	for _, name := range c.workspaceNames() {
+		workspaces = append(workspaces, api.Workspace{
+			Name: name, Prefix: c.Workspaces[name].Prefix,
+		})
 	}
-	secret := getenv(secretEnvironment)
-	if err := validateSecret(secret); err != nil {
-		return serverConfig{}, err
+	return workspaces
+}
+
+func (c serverConfig) holdsSecret() bool {
+	for _, workspace := range c.Workspaces {
+		if workspace.Auth != nil {
+			return true
+		}
 	}
-	return serverConfig{
-		port:    port,
-		data:    filepath.Clean(data),
-		timeout: timeout,
-		secret:  secret,
-	}, nil
+	return false
 }
 
 func validateSecret(secret string) error {
+	if secret == "" {
+		return errors.New("is empty")
+	}
 	for i := 0; i < len(secret); i++ {
 		if secret[i] <= ' ' || secret[i] == 0x7f {
-			return fmt.Errorf(
-				"%s contains whitespace or a control character",
-				secretEnvironment,
-			)
+			return errors.New("contains whitespace or a control character")
 		}
 	}
 	return nil
+}
+
+func (c *serverConfig) validate() error {
+	if c.Data == "" {
+		return errors.New("data is required")
+	}
+	if !filepath.IsAbs(c.Data) {
+		return fmt.Errorf("data must be an absolute path: %q", c.Data)
+	}
+	c.Data = filepath.Clean(c.Data)
+	if c.Listen == "" {
+		c.Listen = defaultListen
+	}
+	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
+		return fmt.Errorf("listen must be host:port: %w", err)
+	}
+	if c.Timeout < 0 {
+		return errors.New("timeout must be greater than zero")
+	}
+	if c.Timeout == 0 {
+		c.Timeout = defaultTimeout
+	}
+
+	if len(c.Workspaces) == 0 {
+		return errors.New("workspaces must name at least one workspace")
+	}
+	owners := map[string]string{}
+	for _, name := range c.workspaceNames() {
+		workspace := c.Workspaces[name]
+		if err := api.ValidateWorkspace(name); err != nil {
+			return err
+		}
+		if err := api.ValidatePrefix(workspace.Prefix); err != nil {
+			return fmt.Errorf("workspace %s: %w", name, err)
+		}
+		if owner, taken := owners[workspace.Prefix]; taken {
+			return fmt.Errorf("workspaces %s and %s both have prefix %s",
+				owner, name, workspace.Prefix)
+		}
+		owners[workspace.Prefix] = name
+		if workspace.Auth == nil {
+			continue
+		}
+
+		if err := validateSecret(workspace.Auth.Secret); err != nil {
+			return fmt.Errorf("workspace %s: the secret %w", name, err)
+		}
+	}
+	return nil
+}
+
+// loadConfig reads and checks the server config at path.
+func loadConfig(path string) (serverConfig, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return serverConfig{}, fmt.Errorf("reading the server config: %w", err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return serverConfig{}, fmt.Errorf("reading the server config: %w", err)
+	}
+	text, err := io.ReadAll(file)
+	if err != nil {
+		return serverConfig{}, fmt.Errorf("reading the server config: %w", err)
+	}
+
+	var config serverConfig
+	decoder := yaml.NewDecoder(bytes.NewReader(text))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&config); err != nil {
+		if errors.Is(err, io.EOF) {
+			err = errors.New("it is empty")
+		}
+		return serverConfig{}, fmt.Errorf("invalid server config %s: %w",
+			path, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return serverConfig{}, fmt.Errorf("invalid server config %s: it "+
+			"must hold one YAML document", path)
+	}
+	if err := config.validate(); err != nil {
+		return serverConfig{}, fmt.Errorf("invalid server config %s: %w",
+			path, err)
+	}
+	if config.holdsSecret() && info.Mode().Perm()&0o044 != 0 {
+		return serverConfig{}, fmt.Errorf("the server config %s holds a "+
+			"secret, so it must not be readable by group or others. "+
+			"Run chmod 600 %s", path, path)
+	}
+	return config, nil
 }

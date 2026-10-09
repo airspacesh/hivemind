@@ -1,7 +1,7 @@
 package version
 
 const (
-	Software  = "0.3.0"
-	API       = 2
-	APIHeader = "Work-Stream-API-Version"
+	Software  = "0.6.0"
+	API       = 5
+	APIHeader = "Workstream-API-Version"
 )

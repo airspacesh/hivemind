@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -26,15 +27,6 @@ type parsedArgs struct {
 
 func (p *parsedArgs) has(flag string) bool {
 	return p.present[flag]
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 func parseArgs(args []string, spec flagSpec) (*parsedArgs, error) {
@@ -67,7 +59,7 @@ func parseArgs(args []string, spec flagSpec) (*parsedArgs, error) {
 			name = canonical
 		}
 		switch {
-		case contains(spec.bools, name):
+		case slices.Contains(spec.bools, name):
 			if hasValue {
 				return nil, fmt.Errorf("%s does not take a value", name)
 			}
@@ -76,7 +68,7 @@ func parseArgs(args []string, spec flagSpec) (*parsedArgs, error) {
 			}
 			p.bools[name] = true
 			p.present[name] = true
-		case contains(spec.strs, name):
+		case slices.Contains(spec.strs, name):
 			if !hasValue {
 				i++
 				if i >= len(args) {
@@ -89,7 +81,7 @@ func parseArgs(args []string, spec flagSpec) (*parsedArgs, error) {
 			}
 			p.strs[name] = value
 			p.present[name] = true
-		case contains(spec.repeat, name):
+		case slices.Contains(spec.repeat, name):
 			if !hasValue {
 				i++
 				if i >= len(args) {
@@ -117,8 +109,9 @@ var shorthandKeys = []string{"project", "jira", "confluence"}
 
 func searchFlagSpec() flagSpec {
 	spec := flagSpec{
-		strs:  []string{"--limit", "--offset"},
-		bools: []string{"--order-by-creation", "--order-by-modified", "--id-only"},
+		strs: []string{"--limit", "--offset", "--under", "--workspace"},
+		bools: []string{"--order-by-creation", "--order-by-modified",
+			"--id-only", "--include-superseded", "--flat"},
 		alias: map[string]string{"-n": "--limit"},
 	}
 	for _, field := range searchFields {
@@ -145,21 +138,12 @@ func shorthandFor(flag string) (key string, negate bool, ok bool) {
 	return "", false, false
 }
 
-// parseEntryID accepts the canonical e-prefixed form (e123) as well as
-// a bare number.
-func parseEntryID(arg string) (int64, error) {
-	s := strings.TrimPrefix(arg, "e")
-	id, err := strconv.ParseInt(s, 10, 64)
-	if err != nil || id <= 0 {
-		return 0, fmt.Errorf("invalid entry id %q (expected e.g. e123)", arg)
-	}
-	return id, nil
-}
-
-func parseLimit(value string) (int, error) {
+// parsePositive reads a count flag. The server checks its upper bound.
+func parsePositive(flag, value string) (int, error) {
 	n, err := strconv.Atoi(value)
-	if err != nil || n < 1 || n > 500 {
-		return 0, fmt.Errorf("--limit must be an integer from 1 to 500")
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("%s must be a positive integer, not %q",
+			flag, value)
 	}
 	return n, nil
 }

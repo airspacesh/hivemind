@@ -12,75 +12,112 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"github.com/Sothatsit/work-stream/internal/api"
-	"github.com/Sothatsit/work-stream/internal/store"
-	"github.com/Sothatsit/work-stream/internal/version"
+	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/workstream/internal/store"
+	"github.com/airspacesh/workstream/internal/version"
 )
 
-const (
-	maxRequestBytes  = int64(1 << 20)
-	maxRecordedBytes = 1 << 20
-)
+const maxRequestBytes = int64(1 << 20)
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	body, err := json.Marshal(value)
+	if err != nil {
+		log.Printf("encoding response: %v", err)
+		status = http.StatusInternalServerError
+		body = []byte(`{"error":"encoding response","code":"internal"}`)
+	}
+	if len(body) > api.MaxResponseBytes {
+		log.Printf("response exceeds %d bytes", api.MaxResponseBytes)
+		status = http.StatusInternalServerError
+		body = []byte(`{"error":"response is too large","code":"internal"}`)
+	}
+	body = append(body, '\n')
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(body)
+}
+
+func writeError(
+	w http.ResponseWriter, status int, code api.ErrorCode, message string,
+) {
+	writeJSON(w, status, api.ErrorResponse{Error: message, Code: code})
+}
+
+func writeBadRequest(w http.ResponseWriter, message string) {
+	writeError(w, http.StatusBadRequest, api.CodeBadRequest, message)
+}
+
+func writeUnauthorized(w http.ResponseWriter, message string) {
+	w.Header().Set("WWW-Authenticate", `Bearer realm="workstream"`)
+	writeError(w, http.StatusUnauthorized, api.CodeUnauthorized, message)
+}
+
+func writeStoreError(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	code := api.CodeInternal
+	message := "internal server error"
+	switch {
+	case errors.Is(err, store.ErrInvalidFilter),
+		errors.Is(err, store.ErrInvalidTreeLimit):
+		status, code, message = http.StatusBadRequest,
+			api.CodeBadRequest, err.Error()
+	case errors.Is(err, store.ErrUnknownPrefix):
+		status, code, message = http.StatusNotFound,
+			api.CodeUnknownPrefix, err.Error()
+	case errors.Is(err, store.ErrEntryNotFound):
+		status, code, message = http.StatusNotFound,
+			api.CodeEntryNotFound, err.Error()
+	case errors.Is(err, store.ErrMessageNotFound):
+		status, code, message = http.StatusNotFound,
+			api.CodeMessageNotFound, err.Error()
+	case errors.Is(err, store.ErrLinkNotFound):
+		status, code, message = http.StatusNotFound,
+			api.CodeLinkNotFound, err.Error()
+	case errors.Is(err, store.ErrLinkTarget):
+		status, code, message = http.StatusBadRequest,
+			api.CodeLinkTargetNotFound, err.Error()
+	case errors.Is(err, store.ErrMetadataLimit),
+		errors.Is(err, store.ErrLinkLoop),
+		errors.Is(err, store.ErrLinkLimit):
+		status, code, message = http.StatusConflict,
+			api.CodeConflict, err.Error()
+	case errors.Is(err, context.DeadlineExceeded), store.IsBusy(err):
+		status, code, message = http.StatusServiceUnavailable,
+			api.CodeUnavailable, "server is busy or the request timed out"
+	case errors.Is(err, context.Canceled):
+		status, code, message = http.StatusServiceUnavailable,
+			api.CodeUnavailable, "request canceled"
+	default:
+		log.Printf("store request failed: %v", err)
+	}
+	writeError(w, status, code, message)
+}
 
 func requireAPIVersion(next http.Handler) http.Handler {
 	serverVersion := strconv.Itoa(version.API)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(version.APIHeader, serverVersion)
 		values := r.Header.Values(version.APIHeader)
-		if len(values) == 0 {
-			writeBadRequest(w, "missing "+version.APIHeader+" header")
-			return
+		message := ""
+		switch {
+		case len(values) == 0:
+			message = "missing " + version.APIHeader + " header"
+		case len(values) != 1:
+			message = version.APIHeader + " must be given once"
+		case values[0] != serverVersion:
+			message = fmt.Sprintf("the client uses API version %q, "+
+				"but the server uses %d", values[0], version.API)
 		}
-		if len(values) != 1 {
-			writeBadRequest(w, version.APIHeader+" must be given once")
-			return
-		}
-		got, err := strconv.Atoi(values[0])
-		if err != nil {
-			writeBadRequest(w, version.APIHeader+" must be an integer")
-			return
-		}
-		if got != version.API {
-			writeBadRequest(w, fmt.Sprintf(
-				"unsupported API version %d; server uses %d",
-				got, version.API,
-			))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func authenticate(secret string, next http.Handler) http.Handler {
-	if secret == "" {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if len(r.Header.Values("Authorization")) != 0 {
-				writeBadRequest(w, "server authentication is disabled")
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-	expected := sha256.Sum256([]byte("Bearer " + secret))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		values := r.Header.Values("Authorization")
-		provided := ""
-		if len(values) == 1 {
-			provided = values[0]
-		}
-		actual := sha256.Sum256([]byte(provided))
-		match := subtle.ConstantTimeCompare(actual[:], expected[:])
-		if len(values) != 1 || match != 1 {
-			w.Header().Set(
-				"WWW-Authenticate", `Bearer realm="work-stream"`,
-			)
-			writeJSON(w, http.StatusUnauthorized,
-				api.ErrorResponse{Error: "authentication failed"})
+		if message != "" {
+			writeError(w, http.StatusBadRequest, api.CodeAPIVersion, message)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -104,53 +141,207 @@ func limitRequestBody(next http.Handler) http.Handler {
 	})
 }
 
-func logRequests(next http.Handler) http.Handler {
+// serverWorkspace is a workspace this server hosts, with the hash of
+// the Authorization header that grants access to it, or nil when it is
+// open.
+type serverWorkspace struct {
+	store.Workspace
+	credential *[sha256.Size]byte
+}
+
+func newServerWorkspaces(
+	workspaces []store.Workspace, config serverConfig,
+) []serverWorkspace {
+	hosted := make([]serverWorkspace, len(workspaces))
+	for i, workspace := range workspaces {
+		hosted[i].Workspace = workspace
+		auth := config.Workspaces[workspace.Name].Auth
+		if auth != nil {
+			credential := sha256.Sum256([]byte("Bearer " + auth.Secret))
+			hosted[i].credential = &credential
+		}
+	}
+	return hosted
+}
+
+// access finds the workspaces a request can read, which are the open
+// ones and any whose secret its one credential presents. A credential
+// that matches no workspace is refused, since it is surely a mistake.
+func (h *handler) access(
+	w http.ResponseWriter, r *http.Request,
+) (store.Access, bool) {
+	values := r.Header.Values("Authorization")
+	if len(values) > 1 {
+		writeBadRequest(w, "a request carries at most one credential")
+		return store.Access{}, false
+	}
+	var presented [sha256.Size]byte
+	if len(values) == 1 {
+		presented = sha256.Sum256([]byte(values[0]))
+	}
+
+	var readable []int64
+	matched := false
+	for _, workspace := range h.workspaces {
+		if workspace.credential == nil {
+			readable = append(readable, workspace.ID)
+			continue
+		}
+		if len(values) == 1 && subtle.ConstantTimeCompare(
+			presented[:], workspace.credential[:]) == 1 {
+			readable = append(readable, workspace.ID)
+			matched = true
+		}
+	}
+	if len(values) == 1 && !matched {
+		writeUnauthorized(w, "the credential matches no workspace "+
+			"on this server")
+		return store.Access{}, false
+	}
+	return store.NewAccess(readable...), true
+}
+
+func writeNeedsSecret(w http.ResponseWriter, workspace string) {
+	writeUnauthorized(w, fmt.Sprintf("workspace %s needs its secret, "+
+		"sent as Authorization: Bearer <secret>", workspace))
+}
+
+// workspace finds the workspace a request's path names, which the
+// request must be able to read.
+func (h *handler) workspace(
+	w http.ResponseWriter, r *http.Request, access store.Access,
+) (store.Workspace, bool) {
+	name := r.PathValue("workspace")
+	for _, workspace := range h.workspaces {
+		if workspace.Name != name {
+			continue
+		}
+		if !access.CanRead(workspace.ID) {
+			writeNeedsSecret(w, name)
+			return store.Workspace{}, false
+		}
+		return workspace.Workspace, true
+	}
+	writeError(w, http.StatusNotFound, api.CodeUnknownWorkspace,
+		fmt.Sprintf("this server has no workspace %q", name))
+	return store.Workspace{}, false
+}
+
+// entryKey finds the entry a ref names, in a workspace the request
+// must be able to read. The entry may not exist.
+func (h *handler) entryKey(
+	w http.ResponseWriter, access store.Access, text string,
+) (store.Key, bool) {
+	ref, err := api.ParseRef(text)
+	if err != nil {
+		writeBadRequest(w, err.Error())
+		return store.Key{}, false
+	}
+	key, err := h.store.Resolve(ref)
+	if err != nil {
+		writeStoreError(w, err)
+		return store.Key{}, false
+	}
+	for _, workspace := range h.workspaces {
+		if workspace.ID == key.Workspace && !access.CanRead(key.Workspace) {
+			writeNeedsSecret(w, workspace.Name)
+			return store.Key{}, false
+		}
+	}
+	return key, true
+}
+
+// logRequests logs one line per request from facts the server
+// controls: the method, the matched route, a configured workspace, a
+// ref with a configured prefix, a message number, the names of known
+// query parameters, the status, and the sizes. It never logs a body, a
+// query value, a raw path, or an error message, because each can carry
+// text a client sent, and an edit must leave no copy of what it
+// overwrote.
+func (h *handler) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		isWrite := r.Method != http.MethodGet
-		rw := &recordingWriter{
-			ResponseWriter: w,
-			status:         http.StatusOK,
-			record:         isWrite,
-		}
-		var requestBody []byte
-		if isWrite && r.Body != nil {
-			var err error
-			requestBody, err = io.ReadAll(r.Body)
-			if err != nil {
-				var tooLarge *http.MaxBytesError
-				if errors.As(err, &tooLarge) {
-					writeJSON(rw, http.StatusRequestEntityTooLarge,
-						api.ErrorResponse{Error: "request body exceeds 1 MiB"})
-				} else {
-					writeBadRequest(rw, "reading request body: "+err.Error())
-				}
-				logRequest(r, requestBody, rw)
-				return
-			}
-			r.Body = io.NopCloser(bytes.NewReader(requestBody))
-		}
+		body := &countingReader{ReadCloser: r.Body}
+		r.Body = body
+		rw := &recordingWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)
-		logRequest(r, requestBody, rw)
+		log.Printf("%s -> %d (%d B in, %d B out)",
+			h.describeRequest(r), rw.status, body.count, rw.count)
 	})
 }
 
-func logRequest(r *http.Request, requestBody []byte, rw *recordingWriter) {
-	if rw.record {
-		log.Printf("%s %s %s -> %d %s", r.Method, r.URL.RequestURI(),
-			logBody(requestBody, false), rw.status,
-			logBody(rw.body.Bytes(), rw.truncated))
-		return
+var messageNumber = regexp.MustCompile(`^[1-9][0-9]{0,17}$`)
+
+// describeRequest names a request by its route, after the mux has
+// matched it. A request refused before routing, or matching no route,
+// is named by its method alone.
+func (h *handler) describeRequest(r *http.Request) string {
+	route := r.Pattern
+	if route == "" || route == "/" {
+		route = loggedMethod(r.Method) + " (no route)"
 	}
-	log.Printf("%s %s -> %d", r.Method, r.URL.RequestURI(), rw.status)
+	name := r.PathValue("workspace")
+	for _, workspace := range h.workspaces {
+		if workspace.Name == name {
+			route += " workspace=" + name
+		}
+	}
+	if ref, err := api.ParseRef(r.PathValue("ref")); err == nil {
+		if _, err := h.store.Resolve(ref); err == nil {
+			route += " ref=" + ref.String()
+		}
+	}
+	if n := r.PathValue("n"); messageNumber.MatchString(n) {
+		route += " n=" + n
+	}
+
+	var known []string
+	unknown := 0
+	for name := range r.URL.Query() {
+		if knownQueryParameter(name) {
+			known = append(known, name)
+		} else {
+			unknown++
+		}
+	}
+	sort.Strings(known)
+	if len(known) > 0 {
+		route += " query=" + strings.Join(known, ",")
+	}
+	if unknown > 0 {
+		route += fmt.Sprintf(" unknown-query=%d", unknown)
+	}
+	return route
+}
+
+// loggedMethod names a request method for the log. A client can send
+// any token as its method, so an unknown one is logged as OTHER.
+func loggedMethod(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete, http.MethodConnect,
+		http.MethodOptions, http.MethodTrace:
+		return method
+	default:
+		return "OTHER"
+	}
+}
+
+type countingReader struct {
+	io.ReadCloser
+	count int64
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	r.count += int64(n)
+	return n, err
 }
 
 type recordingWriter struct {
 	http.ResponseWriter
 	status    int
-	record    bool
 	wroteHead bool
-	truncated bool
-	body      bytes.Buffer
+	count     int64
 }
 
 func (w *recordingWriter) WriteHeader(status int) {
@@ -166,85 +357,19 @@ func (w *recordingWriter) Write(body []byte) (int, error) {
 	if !w.wroteHead {
 		w.WriteHeader(http.StatusOK)
 	}
-	if w.record {
-		remaining := maxRecordedBytes - w.body.Len()
-		if remaining > 0 {
-			kept := body
-			if len(kept) > remaining {
-				kept = kept[:remaining]
-			}
-			_, _ = w.body.Write(kept)
-		}
-		if len(body) > remaining {
-			w.truncated = true
-		}
-	}
-	return w.ResponseWriter.Write(body)
-}
-
-func logBody(body []byte, truncated bool) string {
-	if len(body) == 0 {
-		return "-"
-	}
-	if truncated {
-		return strconv.Quote(string(body)) + " [truncated]"
-	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, body); err != nil {
-		return strconv.Quote(string(body))
-	}
-	return compact.String()
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	body, err := json.Marshal(value)
-	if err != nil {
-		log.Printf("encoding response: %v", err)
-		status = http.StatusInternalServerError
-		body = []byte(`{"error":"encoding response"}`)
-	}
-	if len(body) > api.MaxResponseBytes {
-		log.Printf("response exceeds %d bytes", api.MaxResponseBytes)
-		status = http.StatusInternalServerError
-		body = []byte(`{"error":"response is too large"}`)
-	}
-	body = append(body, '\n')
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = w.Write(body)
-}
-
-func writeStoreError(w http.ResponseWriter, err error) {
-	status := http.StatusInternalServerError
-	message := "internal server error"
-	switch {
-	case errors.Is(err, store.ErrInvalidFilter):
-		status = http.StatusBadRequest
-		message = err.Error()
-	case errors.Is(err, store.ErrEntryNotFound):
-		status = http.StatusNotFound
-		message = err.Error()
-	case errors.Is(err, store.ErrMetadataLimit):
-		status = http.StatusConflict
-		message = err.Error()
-	case errors.Is(err, context.DeadlineExceeded), store.IsBusy(err):
-		status = http.StatusServiceUnavailable
-		message = "server is busy or the request timed out"
-	case errors.Is(err, context.Canceled):
-		status = http.StatusServiceUnavailable
-		message = "request canceled"
-	default:
-		log.Printf("store request failed: %v", err)
-	}
-	writeJSON(w, status, api.ErrorResponse{Error: message})
-}
-
-func writeBadRequest(w http.ResponseWriter, message string) {
-	writeJSON(w, http.StatusBadRequest, api.ErrorResponse{Error: message})
+	n, err := w.ResponseWriter.Write(body)
+	w.count += int64(n)
+	return n, err
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, value any) bool {
 	body, err := io.ReadAll(r.Body)
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, api.CodeTooLarge,
+			"request body exceeds 1 MiB")
+		return false
+	}
 	if err != nil {
 		writeBadRequest(w, "reading request body: "+err.Error())
 		return false
@@ -281,22 +406,53 @@ func parseQuery(w http.ResponseWriter, r *http.Request) (url.Values, bool) {
 	return query, true
 }
 
-func requireNoQuery(w http.ResponseWriter, r *http.Request) bool {
+// parseQueryOf parses a query that may hold only the given parameters,
+// each at most once.
+func parseQueryOf(
+	w http.ResponseWriter, r *http.Request, allowed ...string,
+) (url.Values, bool) {
 	query, ok := parseQuery(w, r)
 	if !ok {
-		return false
+		return nil, false
 	}
-	for key := range query {
-		writeBadRequest(w, fmt.Sprintf("unknown query parameter %q", key))
-		return false
+	for key, values := range query {
+		if !slices.Contains(allowed, key) {
+			writeBadRequest(w, fmt.Sprintf("unknown query parameter %q", key))
+			return nil, false
+		}
+		if len(values) != 1 {
+			writeBadRequest(w, key+" must be given once")
+			return nil, false
+		}
 	}
-	return true
+	return query, true
 }
 
-func splitMeta(value string) (string, string, error) {
-	key, metadataValue, found := strings.Cut(value, "=")
-	if !found {
-		return "", "", fmt.Errorf("meta filter %q must be key=value", value)
+// queryInteger reads an integer parameter from minimum to maximum, or
+// fallback when it is absent.
+func queryInteger(
+	query url.Values, key string, fallback, minimum, maximum int64,
+) (int64, error) {
+	values := query[key]
+	if len(values) == 0 {
+		return fallback, nil
 	}
-	return key, metadataValue, nil
+	value, err := strconv.ParseInt(values[0], 10, 64)
+	if err != nil || value < minimum || value > maximum {
+		return 0, fmt.Errorf("%s must be an integer from %d to %d",
+			key, minimum, maximum)
+	}
+	return value, nil
+}
+
+// queryFlag reads a parameter that is either absent or true.
+func queryFlag(query url.Values, key string) (bool, error) {
+	values := query[key]
+	if len(values) == 0 {
+		return false, nil
+	}
+	if values[0] != "true" {
+		return false, fmt.Errorf("%s must be 'true'", key)
+	}
+	return true, nil
 }

@@ -9,152 +9,167 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/Sothatsit/work-stream/internal/api"
-	"github.com/Sothatsit/work-stream/internal/config"
-	"github.com/Sothatsit/work-stream/internal/version"
+	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/workstream/internal/version"
 )
 
-const (
-	defaultAddress    = "localhost"
-	defaultPort       = "7139"
-	secretEnvironment = "WORK_STREAM_SECRET"
-)
+const defaultTimeout = 5 * time.Second
 
-type requestOperation int
+// requestTimeout is the timeout <PREFIX>_TIMEOUT sets, or the default.
+func requestTimeout() (time.Duration, error) {
+	value := os.Getenv(timeoutEnvironment())
+	if value == "" {
+		return defaultTimeout, nil
+	}
+	timeout, err := time.ParseDuration(value)
+	if err != nil || timeout <= 0 {
+		return 0, fmt.Errorf("%s must be a positive duration, like 10s, "+
+			"not %q", timeoutEnvironment(), value)
+	}
+	return timeout, nil
+}
 
-const (
-	readOperation requestOperation = iota
-	addOperation
-	editOperation
-	deleteOperation
-)
+// connectionError is a request that got no answer from its server.
+// Unless it was never sent, the server may have acted on it.
+type connectionError struct {
+	server  string
+	timeout time.Duration
+	err     error
+	unsent  bool
+}
 
-func (op requestOperation) advice(id int64) string {
-	switch op {
-	case addOperation:
-		return "check 'ws recent' before retrying"
-	case editOperation, deleteOperation:
-		return fmt.Sprintf("check 'ws entry e%d' before retrying", id)
-	default:
-		return ""
+func (e *connectionError) Error() string {
+	var netErr net.Error
+	if errors.Is(e.err, context.DeadlineExceeded) ||
+		(errors.As(e.err, &netErr) && netErr.Timeout()) {
+		return fmt.Sprintf("request to %s timed out after %s. Is the "+
+			"server up? %s sets a longer timeout", e.server, e.timeout,
+			timeoutEnvironment())
+	}
+	return fmt.Sprintf("request to %s failed: %v", e.server, e.err)
+}
+
+func (e *connectionError) Unwrap() error {
+	return e.err
+}
+
+// unusableAnswer is a response the client cannot trust or read, so the
+// server may have acted on the request whatever the response says.
+type unusableAnswer struct {
+	server string
+	err    error
+}
+
+func (e *unusableAnswer) Error() string {
+	return fmt.Sprintf("%s gave an unusable answer: %v", e.server, e.err)
+}
+
+func (e *unusableAnswer) Unwrap() error {
+	return e.err
+}
+
+// serverError is a server's well-formed refusal of a request.
+type serverError struct {
+	server  string
+	status  int
+	code    api.ErrorCode
+	message string
+}
+
+func (e *serverError) Error() string {
+	return e.server + ": " + e.message
+}
+
+// mayHaveApplied reports whether a write that failed with err may
+// still have taken effect, so it must not be repeated blindly. Only a
+// failure before the request left the client, or a well-formed refusal
+// short of a server failure, is certain.
+func mayHaveApplied(err error) bool {
+	var connection *connectionError
+	if errors.As(err, &connection) {
+		return !connection.unsent
+	}
+	var unusable *unusableAnswer
+	if errors.As(err, &unusable) {
+		return true
+	}
+	var refused *serverError
+	return errors.As(err, &refused) &&
+		refused.status >= http.StatusInternalServerError
+}
+
+// target is where requests about one workspace go: its server, with
+// the secret configured for that workspace there, if any.
+type target struct {
+	workspace string
+	server    string
+	secret    string
+	// configured says the config names this workspace on this server.
+	configured bool
+	capture    metadataCapture
+}
+
+func targetOf(workspace workspaceConfig) target {
+	return target{
+		workspace:  workspace.name,
+		server:     workspace.server,
+		secret:     workspace.secret,
+		configured: true,
+		capture:    workspace.capture,
 	}
 }
 
-type serverResponseError struct {
-	StatusCode int
-	Message    string
-}
-
-func (e *serverResponseError) Error() string {
-	return e.Message
+// targetOn is the target for a workspace a server lists. The config's
+// settings and secret apply only when it names that workspace on that
+// same server, so a secret never reaches another server.
+func (c clientConfig) targetOn(workspace, server string) target {
+	configured, ok := c.find(workspace)
+	if ok && configured.server == server {
+		return targetOf(configured)
+	}
+	return target{workspace: workspace, server: server, capture: captureAll}
 }
 
 type client struct {
-	baseURL string
-	secret  string
+	config  clientConfig
 	timeout time.Duration
 	http    *http.Client
+	// listings caches each server's workspaces for one command.
+	listings map[string][]api.Workspace
 }
 
-func newClient(address, port, timeoutFlag string) (*client, error) {
-	if address == "" {
-		address = os.Getenv("WORK_STREAM_ADDRESS")
-	}
-	if address == "" {
-		address = defaultAddress
-	}
-	if port == "" {
-		port = os.Getenv("WORK_STREAM_PORT")
-	}
-	if port == "" {
-		port = defaultPort
-	}
-	timeout, err := config.Timeout(timeoutFlag)
-	if err != nil {
-		return nil, err
-	}
-	secret := os.Getenv(secretEnvironment)
-	if err := validateSecret(secret); err != nil {
-		return nil, err
-	}
+func newClient(config clientConfig, timeout time.Duration) *client {
 	return &client{
-		baseURL: "http://" + net.JoinHostPort(address, port),
-		secret:  secret,
+		config:  config,
 		timeout: timeout,
 		http: &http.Client{
 			Timeout: timeout,
-			CheckRedirect: func(
-				_ *http.Request, _ []*http.Request,
-			) error {
+			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
 		},
-	}, nil
+		listings: map[string][]api.Workspace{},
+	}
 }
 
-func validateSecret(secret string) error {
-	for i := 0; i < len(secret); i++ {
-		if secret[i] <= ' ' || secret[i] == 0x7f {
-			return fmt.Errorf(
-				"%s cannot contain ASCII whitespace or control characters",
-				secretEnvironment,
-			)
-		}
-	}
-	return nil
-}
-
-func (c *client) addAdvice(
-	op requestOperation, id int64, err error,
-) error {
-	advice := op.advice(id)
-	if advice == "" {
-		return err
-	}
-	return fmt.Errorf("%w; it may have succeeded\n%s", err, advice)
-}
-
-func (c *client) requestError(
-	op requestOperation, id int64, err error,
-) error {
-	var netErr net.Error
-	if errors.Is(err, context.DeadlineExceeded) ||
-		(errors.As(err, &netErr) && netErr.Timeout()) {
-		failure := fmt.Errorf("request timed out after %s", c.timeout)
-		return c.addAdvice(op, id, failure)
-	}
-	failure := fmt.Errorf("request to %s failed: %w", c.baseURL, err)
-	return c.addAdvice(op, id, failure)
-}
-
-func validateAPIVersion(resp *http.Response) error {
-	expected := strconv.Itoa(version.API)
-	values := resp.Header.Values(version.APIHeader)
-	if len(values) == 1 && values[0] == expected {
-		return nil
-	}
-	if len(values) == 0 {
-		return fmt.Errorf(
-			"server omitted %s; ws requires API %s",
-			version.APIHeader, expected,
-		)
-	}
-	return fmt.Errorf(
-		"server returned %s %q; ws requires API %s",
-		version.APIHeader, values, expected,
-	)
-}
-
-func decodeResponse(body io.Reader, out any) error {
-	data, err := readResponse(body)
+func readResponse(body io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, api.MaxResponseBytes+1))
 	if err != nil {
-		return err
+		return nil, err
 	}
+	if len(data) > api.MaxResponseBytes {
+		return nil, fmt.Errorf("the response exceeds %d bytes",
+			api.MaxResponseBytes)
+	}
+	return data, nil
+}
+
+func decodeResponse(data []byte, out any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {
@@ -162,143 +177,166 @@ func decodeResponse(body io.Reader, out any) error {
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return fmt.Errorf("response contains more than one JSON value")
-		}
-		return err
+		return errors.New("the response holds more than one JSON value")
 	}
 	return nil
 }
 
-func readResponse(body io.Reader) ([]byte, error) {
-	reader := io.LimitReader(body, int64(api.MaxResponseBytes)+1)
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, err
+func checkAPIVersion(response *http.Response) error {
+	want := strconv.Itoa(version.API)
+	values := response.Header.Values(version.APIHeader)
+	if len(values) == 1 && values[0] == want {
+		return nil
 	}
-	if len(data) > api.MaxResponseBytes {
-		return nil, fmt.Errorf("server response exceeds %d bytes",
-			api.MaxResponseBytes)
-	}
-	return data, nil
+	return fmt.Errorf("it sent %s %q, but this %s needs API %s. Update "+
+		"whichever of %s and ws-server is older", version.APIHeader,
+		values, programName, want, programName)
 }
 
-func (c *client) do(
-	op requestOperation, id int64, method, path string, body any, out any,
-) error {
-	var reqBody io.Reader
+// refusal reads a server's error response. An auth failure says which
+// secret the request carried, since the server cannot know the config.
+func (c *client) refusal(t target, response *http.Response) error {
+	data, err := readResponse(response.Body)
+	var body api.ErrorResponse
+	if err == nil {
+		err = decodeResponse(data, &body)
+	}
+	if err == nil && body.Error == "" {
+		err = errors.New("the error response gives no error")
+	}
+	if err != nil {
+		return &unusableAnswer{server: t.server, err: fmt.Errorf(
+			"%s, with an unreadable error: %w", response.Status, err)}
+	}
+	refused := &serverError{server: t.server, status: response.StatusCode,
+		code: body.Code, message: body.Error}
+	if response.StatusCode != http.StatusUnauthorized {
+		return refused
+	}
+
+	switch {
+	case t.secret != "":
+		refused.message += fmt.Sprintf(". The request carried the "+
+			"auth.secret of workspace %s in %s", t.workspace, c.config.path)
+	case t.configured:
+		refused.message += fmt.Sprintf(". The request carried no secret, "+
+			"since %s sets no auth.secret for workspace %s", c.config.path,
+			t.workspace)
+	default:
+		refused.message += fmt.Sprintf(". The request carried no secret, "+
+			"since %s does not configure workspace %s on %s",
+			c.config.path, t.workspace, t.server)
+	}
+	return refused
+}
+
+// do sends one request to t's server, with t's secret if it has one,
+// and decodes the response into out. It never repeats a request, and
+// every failure after the request may have left the client is a
+// connectionError, an unusableAnswer, or a serverError.
+func (c *client) do(t target, method, path string, body, out any) error {
+	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
 			return err
 		}
-		reqBody = bytes.NewReader(encoded)
+		reader = bytes.NewReader(encoded)
 	}
-	req, err := http.NewRequest(method, c.baseURL+path, reqBody)
+	request, err := http.NewRequest(method, t.server+path, reader)
 	if err != nil {
 		return err
 	}
-	req.Header.Set(version.APIHeader, strconv.Itoa(version.API))
-	if c.secret != "" {
-		req.Header.Set("Authorization", "Bearer "+c.secret)
+	request.Header.Set(version.APIHeader, strconv.Itoa(version.API))
+	if t.secret != "" {
+		request.Header.Set("Authorization", "Bearer "+t.secret)
 	}
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return c.requestError(op, id, err)
-	}
-	defer resp.Body.Close()
 
-	if err := validateAPIVersion(resp); err != nil {
-		return c.addAdvice(op, id, err)
+	response, err := c.http.Do(request)
+	if err != nil {
+		var dial *net.OpError
+		unsent := errors.As(err, &dial) && dial.Op == "dial"
+		return &connectionError{server: t.server, timeout: c.timeout,
+			err: err, unsent: unsent}
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		data, err := readResponse(resp.Body)
-		if err != nil {
-			return c.requestError(op, id, err)
-		}
-		var errResp api.ErrorResponse
-		message := ""
-		if json.Unmarshal(data, &errResp) == nil {
-			message = errResp.Error
-		}
-		if resp.StatusCode == http.StatusUnauthorized {
-			if c.secret == "" {
-				message = "server requires WORK_STREAM_SECRET"
-			} else {
-				message = "WORK_STREAM_SECRET was rejected"
-			}
-		}
-		if message == "" {
-			message = fmt.Sprintf("server returned %s", resp.Status)
-			if len(data) > 0 {
-				message += ": " + string(data)
-			}
-		}
-		responseErr := &serverResponseError{
-			StatusCode: resp.StatusCode,
-			Message:    message,
-		}
-		if resp.StatusCode >= http.StatusInternalServerError {
-			return c.addAdvice(op, id, responseErr)
-		}
-		return responseErr
+	defer response.Body.Close()
+	if err := checkAPIVersion(response); err != nil {
+		return &unusableAnswer{server: t.server, err: err}
 	}
-	if out == nil {
-		return nil
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return c.refusal(t, response)
 	}
-	if err := decodeResponse(resp.Body, out); err != nil {
-		return c.requestError(
-			op, id, fmt.Errorf("reading server response: %w", err),
-		)
+
+	data, err := readResponse(response.Body)
+	if err == nil {
+		err = decodeResponse(data, out)
+	}
+	if err != nil {
+		return &unusableAnswer{server: t.server,
+			err: fmt.Errorf("reading the response: %w", err)}
 	}
 	return nil
 }
 
-func (c *client) addEntry(req api.AddEntryRequest) (api.Entry, error) {
-	var entry api.Entry
-	if err := req.Validate(); err != nil {
-		return entry, err
+// listWorkspaces asks a server which workspaces it hosts. It sends no
+// secret, since the server answers anyone, and caches the answer for
+// the rest of the command.
+func (c *client) listWorkspaces(server string) ([]api.Workspace, error) {
+	if listed, ok := c.listings[server]; ok {
+		return listed, nil
 	}
-	err := c.do(addOperation, 0, "POST", "/api/entries", req, &entry)
-	return entry, err
-}
-
-func (c *client) getEntry(id int64) (api.Entry, error) {
-	var entry api.Entry
-	path := fmt.Sprintf("/api/entries/%d", id)
-	err := c.do(readOperation, id, "GET", path, nil, &entry)
-	return entry, err
-}
-
-func (c *client) editEntry(
-	id int64, req api.EditEntryRequest,
-) (api.Entry, error) {
-	var entry api.Entry
-	if err := req.Validate(); err != nil {
-		return entry, err
+	var response api.WorkspacesResponse
+	err := c.do(target{server: server}, "GET", "/api/workspaces", nil,
+		&response)
+	if err != nil {
+		return nil, err
 	}
-	path := fmt.Sprintf("/api/entries/%d", id)
-	err := c.do(editOperation, id, "PATCH", path, req, &entry)
-	return entry, err
+	c.listings[server] = response.Workspaces
+	return response.Workspaces, nil
 }
 
-func (c *client) deleteEntry(id int64) error {
-	path := fmt.Sprintf("/api/entries/%d", id)
-	return c.do(deleteOperation, id, "DELETE", path, nil, nil)
+// servers lists the configured servers in config order, each once.
+func (c clientConfig) servers() []string {
+	var servers []string
+	seen := map[string]bool{}
+	for _, workspace := range c.workspaces {
+		if !seen[workspace.server] {
+			seen[workspace.server] = true
+			servers = append(servers, workspace.server)
+		}
+	}
+	return servers
 }
 
-func (c *client) search(params url.Values) (api.SearchResult, error) {
-	var result api.SearchResult
-	path := "/api/entries?" + params.Encode()
-	err := c.do(readOperation, 0, "GET", path, nil, &result)
-	return result, err
-}
+// resolve finds the workspace an entry id belongs to, and so the server
+// its requests go to. A prefix the config sets picks its workspace.
+// Otherwise each configured server is asked in turn which prefixes it
+// hosts, and only a server that answers without the prefix passes the
+// question on. Resolving only reads, and sends no secret.
+func (c *client) resolve(ref api.Ref) (target, error) {
+	for _, workspace := range c.config.workspaces {
+		if workspace.prefix == ref.Prefix {
+			return targetOf(workspace), nil
+		}
+	}
 
-func (c *client) status() (api.StatusResponse, error) {
-	var status api.StatusResponse
-	err := c.do(readOperation, 0, "GET", "/api/status", nil, &status)
-	return status, err
+	servers := c.config.servers()
+	for _, server := range servers {
+		listed, err := c.listWorkspaces(server)
+		if err != nil {
+			return target{}, fmt.Errorf("finding the workspace of %s: %w",
+				ref, err)
+		}
+		for _, workspace := range listed {
+			if workspace.Prefix == ref.Prefix {
+				return c.config.targetOn(workspace.Name, server), nil
+			}
+		}
+	}
+	return target{}, fmt.Errorf("no configured server has a workspace with "+
+		"prefix %s, so %s names no entry %s can reach (asked %s)",
+		ref.Prefix, ref, programName, strings.Join(servers, ", "))
 }

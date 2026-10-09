@@ -3,10 +3,11 @@ package store
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/Sothatsit/work-stream/internal/api"
+	"github.com/airspacesh/workstream/internal/api"
 )
 
 type searchEntries struct {
@@ -34,27 +35,26 @@ func newSearchEntries(t *testing.T) searchEntries {
 	}
 }
 
+// runSearch searches the default workspace with every workspace
+// readable.
 func runSearch(t *testing.T, store *Store, filter Filter) api.SearchResult {
 	t.Helper()
 	if filter.Limit == 0 {
 		filter.Limit = 50
 	}
-	result, err := store.Search(context.Background(), filter)
+	result, err := store.Search(context.Background(), everyAccess(store),
+		workspaceID(t, store, "default"), filter)
 	if err != nil {
 		t.Fatalf("searching: %v", err)
 	}
 	return result
 }
 
-func assertEntryIDs(t *testing.T, entries []api.Entry, want ...int64) {
+func assertEntryRefs(t *testing.T, entries []api.ListedEntry, want ...api.Ref) {
 	t.Helper()
-	if len(entries) != len(want) {
-		t.Fatalf("entry count = %d, want %d: %v", len(entries), len(want), entries)
-	}
-	for index, entry := range entries {
-		if entry.ID != want[index] {
-			t.Fatalf("entry %d has id %d, want %d", index, entry.ID, want[index])
-		}
+	if got := entryRefsOf(entries); !reflect.DeepEqual(
+		got, refStrings(want...)) {
+		t.Fatalf("entries = %v, want %v", got, refStrings(want...))
 	}
 }
 
@@ -63,27 +63,27 @@ func TestSearchUsesRawCaseFoldedGlobPatterns(t *testing.T) {
 	tests := []struct {
 		name    string
 		pattern string
-		want    []int64
+		want    []api.Ref
 	}{
-		{"whole string", "COUNT THE DUCKLINGS", []int64{entries.first.ID}},
-		{"bare text matches anywhere", "DUCKLINGS", []int64{
-			entries.third.ID, entries.first.ID,
+		{"whole string", "COUNT THE DUCKLINGS", []api.Ref{entries.first.Ref}},
+		{"bare text matches anywhere", "DUCKLINGS", []api.Ref{
+			entries.third.Ref, entries.first.Ref,
 		}},
 		{"empty matches only an empty value", "", nil},
-		{"wildcard", "*DUCKLINGS*", []int64{
-			entries.third.ID, entries.first.ID,
+		{"wildcard", "*DUCKLINGS*", []api.Ref{
+			entries.third.Ref, entries.first.Ref,
 		}},
-		{"single character", "fix nes?", []int64{entries.second.ID}},
-		{"character class", "fi[xz] nest", []int64{entries.second.ID}},
+		{"single character", "fix nes?", []api.Ref{entries.second.Ref}},
+		{"character class", "fi[xz] nest", []api.Ref{entries.second.Ref}},
 		{"non-ASCII is unchanged", "æther", nil},
-		{"matching non-ASCII", "ÆTHER", []int64{entries.fifth.ID}},
+		{"matching non-ASCII", "ÆTHER", []api.Ref{entries.fifth.Ref}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			result := runSearch(t, entries.store, Filter{
 				Subject: []FieldCond{{Value: test.pattern}},
 			})
-			assertEntryIDs(t, result.Entries, test.want...)
+			assertEntryRefs(t, result.Entries, test.want...)
 		})
 	}
 }
@@ -93,12 +93,12 @@ func TestSearchMatchesTypeWholeValue(t *testing.T) {
 	result := runSearch(t, entries.store, Filter{
 		Type: []FieldCond{{Value: "not"}},
 	})
-	assertEntryIDs(t, result.Entries)
+	assertEntryRefs(t, result.Entries)
 
 	result = runSearch(t, entries.store, Filter{
 		Type: []FieldCond{{Value: "not*"}},
 	})
-	assertEntryIDs(t, result.Entries, entries.fifth.ID, entries.third.ID)
+	assertEntryRefs(t, result.Entries, entries.fifth.Ref, entries.third.Ref)
 }
 
 func TestSearchSetAndPairNegationUsesNotExists(t *testing.T) {
@@ -106,30 +106,30 @@ func TestSearchSetAndPairNegationUsesNotExists(t *testing.T) {
 	result := runSearch(t, entries.store, Filter{
 		Key: []FieldCond{{Value: "JIRA"}},
 	})
-	assertEntryIDs(t, result.Entries, entries.third.ID, entries.first.ID)
+	assertEntryRefs(t, result.Entries, entries.third.Ref, entries.first.Ref)
 
 	result = runSearch(t, entries.store, Filter{
 		Key: []FieldCond{{Negate: true, Value: "JIRA"}},
 	})
-	assertEntryIDs(t, result.Entries,
-		entries.fifth.ID, entries.fourth.ID, entries.second.ID)
+	assertEntryRefs(t, result.Entries,
+		entries.fifth.Ref, entries.fourth.Ref, entries.second.Ref)
 
 	result = runSearch(t, entries.store, Filter{
 		Meta: []MetaCond{{Key: "project", Value: "DUCK-*"}},
 	})
-	assertEntryIDs(t, result.Entries,
-		entries.third.ID, entries.second.ID, entries.first.ID)
+	assertEntryRefs(t, result.Entries,
+		entries.third.Ref, entries.second.Ref, entries.first.Ref)
 
 	result = runSearch(t, entries.store, Filter{
 		Meta: []MetaCond{{Key: "project", Value: "DUCK-1"}},
 	})
-	assertEntryIDs(t, result.Entries)
+	assertEntryRefs(t, result.Entries)
 
 	result = runSearch(t, entries.store, Filter{
 		Meta: []MetaCond{{Negate: true, Key: "project", Value: "DUCK-POND"}},
 	})
-	assertEntryIDs(t, result.Entries,
-		entries.fifth.ID, entries.fourth.ID, entries.second.ID)
+	assertEntryRefs(t, result.Entries,
+		entries.fifth.Ref, entries.fourth.Ref, entries.second.Ref)
 }
 
 func TestSearchContentPagingAndMetadata(t *testing.T) {
@@ -142,7 +142,7 @@ func TestSearchContentPagingAndMetadata(t *testing.T) {
 	if result.Total != 3 {
 		t.Fatalf("total = %d, want 3", result.Total)
 	}
-	assertEntryIDs(t, result.Entries, entries.second.ID, entries.first.ID)
+	assertEntryRefs(t, result.Entries, entries.second.Ref, entries.first.Ref)
 	if got := result.Entries[1].Metadata["jira"]; got != "QUACK-1" {
 		t.Fatalf("paged metadata jira = %q, want QUACK-1", got)
 	}
@@ -160,7 +160,8 @@ func TestSearchOrdersEditedEntryFirstByDefault(t *testing.T) {
 		t.Fatalf("setting modification times: %v", err)
 	}
 	if _, err := entries.store.Edit(
-		context.Background(), entries.first.ID, api.EditEntryRequest{
+		context.Background(), everyAccess(entries.store),
+		entries.store.mustKey(entries.first.Ref), api.EditEntryRequest{
 			Metadata: map[string]string{"jira": "QUACK-9"},
 		},
 	); err != nil {
@@ -168,15 +169,15 @@ func TestSearchOrdersEditedEntryFirstByDefault(t *testing.T) {
 	}
 
 	result := runSearch(t, entries.store, Filter{})
-	if result.Entries[0].ID != entries.first.ID {
-		t.Fatalf("first entry = %d, want the edited %d",
-			result.Entries[0].ID, entries.first.ID)
+	if result.Entries[0].Ref != entries.first.Ref {
+		t.Fatalf("first entry = %s, want the edited %s",
+			result.Entries[0].Ref, entries.first.Ref)
 	}
 
 	byCreation := runSearch(t, entries.store, Filter{OrderByCreation: true})
-	if byCreation.Entries[0].ID != entries.fifth.ID {
-		t.Fatalf("first entry by creation = %d, want the newest %d",
-			byCreation.Entries[0].ID, entries.fifth.ID)
+	if byCreation.Entries[0].Ref != entries.fifth.Ref {
+		t.Fatalf("first entry by creation = %s, want the newest %s",
+			byCreation.Entries[0].Ref, entries.fifth.Ref)
 	}
 }
 
@@ -209,7 +210,9 @@ func TestSearchRejectsInvalidBoundsAndNUL(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := store.Search(context.Background(), test.filter)
+			_, err := store.Search(context.Background(),
+				everyAccess(store), workspaceID(t, store, "default"),
+				test.filter)
 			if !errors.Is(err, ErrInvalidFilter) ||
 				!strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Search error = %v, want text %q", err, test.want)
@@ -219,7 +222,8 @@ func TestSearchRejectsInvalidBoundsAndNUL(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := store.Search(ctx, Filter{Limit: 1})
+	_, err := store.Search(ctx, everyAccess(store),
+		workspaceID(t, store, "default"), Filter{Limit: 1})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled Search error = %v, want context.Canceled", err)
 	}
@@ -229,42 +233,38 @@ func TestSearchByOrigin(t *testing.T) {
 	store := openTestStore(t)
 	add := func(subject string, origin api.Origin) api.Entry {
 		t.Helper()
-		entry, err := store.Add(context.Background(), api.AddEntryRequest{
+		return addTo(t, store, "default", api.AddEntryRequest{
 			Type: "note", Subject: subject, Origin: origin,
 		})
-		if err != nil {
-			t.Fatalf("adding entry: %v", err)
-		}
-		return entry
 	}
-	bud := add("on bud", api.Origin{
-		User: "paddyl", Host: "BUD110",
-		Dir: "/node/bud110/paddyl/src", ClaudeSession: "abc-123",
+	first := add("on the first host", api.Origin{
+		User: "duck", Host: "POND-A",
+		Dir: "/work/pond-a/src", ClaudeSession: "abc-123",
 	})
-	hud := add("on hud", api.Origin{
-		User: "paddyl", Host: "hud21",
-		Dir: "/node/hud21/paddyl/envs",
+	second := add("on the second host", api.Origin{
+		User: "duck", Host: "pond-b",
+		Dir: "/work/pond-b/envs",
 	})
 
 	// Host match folds ASCII case, like the other text fields.
 	got := runSearch(t, store, Filter{
-		Limit: 50, OriginHost: []FieldCond{{Value: "bud110"}},
+		Limit: 50, OriginHost: []FieldCond{{Value: "pond-a"}},
 	})
-	assertEntryIDs(t, got.Entries, bud.ID)
+	assertEntryRefs(t, got.Entries, first.Ref)
 
 	// Directory glob and session match reach only their entry.
 	got = runSearch(t, store, Filter{
 		Limit: 50, OriginDir: []FieldCond{{Value: "*/envs"}},
 	})
-	assertEntryIDs(t, got.Entries, hud.ID)
+	assertEntryRefs(t, got.Entries, second.Ref)
 	got = runSearch(t, store, Filter{
 		Limit: 50, OriginClaudeSession: []FieldCond{{Value: "abc-*"}},
 	})
-	assertEntryIDs(t, got.Entries, bud.ID)
+	assertEntryRefs(t, got.Entries, first.Ref)
 
 	// Negation excludes the matching origin.
 	got = runSearch(t, store, Filter{
-		Limit: 50, OriginHost: []FieldCond{{Negate: true, Value: "bud110"}},
+		Limit: 50, OriginHost: []FieldCond{{Negate: true, Value: "pond-a"}},
 	})
-	assertEntryIDs(t, got.Entries, hud.ID)
+	assertEntryRefs(t, got.Entries, second.Ref)
 }

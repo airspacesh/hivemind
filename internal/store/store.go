@@ -7,35 +7,51 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
 	sqlite "modernc.org/sqlite"
 
-	"github.com/Sothatsit/work-stream/internal/api"
+	"github.com/airspacesh/workstream/internal/api"
 )
 
 var (
 	ErrEntryNotFound   = errors.New("entry not found")
 	ErrMetadataLimit   = errors.New("metadata pair limit reached")
-	ErrInvalidDatabase = errors.New("invalid work-stream database")
+	ErrInvalidDatabase = errors.New("invalid workstream database")
 )
 
 const (
-	applicationID       = 0x57535452 // "WSTR"
-	databaseVersion     = 1
+	applicationID = 0x574b5350 // "WKSP"
+	// legacyApplicationID marked the databases of releases before
+	// workspaces, which this release does not migrate.
+	legacyApplicationID = 0x57535452 // "WSTR"
 	maxBusyTimeoutMsecs = int64(1<<31 - 1)
 	sqliteBusy          = 5
 	sqliteLocked        = 6
 )
 
-// createEntries defines the entries table. Each entry records its
-// origin: the OS user, host, working directory, and Claude Code
-// session that created it. Every searchable text field has a lowered
-// twin so GLOB can match without regard to ASCII case.
+// createWorkspaces defines the workspaces a server hosts. Nothing is
+// ever deleted, so an id is never reused. A workspace the config no
+// longer names keeps its row, and its prefix is NULL, so a configured
+// workspace can take that prefix.
+const createWorkspaces = `
+CREATE TABLE workspaces (
+	id INTEGER PRIMARY KEY,
+	name TEXT NOT NULL UNIQUE,
+	prefix TEXT UNIQUE
+)`
+
+// createEntries defines the entries table. An entry's id counts from 1
+// within its workspace. Each entry records its origin: the OS user,
+// host, working directory, and Claude Code session that created it.
+// Every searchable text field has a lowered twin so GLOB can match
+// without regard to ASCII case.
 const createEntries = `
 CREATE TABLE entries (
-	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+	id INTEGER NOT NULL,
 	created_utc TEXT NOT NULL,
 	modified_utc TEXT NOT NULL,
 	type TEXT NOT NULL,
@@ -58,26 +74,29 @@ CREATE TABLE entries (
 		GENERATED ALWAYS AS (lower(origin_dir)) STORED,
 	origin_claude_session TEXT NOT NULL DEFAULT '',
 	origin_claude_session_lower TEXT COLLATE BINARY
-		GENERATED ALWAYS AS (lower(origin_claude_session)) STORED
+		GENERATED ALWAYS AS (lower(origin_claude_session)) STORED,
+	PRIMARY KEY (workspace_id, id)
 )`
 
 const createMetadata = `
 CREATE TABLE entry_metadata (
-	entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+	workspace_id INTEGER NOT NULL,
+	entry_id INTEGER NOT NULL,
 	key TEXT NOT NULL,
 	value TEXT NOT NULL,
 	value_lower TEXT COLLATE BINARY
 		GENERATED ALWAYS AS (lower(value)) STORED,
-	PRIMARY KEY (entry_id, key)
+	PRIMARY KEY (workspace_id, entry_id, key),
+	FOREIGN KEY (workspace_id, entry_id) REFERENCES entries(workspace_id, id)
 ) WITHOUT ROWID`
 
 const createCreatedIndex = `
 CREATE INDEX entries_created_order
-ON entries(created_utc DESC, id DESC)`
+ON entries(workspace_id, created_utc DESC, id DESC)`
 
 const createModifiedIndex = `
 CREATE INDEX entries_modified_order
-ON entries(modified_utc DESC, id DESC)`
+ON entries(workspace_id, modified_utc DESC, id DESC)`
 
 const createTypeIndex = `
 CREATE INDEX entries_type_search ON entries(type_lower)`
@@ -85,14 +104,58 @@ CREATE INDEX entries_type_search ON entries(type_lower)`
 const createSubjectIndex = `
 CREATE INDEX entries_subject_search ON entries(subject_lower)`
 
-var schemaStatements = []string{
-	createEntries,
-	createMetadata,
-	createCreatedIndex,
-	createModifiedIndex,
-	createTypeIndex,
-	createSubjectIndex,
-}
+// createLinks defines named links between entries, which may join
+// workspaces. Each link is stored once, on its source, and
+// entry_links_target derives the reverse direction. A source has at
+// most one parent.
+const createLinks = `
+CREATE TABLE entry_links (
+	source_workspace_id INTEGER NOT NULL,
+	source_id INTEGER NOT NULL,
+	name TEXT NOT NULL,
+	target_workspace_id INTEGER NOT NULL,
+	target_id INTEGER NOT NULL,
+	PRIMARY KEY (source_workspace_id, source_id, name,
+		target_workspace_id, target_id),
+	FOREIGN KEY (source_workspace_id, source_id)
+		REFERENCES entries(workspace_id, id),
+	FOREIGN KEY (target_workspace_id, target_id)
+		REFERENCES entries(workspace_id, id)
+) WITHOUT ROWID`
+
+const createLinkTargetIndex = `
+CREATE INDEX entry_links_target
+ON entry_links(target_workspace_id, target_id, name)`
+
+const createOneParentIndex = `
+CREATE UNIQUE INDEX entry_links_one_parent
+ON entry_links(source_workspace_id, source_id) WHERE name = 'parent'`
+
+// createMessages defines the chat attached to entries. A message's id
+// counts from 1 within its entry. post_order numbers every message on
+// the server in the order it was posted, so the chat overview orders
+// by it rather than by a clock. An edit overwrites the body, so no
+// earlier text is kept.
+const createMessages = `
+CREATE TABLE entry_messages (
+	post_order INTEGER PRIMARY KEY,
+	workspace_id INTEGER NOT NULL,
+	entry_id INTEGER NOT NULL,
+	id INTEGER NOT NULL,
+	created_utc TEXT NOT NULL,
+	modified_utc TEXT NOT NULL,
+	body TEXT NOT NULL,
+	origin_user TEXT NOT NULL DEFAULT '',
+	origin_host TEXT NOT NULL DEFAULT '',
+	origin_dir TEXT NOT NULL DEFAULT '',
+	origin_claude_session TEXT NOT NULL DEFAULT '',
+	UNIQUE (workspace_id, entry_id, id),
+	FOREIGN KEY (workspace_id, entry_id) REFERENCES entries(workspace_id, id)
+)`
+
+const createMessageOrderIndex = `
+CREATE INDEX entry_messages_workspace_order
+ON entry_messages(workspace_id, post_order)`
 
 type schemaObject struct {
 	typ   string
@@ -101,28 +164,85 @@ type schemaObject struct {
 	defn  string
 }
 
-var expectedSchema = []schemaObject{
-	{"index", "entries_created_order", "entries",
-		normalizeSchemaSQL(createCreatedIndex)},
-	{"index", "entries_modified_order", "entries",
-		normalizeSchemaSQL(createModifiedIndex)},
-	{"index", "entries_subject_search", "entries",
-		normalizeSchemaSQL(createSubjectIndex)},
-	{"index", "entries_type_search", "entries",
-		normalizeSchemaSQL(createTypeIndex)},
-	{"table", "entries", "entries", normalizeSchemaSQL(createEntries)},
-	{"table", "entry_metadata", "entry_metadata",
-		normalizeSchemaSQL(createMetadata)},
+// schemaStep takes a database from one version to the next: from
+// version i to i+1 for schemaSteps[i]. A new database runs every step,
+// so a fresh database and a migrated one go through the same path.
+type schemaStep struct {
+	statements []string
+	objects    []schemaObject
+}
+
+var schemaSteps = []schemaStep{
+	{
+		statements: []string{
+			createWorkspaces, createEntries, createMetadata,
+			createCreatedIndex, createModifiedIndex, createTypeIndex,
+			createSubjectIndex, createLinks, createLinkTargetIndex,
+			createOneParentIndex, createMessages, createMessageOrderIndex,
+		},
+		objects: []schemaObject{
+			{"index", "entries_created_order", "entries",
+				normalizeSchemaSQL(createCreatedIndex)},
+			{"index", "entries_modified_order", "entries",
+				normalizeSchemaSQL(createModifiedIndex)},
+			{"index", "entries_subject_search", "entries",
+				normalizeSchemaSQL(createSubjectIndex)},
+			{"index", "entries_type_search", "entries",
+				normalizeSchemaSQL(createTypeIndex)},
+			{"index", "entry_links_one_parent", "entry_links",
+				normalizeSchemaSQL(createOneParentIndex)},
+			{"index", "entry_links_target", "entry_links",
+				normalizeSchemaSQL(createLinkTargetIndex)},
+			{"index", "entry_messages_workspace_order", "entry_messages",
+				normalizeSchemaSQL(createMessageOrderIndex)},
+			{"table", "entries", "entries",
+				normalizeSchemaSQL(createEntries)},
+			{"table", "entry_links", "entry_links",
+				normalizeSchemaSQL(createLinks)},
+			{"table", "entry_messages", "entry_messages",
+				normalizeSchemaSQL(createMessages)},
+			{"table", "entry_metadata", "entry_metadata",
+				normalizeSchemaSQL(createMetadata)},
+			{"table", "workspaces", "workspaces",
+				normalizeSchemaSQL(createWorkspaces)},
+		},
+	},
+}
+
+var databaseVersion = len(schemaSteps)
+
+// expectedSchema lists the objects a database of the given version
+// holds, in the order readSchema returns them.
+func expectedSchema(version int) []schemaObject {
+	var objects []schemaObject
+	for _, step := range schemaSteps[:version] {
+		objects = append(objects, step.objects...)
+	}
+	sort.Slice(objects, func(i, j int) bool {
+		if objects[i].typ != objects[j].typ {
+			return objects[i].typ < objects[j].typ
+		}
+		return objects[i].name < objects[j].name
+	})
+	return objects
 }
 
 type Store struct {
 	db *sql.DB
+	// workspaces are the configured workspaces, in config order.
+	workspaces []Workspace
+	// unconfigured names the workspaces the database holds but the
+	// config does not, whose entries are unreachable.
+	unconfigured []string
 }
 
+// Open opens the database at path, creating it if it is new, and
+// brings its workspaces in line with the configured ones.
 func Open(
 	ctx context.Context,
 	path string,
 	busyTimeout time.Duration,
+	configured []api.Workspace,
 ) (_ *Store, retErr error) {
 	dsn, err := sqliteDSN(path, busyTimeout)
 	if err != nil {
@@ -143,17 +263,12 @@ func Open(
 	if err := db.PingContext(ctx); err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
-	if err := prepareDatabase(ctx, db); err != nil {
+	workspaces, unconfigured, err := prepareDatabase(ctx, db, configured)
+	if err != nil {
 		return nil, err
 	}
-	var journalMode string
-	if err := db.QueryRowContext(
-		ctx, `PRAGMA journal_mode = WAL`,
-	).Scan(&journalMode); err != nil {
-		return nil, fmt.Errorf("enabling WAL: %w", err)
-	}
-	if !strings.EqualFold(journalMode, "wal") {
-		return nil, fmt.Errorf("enabling WAL: got mode %q", journalMode)
+	if err := enableWAL(ctx, db, busyTimeout); err != nil {
+		return nil, err
 	}
 	var foreignKeys int
 	if err := db.QueryRowContext(
@@ -164,11 +279,48 @@ func Open(
 	if foreignKeys != 1 {
 		return nil, errors.New("SQLite foreign keys are disabled")
 	}
-	stream := &Store{db: db}
+	stream := &Store{
+		db: db, workspaces: workspaces, unconfigured: unconfigured,
+	}
 	if err := stream.Ping(ctx); err != nil {
 		return nil, fmt.Errorf("checking database health: %w", err)
 	}
 	return stream, nil
+}
+
+// walRetryInterval is how long enableWAL waits between attempts.
+const walRetryInterval = 10 * time.Millisecond
+
+// enableWAL switches the database to WAL. SQLite does not call the busy
+// handler for a journal mode change, so while another connection is
+// opening the same new database the change fails at once with
+// SQLITE_BUSY. It retries until busyTimeout, the wait every other lock
+// gets.
+func enableWAL(
+	ctx context.Context, db *sql.DB, busyTimeout time.Duration,
+) error {
+	deadline := time.Now().Add(busyTimeout)
+	for {
+		var mode string
+		err := db.QueryRowContext(
+			ctx, `PRAGMA journal_mode = WAL`,
+		).Scan(&mode)
+		if err == nil && strings.EqualFold(mode, "wal") {
+			return nil
+		}
+		if err == nil {
+			return fmt.Errorf("enabling WAL: got mode %q", mode)
+		}
+		if !IsBusy(err) || time.Now().After(deadline) {
+			return fmt.Errorf("enabling WAL: %w", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("enabling WAL: %w", ctx.Err())
+		case <-time.After(walRetryInterval):
+		}
+	}
 }
 
 func sqliteDSN(path string, busyTimeout time.Duration) (string, error) {
@@ -187,19 +339,27 @@ func sqliteDSN(path string, busyTimeout time.Duration) (string, error) {
 	query := url.Values{}
 	query.Set("mode", "rwc")
 	query.Add("_pragma", "foreign_keys(1)")
+	// secure_delete zeroes freed space, so text an edit overwrites is
+	// not left behind in the database file's free pages.
+	query.Add("_pragma", "secure_delete(1)")
 	query.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", msecs))
 	fileURL.RawQuery = query.Encode()
 	return fileURL.String(), nil
 }
 
-func prepareDatabase(ctx context.Context, db *sql.DB) error {
+// prepareDatabase creates or checks the schema and brings the
+// workspaces in line with the configured ones, all under one write
+// lock, so connections opening the same database at once take turns.
+func prepareDatabase(
+	ctx context.Context, db *sql.DB, configured []api.Workspace,
+) ([]Workspace, []string, error) {
 	conn, err := db.Conn(ctx)
 	if err != nil {
-		return fmt.Errorf("checking database: %w", err)
+		return nil, nil, fmt.Errorf("checking database: %w", err)
 	}
 	defer conn.Close()
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return fmt.Errorf("locking database schema: %w", err)
+		return nil, nil, fmt.Errorf("locking database schema: %w", err)
 	}
 	committed := false
 	defer func() {
@@ -212,46 +372,58 @@ func prepareDatabase(ctx context.Context, db *sql.DB) error {
 	if err := conn.QueryRowContext(
 		ctx, `PRAGMA application_id`,
 	).Scan(&application); err != nil {
-		return fmt.Errorf("reading application_id: %w", err)
+		return nil, nil, fmt.Errorf("reading application_id: %w", err)
 	}
 	if err := conn.QueryRowContext(
 		ctx, `PRAGMA user_version`,
 	).Scan(&version); err != nil {
-		return fmt.Errorf("reading user_version: %w", err)
+		return nil, nil, fmt.Errorf("reading user_version: %w", err)
 	}
 	if err := conn.QueryRowContext(
 		ctx, `SELECT count(*) FROM sqlite_schema`,
 	).Scan(&objectCount); err != nil {
-		return fmt.Errorf("reading database schema: %w", err)
+		return nil, nil, fmt.Errorf("reading database schema: %w", err)
 	}
 
 	if objectCount == 0 && application == 0 && version == 0 {
-		if err := createDatabase(ctx, conn); err != nil {
-			return err
+		if _, err := conn.ExecContext(ctx, fmt.Sprintf(
+			`PRAGMA application_id = %d`, applicationID,
+		)); err != nil {
+			return nil, nil, fmt.Errorf("setting application_id: %w", err)
 		}
 	} else if err := validateDatabase(
 		ctx, conn, application, version, objectCount,
 	); err != nil {
-		return err
+		return nil, nil, err
+	}
+	if err := migrateDatabase(ctx, conn, version); err != nil {
+		return nil, nil, err
+	}
+	workspaces, unconfigured, err := syncWorkspaces(ctx, conn, configured)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
-		return fmt.Errorf("committing database schema: %w", err)
+		return nil, nil, fmt.Errorf("committing database schema: %w", err)
 	}
 	committed = true
-	return nil
+	return workspaces, unconfigured, nil
 }
 
-func createDatabase(ctx context.Context, conn *sql.Conn) error {
-	for _, statement := range schemaStatements {
-		if _, err := conn.ExecContext(ctx, statement); err != nil {
-			return fmt.Errorf("creating database schema: %w", err)
-		}
+// migrateDatabase runs every schema step after the given version, then
+// checks that the result matches a fresh database exactly.
+func migrateDatabase(ctx context.Context, conn *sql.Conn, version int) error {
+	if version == databaseVersion {
+		return nil
 	}
-	if _, err := conn.ExecContext(
-		ctx, fmt.Sprintf(`PRAGMA application_id = %d`, applicationID),
-	); err != nil {
-		return fmt.Errorf("setting application_id: %w", err)
+	for _, step := range schemaSteps[version:] {
+		for _, statement := range step.statements {
+			if _, err := conn.ExecContext(ctx, statement); err != nil {
+				return fmt.Errorf("migrating database from v%d: %w",
+					version, err)
+			}
+		}
 	}
 	if _, err := conn.ExecContext(
 		ctx, fmt.Sprintf(`PRAGMA user_version = %d`, databaseVersion),
@@ -262,9 +434,10 @@ func createDatabase(ctx context.Context, conn *sql.Conn) error {
 	if err != nil {
 		return err
 	}
-	if !sameSchema(objects, expectedSchema) {
-		return fmt.Errorf("%w: newly-created schema does not match v1",
-			ErrInvalidDatabase)
+	if !sameSchema(objects, expectedSchema(databaseVersion)) {
+		return fmt.Errorf("%w: schema after migrating from v%d "+
+			"does not match v%d", ErrInvalidDatabase, version,
+			databaseVersion)
 	}
 	return nil
 }
@@ -286,6 +459,11 @@ func validateDatabase(
 		return fmt.Errorf("%w: non-empty database is unversioned",
 			ErrInvalidDatabase)
 	}
+	if application == legacyApplicationID {
+		return fmt.Errorf("%w: it was made by a workstream release "+
+			"before workspaces, and this release starts fresh databases "+
+			"only. Point data at an empty directory", ErrInvalidDatabase)
+	}
 	if application != applicationID {
 		return fmt.Errorf("%w: application_id is %d, want %d",
 			ErrInvalidDatabase, application, applicationID)
@@ -297,17 +475,13 @@ func validateDatabase(
 		return fmt.Errorf("%w: database version %d is newer than %d",
 			ErrInvalidDatabase, version, databaseVersion)
 	}
-	if version != databaseVersion {
-		return fmt.Errorf("%w: database version %d is unsupported",
-			ErrInvalidDatabase, version)
-	}
 	objects, err := readSchema(ctx, conn)
 	if err != nil {
 		return err
 	}
-	if !sameSchema(objects, expectedSchema) {
+	if !sameSchema(objects, expectedSchema(version)) {
 		return fmt.Errorf("%w: schema does not match database v%d",
-			ErrInvalidDatabase, databaseVersion)
+			ErrInvalidDatabase, version)
 	}
 	return nil
 }
@@ -414,271 +588,14 @@ func IsBusy(err error) bool {
 
 const timeLayout = "2006-01-02T15:04:05.000000000Z07:00"
 
+func parseTime(value string) (time.Time, error) {
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parsing time %q: %w", value, err)
+	}
+	return parsed, nil
+}
+
 func nowUTC() string {
 	return time.Now().UTC().Format(timeLayout)
-}
-
-func (s *Store) Add(
-	ctx context.Context,
-	req api.AddEntryRequest,
-) (api.Entry, error) {
-	if len(req.Metadata) > api.MaxMetadata {
-		return api.Entry{}, ErrMetadataLimit
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return api.Entry{}, fmt.Errorf("adding entry: %w", err)
-	}
-	defer tx.Rollback()
-
-	now := nowUTC()
-	result, err := tx.ExecContext(ctx, `
-		INSERT INTO entries (
-			created_utc, modified_utc, type, subject, body,
-			origin_user, origin_host, origin_dir, origin_claude_session
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		now, now, req.Type, req.Subject, req.Body,
-		req.Origin.User, req.Origin.Host, req.Origin.Dir,
-		req.Origin.ClaudeSession,
-	)
-	if err != nil {
-		return api.Entry{}, fmt.Errorf("adding entry: %w", err)
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return api.Entry{}, fmt.Errorf("reading new entry id: %w", err)
-	}
-	for key, value := range req.Metadata {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO entry_metadata (entry_id, key, value)
-			VALUES (?, ?, ?)`, id, key, value,
-		); err != nil {
-			return api.Entry{}, fmt.Errorf("adding entry metadata: %w", err)
-		}
-	}
-	entry, err := getEntry(ctx, tx, id)
-	if err != nil {
-		return api.Entry{}, fmt.Errorf("reading new entry: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return api.Entry{}, fmt.Errorf("committing new entry: %w", err)
-	}
-	return entry, nil
-}
-
-func (s *Store) Get(ctx context.Context, id int64) (api.Entry, error) {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return api.Entry{}, fmt.Errorf("getting entry: %w", err)
-	}
-	defer tx.Rollback()
-	entry, err := getEntry(ctx, tx, id)
-	if err != nil {
-		return api.Entry{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return api.Entry{}, fmt.Errorf("finishing entry read: %w", err)
-	}
-	return entry, nil
-}
-
-func (s *Store) Edit(
-	ctx context.Context,
-	id int64,
-	req api.EditEntryRequest,
-) (api.Entry, error) {
-	if req.Type == nil && req.Subject == nil && req.Body == nil &&
-		len(req.Metadata) == 0 {
-		return api.Entry{}, errors.New("nothing to edit")
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return api.Entry{}, fmt.Errorf("editing entry: %w", err)
-	}
-	defer tx.Rollback()
-
-	query := `UPDATE entries SET modified_utc = ?`
-	args := []any{nowUTC()}
-	if req.Type != nil {
-		query += `, type = ?`
-		args = append(args, *req.Type)
-	}
-	if req.Subject != nil {
-		query += `, subject = ?`
-		args = append(args, *req.Subject)
-	}
-	if req.Body != nil {
-		query += `, body = ?`
-		args = append(args, *req.Body)
-	}
-	query += ` WHERE id = ?`
-	args = append(args, id)
-	result, err := tx.ExecContext(ctx, query, args...)
-	if err != nil {
-		return api.Entry{}, fmt.Errorf("editing entry: %w", err)
-	}
-	matched, err := result.RowsAffected()
-	if err != nil {
-		return api.Entry{}, fmt.Errorf("checking edited entry: %w", err)
-	}
-	if matched == 0 {
-		return api.Entry{}, ErrEntryNotFound
-	}
-
-	for key, value := range req.Metadata {
-		if value == "" {
-			if _, err := tx.ExecContext(ctx, `
-				DELETE FROM entry_metadata
-				WHERE entry_id = ? AND key = ?`, id, key,
-			); err != nil {
-				return api.Entry{}, fmt.Errorf(
-					"removing metadata: %w", err)
-			}
-			continue
-		}
-
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO entry_metadata (entry_id, key, value)
-			VALUES (?, ?, ?)
-			ON CONFLICT (entry_id, key)
-			DO UPDATE SET value = excluded.value`, id, key, value,
-		); err != nil {
-			return api.Entry{}, fmt.Errorf("editing metadata: %w", err)
-		}
-	}
-	if len(req.Metadata) > 0 {
-		var count int
-		if err := tx.QueryRowContext(ctx, `
-			SELECT count(*) FROM entry_metadata WHERE entry_id = ?`, id,
-		).Scan(&count); err != nil {
-			return api.Entry{}, fmt.Errorf("checking metadata: %w", err)
-		}
-
-		if count > api.MaxMetadata {
-			return api.Entry{}, ErrMetadataLimit
-		}
-	}
-
-	entry, err := getEntry(ctx, tx, id)
-	if err != nil {
-		return api.Entry{}, fmt.Errorf("reading edited entry: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return api.Entry{}, fmt.Errorf("committing edited entry: %w", err)
-	}
-	return entry, nil
-}
-
-func (s *Store) Delete(ctx context.Context, id int64) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("deleting entry: %w", err)
-	}
-	defer tx.Rollback()
-	result, err := tx.ExecContext(
-		ctx, `DELETE FROM entries WHERE id = ?`, id,
-	)
-	if err != nil {
-		return fmt.Errorf("deleting entry: %w", err)
-	}
-	matched, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("checking deleted entry: %w", err)
-	}
-	if matched == 0 {
-		return ErrEntryNotFound
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing deleted entry: %w", err)
-	}
-	return nil
-}
-
-type databaseReader interface {
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}
-
-func getEntry(
-	ctx context.Context,
-	db databaseReader,
-	id int64,
-) (api.Entry, error) {
-	row := db.QueryRowContext(ctx, `
-		SELECT id, created_utc, modified_utc, type, subject, body,
-			origin_user, origin_host, origin_dir, origin_claude_session
-		FROM entries WHERE id = ?`, id,
-	)
-	entry, err := scanEntry(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return api.Entry{}, ErrEntryNotFound
-	}
-	if err != nil {
-		return api.Entry{}, err
-	}
-	metadata, err := metadataFor(ctx, db, id)
-	if err != nil {
-		return api.Entry{}, err
-	}
-	entry.Metadata = metadata
-	return entry, nil
-}
-
-type rowScanner interface {
-	Scan(...any) error
-}
-
-func scanEntry(row rowScanner) (api.Entry, error) {
-	var entry api.Entry
-	var created, modified string
-	err := row.Scan(
-		&entry.ID, &created, &modified,
-		&entry.Type, &entry.Subject, &entry.Body,
-		&entry.Origin.User, &entry.Origin.Host,
-		&entry.Origin.Dir, &entry.Origin.ClaudeSession,
-	)
-	if err != nil {
-		return api.Entry{}, err
-	}
-	if err := setEntryTimes(&entry, created, modified); err != nil {
-		return api.Entry{}, err
-	}
-	return entry, nil
-}
-
-func setEntryTimes(entry *api.Entry, created, modified string) error {
-	var err error
-	entry.Created, err = time.Parse(time.RFC3339, created)
-	if err != nil {
-		return fmt.Errorf("parsing created_utc: %w", err)
-	}
-	entry.Modified, err = time.Parse(time.RFC3339, modified)
-	if err != nil {
-		return fmt.Errorf("parsing modified_utc: %w", err)
-	}
-	return nil
-}
-
-func metadataFor(
-	ctx context.Context,
-	db databaseReader,
-	id int64,
-) (map[string]string, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT key, value FROM entry_metadata
-		WHERE entry_id = ? ORDER BY key`, id,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	metadata := map[string]string{}
-	for rows.Next() {
-		var key, value string
-		if err := rows.Scan(&key, &value); err != nil {
-			return nil, err
-		}
-		metadata[key] = value
-	}
-	return metadata, rows.Err()
 }

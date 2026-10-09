@@ -1,9 +1,11 @@
-// ws-server hosts one work-stream database for remote ws clients.
+// ws-server hosts the workspaces of one workstream database for remote
+// ws clients.
 package main
 
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -11,14 +13,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sort"
-	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
-	"github.com/Sothatsit/work-stream/internal/api"
-	"github.com/Sothatsit/work-stream/internal/store"
-	"github.com/Sothatsit/work-stream/internal/version"
+	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/workstream/internal/store"
+	"github.com/airspacesh/workstream/internal/version"
 )
 
 func main() {
@@ -28,70 +29,109 @@ func main() {
 }
 
 func run(args []string) error {
-	cfg, err := parseConfig(args, os.Getenv)
+	flags := flag.NewFlagSet("ws-server", flag.ContinueOnError)
+	configPath := flags.String("config", defaultConfigPath,
+		"server config file")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected argument %q", flags.Arg(0))
+	}
+	config, err := loadConfig(*configPath)
 	if err != nil {
 		return err
 	}
-	address := ":" + cfg.port
-	listenScope := "all interfaces"
-	authentication := "enabled"
-	if cfg.secret == "" {
-		address = net.JoinHostPort("127.0.0.1", cfg.port)
-		listenScope = "loopback only"
-		authentication = "disabled"
-	}
-	listener, err := net.Listen("tcp", address)
+
+	listener, err := net.Listen("tcp", config.Listen)
 	if err != nil {
-		return fmt.Errorf("listening on %s: %w", address, err)
+		return fmt.Errorf("listening on %s: %w", config.Listen, err)
 	}
 	defer listener.Close()
-
-	if err := os.MkdirAll(cfg.data, 0o700); err != nil {
+	if err := os.MkdirAll(config.Data, 0o700); err != nil {
 		return fmt.Errorf("creating data directory: %w", err)
 	}
-	databasePath := filepath.Join(cfg.data, "ws.db")
-	workTimeout := serverWorkTimeout(cfg.timeout)
+	databasePath := filepath.Join(config.Data, "ws.db")
+	workTimeout := serverWorkTimeout(config.Timeout)
 	openContext, cancel := context.WithTimeout(
-		context.Background(), cfg.timeout,
+		context.Background(), config.Timeout,
 	)
-	stream, err := store.Open(openContext, databasePath, workTimeout)
+	stream, err := store.Open(openContext, databasePath, workTimeout,
+		config.workspaces())
 	cancel()
 	if err != nil {
-		return fmt.Errorf("opening database: %w", err)
+		return fmt.Errorf("opening database %s: %w", databasePath, err)
 	}
 	defer stream.Close()
 
 	h := &handler{
-		store:          stream,
-		data:           cfg.data,
-		timeout:        cfg.timeout,
-		authentication: cfg.secret != "",
+		store:       stream,
+		workspaces:  newServerWorkspaces(stream.Workspaces(), config),
+		workTimeout: workTimeout,
 	}
-	mux := routes(h)
-	root := requireAPIVersion(authenticate(cfg.secret,
-		requestTimeout(workTimeout,
-			limitRequestBody(logRequests(mux)))))
 	server := &http.Server{
-		Handler:           root,
-		ReadTimeout:       cfg.timeout,
-		ReadHeaderTimeout: cfg.timeout,
-		WriteTimeout:      cfg.timeout,
-		IdleTimeout:       cfg.timeout,
+		Handler:           h.routes(),
+		ReadTimeout:       config.Timeout,
+		ReadHeaderTimeout: config.Timeout,
+		WriteTimeout:      config.Timeout,
+		IdleTimeout:       config.Timeout,
 		MaxHeaderBytes:    1 << 20,
 	}
 	shutdownSignal, stopSignals := signal.NotifyContext(
 		context.Background(), os.Interrupt, syscall.SIGTERM,
 	)
 	defer stopSignals()
-	log.Printf(
-		"ws-server %s listening on %s "+
-			"(scope: %s, authentication: %s, data: %s)",
-		version.Software, listener.Addr(), listenScope,
-		authentication, cfg.data,
-	)
+	log.Printf("ws-server %s listening on %s (data: %s, workspaces: %s)",
+		version.Software, listener.Addr(), config.Data,
+		describeWorkspaces(h.workspaces))
+	for _, warning := range startupWarnings(
+		listener.Addr(), h.workspaces, stream.Unconfigured(),
+	) {
+		log.Print("warning: " + warning)
+	}
 	return serveUntilShutdown(
-		server, listener, shutdownSignal, cfg.timeout,
+		server, listener, shutdownSignal, config.Timeout,
 	)
+}
+
+func describeWorkspaces(workspaces []serverWorkspace) string {
+	var described []string
+	for _, workspace := range workspaces {
+		access := "open"
+		if workspace.credential != nil {
+			access = "secret"
+		}
+		described = append(described, fmt.Sprintf("%s (prefix %s, %s)",
+			workspace.Name, workspace.Prefix, access))
+	}
+	return strings.Join(described, ", ")
+}
+
+// startupWarnings names the open workspaces when the server listens
+// beyond loopback, and the workspaces the database holds that the
+// config no longer names.
+func startupWarnings(
+	address net.Addr, workspaces []serverWorkspace, unconfigured []string,
+) []string {
+	var warnings []string
+	var open []string
+	for _, workspace := range workspaces {
+		if workspace.credential == nil {
+			open = append(open, workspace.Name)
+		}
+	}
+	tcp, ok := address.(*net.TCPAddr)
+	if len(open) > 0 && !(ok && tcp.IP.IsLoopback()) {
+		warnings = append(warnings, fmt.Sprintf("listening on %s, beyond "+
+			"loopback, with open workspaces anyone who can reach it can "+
+			"read and write: %s", address, strings.Join(open, ", ")))
+	}
+	for _, name := range unconfigured {
+		warnings = append(warnings, fmt.Sprintf("the database holds "+
+			"workspace %s, which the config does not name, so its "+
+			"entries are unreachable", name))
+	}
+	return warnings
 }
 
 func serveUntilShutdown(
@@ -124,6 +164,8 @@ func serveUntilShutdown(
 	return nil
 }
 
+// serverWorkTimeout is the share of the request timeout a request's
+// database work may take, leaving a margin to write the response.
 func serverWorkTimeout(total time.Duration) time.Duration {
 	margin := total / 10
 	if margin > 500*time.Millisecond {
@@ -132,26 +174,40 @@ func serverWorkTimeout(total time.Duration) time.Duration {
 	return total - margin
 }
 
-func routes(h *handler) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/status", h.status)
-	mux.HandleFunc("POST /api/entries", h.addEntry)
-	mux.HandleFunc("GET /api/entries", h.search)
-	mux.HandleFunc("GET /api/entries/{id}", h.getEntry)
-	mux.HandleFunc("PATCH /api/entries/{id}", h.editEntry)
-	mux.HandleFunc("DELETE /api/entries/{id}", h.deleteEntry)
-	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusNotFound,
-			api.ErrorResponse{Error: "route not found"})
-	})
-	return mux
+type handler struct {
+	store      *store.Store
+	workspaces []serverWorkspace
+	// workTimeout bounds each request's database work.
+	workTimeout time.Duration
 }
 
-type handler struct {
-	store          *store.Store
-	data           string
-	timeout        time.Duration
-	authentication bool
+func (h *handler) routes() http.Handler {
+	mux := http.NewServeMux()
+	route := func(pattern string, f http.HandlerFunc) {
+		mux.Handle(pattern, requestTimeout(h.workTimeout, f))
+	}
+	route("GET /api/status", h.status)
+	route("GET /api/workspaces", h.listWorkspaces)
+	route("GET /api/workspaces/{workspace}/entries", h.search)
+	route("POST /api/workspaces/{workspace}/entries", h.addEntry)
+	route("GET /api/workspaces/{workspace}/projects", h.projects)
+	route("GET /api/workspaces/{workspace}/messages", h.overview)
+	route("GET /api/entries/{ref}", h.getEntry)
+	route("PATCH /api/entries/{ref}", h.editEntry)
+	route("GET /api/entries/{ref}/tree", h.tree)
+	route("POST /api/entries/{ref}/messages", h.postMessage)
+	route("GET /api/entries/{ref}/messages", h.listMessages)
+	route("PATCH /api/entries/{ref}/messages/{n}", h.editMessage)
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusNotFound, api.CodeRouteNotFound,
+			"route not found")
+	})
+	return h.logRequests(requireAPIVersion(limitRequestBody(mux)))
+}
+
+func requireNoQuery(w http.ResponseWriter, r *http.Request) bool {
+	_, ok := parseQueryOf(w, r)
+	return ok
 }
 
 func (h *handler) status(w http.ResponseWriter, r *http.Request) {
@@ -163,25 +219,54 @@ func (h *handler) status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, api.StatusResponse{
-		Version:        version.Software,
-		Database:       "ok",
-		Data:           h.data,
-		Timeout:        h.timeout.String(),
-		Authentication: h.authentication,
+		Version:  version.Software,
+		Database: "ok",
 	})
 }
 
-func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil || id <= 0 {
-		writeBadRequest(w, "invalid entry id: "+r.PathValue("id"))
-		return 0, false
+func (h *handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
+	if !requireNoQuery(w, r) {
+		return
 	}
-	return id, true
+	response := api.WorkspacesResponse{Workspaces: []api.Workspace{}}
+	for _, workspace := range h.workspaces {
+		response.Workspaces = append(response.Workspaces, api.Workspace{
+			Name: workspace.Name, Prefix: workspace.Prefix,
+		})
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *handler) projects(w http.ResponseWriter, r *http.Request) {
+	if !requireNoQuery(w, r) {
+		return
+	}
+	access, ok := h.access(w, r)
+	if !ok {
+		return
+	}
+	workspace, ok := h.workspace(w, r, access)
+	if !ok {
+		return
+	}
+	projects, err := h.store.Projects(r.Context(), workspace.ID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, api.ProjectsResponse{Projects: projects})
 }
 
 func (h *handler) addEntry(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
+		return
+	}
+	access, ok := h.access(w, r)
+	if !ok {
+		return
+	}
+	workspace, ok := h.workspace(w, r, access)
+	if !ok {
 		return
 	}
 	var request api.AddEntryRequest
@@ -192,35 +277,49 @@ func (h *handler) addEntry(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	entry, err := h.store.Add(r.Context(), request)
+	entry, err := h.store.Add(r.Context(), access, workspace.ID, request)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
+	log.Printf("issued %s", entry.Ref)
 	writeJSON(w, http.StatusCreated, entry)
+}
+
+// pathEntry finds the entry the path's ref names, which the request
+// must be able to read.
+func (h *handler) pathEntry(
+	w http.ResponseWriter, r *http.Request,
+) (store.Access, store.Key, bool) {
+	access, ok := h.access(w, r)
+	if !ok {
+		return store.Access{}, store.Key{}, false
+	}
+	key, ok := h.entryKey(w, access, r.PathValue("ref"))
+	return access, key, ok
 }
 
 func (h *handler) getEntry(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return
 	}
-	id, ok := pathID(w, r)
+	access, key, ok := h.pathEntry(w, r)
 	if !ok {
 		return
 	}
-	entry, err := h.store.Get(r.Context(), id)
+	detail, err := h.store.Detail(r.Context(), access, key)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, entry)
+	writeJSON(w, http.StatusOK, detail)
 }
 
 func (h *handler) editEntry(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return
 	}
-	id, ok := pathID(w, r)
+	access, key, ok := h.pathEntry(w, r)
 	if !ok {
 		return
 	}
@@ -232,7 +331,7 @@ func (h *handler) editEntry(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	entry, err := h.store.Edit(r.Context(), id, request)
+	entry, err := h.store.Edit(r.Context(), access, key, request)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -240,200 +339,33 @@ func (h *handler) editEntry(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entry)
 }
 
-func (h *handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
-	if !requireNoQuery(w, r) {
-		return
-	}
-	id, ok := pathID(w, r)
+const defaultTreeLimit = 30
+
+func (h *handler) tree(w http.ResponseWriter, r *http.Request) {
+	query, ok := parseQueryOf(w, r, "limit", "include-superseded")
 	if !ok {
 		return
 	}
-	if err := h.store.Delete(r.Context(), id); err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-var repeatedQueryParameters = map[string]bool{
-	"subject":    true,
-	"no-subject": true,
-	"body":       true,
-	"no-body":    true,
-	"type":       true,
-	"no-type":    true,
-	"key":        true,
-	"no-key":     true,
-	"content":    true,
-	"no-content": true,
-	"meta":       true,
-	"no-meta":    true,
-
-	"origin-user":              true,
-	"no-origin-user":           true,
-	"origin-host":              true,
-	"no-origin-host":           true,
-	"origin-dir":               true,
-	"no-origin-dir":            true,
-	"origin-claude-session":    true,
-	"no-origin-claude-session": true,
-}
-
-var singleQueryParameters = map[string]bool{
-	"limit":    true,
-	"offset":   true,
-	"order-by": true,
-}
-
-func validateSearchQuery(
-	w http.ResponseWriter, query map[string][]string,
-) bool {
-	keys := make([]string, 0, len(query))
-	conditionCount := 0
-	for key := range query {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		values := query[key]
-		switch {
-		case repeatedQueryParameters[key]:
-			conditionCount += len(values)
-		case singleQueryParameters[key]:
-			if len(values) != 1 {
-				writeBadRequest(w, key+" must be given once")
-				return false
-			}
-		default:
-			writeBadRequest(w,
-				fmt.Sprintf("unknown query parameter %q", key))
-			return false
-		}
-	}
-	if conditionCount > store.MaxSearchConditions {
-		message := fmt.Sprintf(
-			"at most %d search conditions are allowed",
-			store.MaxSearchConditions,
-		)
-		writeBadRequest(w, message)
-		return false
-	}
-	return true
-}
-
-func fieldConditions(
-	query map[string][]string, field string,
-) []store.FieldCond {
-	conditions := make([]store.FieldCond, 0,
-		len(query[field])+len(query["no-"+field]))
-	for _, value := range query[field] {
-		conditions = append(conditions, store.FieldCond{Value: value})
-	}
-	for _, value := range query["no-"+field] {
-		conditions = append(conditions,
-			store.FieldCond{Negate: true, Value: value})
-	}
-	return conditions
-}
-
-func metaConditions(query map[string][]string) ([]store.MetaCond, error) {
-	conditions := make([]store.MetaCond, 0,
-		len(query["meta"])+len(query["no-meta"]))
-	for _, parameter := range []struct {
-		name   string
-		negate bool
-	}{
-		{"meta", false},
-		{"no-meta", true},
-	} {
-		for _, value := range query[parameter.name] {
-			key, metadataValue, err := splitMeta(value)
-			if err != nil {
-				return nil, err
-			}
-			conditions = append(conditions, store.MetaCond{
-				Negate: parameter.negate,
-				Key:    key,
-				Value:  metadataValue,
-			})
-		}
-	}
-	return conditions, nil
-}
-
-func searchInteger(
-	query map[string][]string, key string, defaultValue int,
-) (int, error) {
-	values := query[key]
-	if len(values) == 0 {
-		return defaultValue, nil
-	}
-	if values[0] == "" {
-		return 0, fmt.Errorf("%s requires a value", key)
-	}
-	value, err := strconv.Atoi(values[0])
-	if err != nil {
-		return 0, fmt.Errorf("%s must be an integer", key)
-	}
-	return value, nil
-}
-
-func (h *handler) search(w http.ResponseWriter, r *http.Request) {
-	query, ok := parseQuery(w, r)
-	if !ok || !validateSearchQuery(w, query) {
-		return
-	}
-	metadata, err := metaConditions(query)
+	limit, err := queryInteger(query, "limit", defaultTreeLimit,
+		1, store.MaxTreeLimit)
 	if err != nil {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	limit, err := searchInteger(query, "limit", 20)
-	if err != nil || limit < 1 || limit > 500 {
-		if err != nil {
-			writeBadRequest(w, err.Error())
-		} else {
-			writeBadRequest(w, "limit must be between 1 and 500")
-		}
+	includeSuperseded, err := queryFlag(query, "include-superseded")
+	if err != nil {
+		writeBadRequest(w, err.Error())
 		return
 	}
-	offset, err := searchInteger(query, "offset", 0)
-	if err != nil || offset < 0 {
-		if err != nil {
-			writeBadRequest(w, err.Error())
-		} else {
-			writeBadRequest(w, "offset must be non-negative")
-		}
+	access, key, ok := h.pathEntry(w, r)
+	if !ok {
 		return
 	}
-	filter := store.Filter{
-		Subject:             fieldConditions(query, "subject"),
-		Body:                fieldConditions(query, "body"),
-		Type:                fieldConditions(query, "type"),
-		Key:                 fieldConditions(query, "key"),
-		Content:             fieldConditions(query, "content"),
-		Meta:                metadata,
-		OriginUser:          fieldConditions(query, "origin-user"),
-		OriginHost:          fieldConditions(query, "origin-host"),
-		OriginDir:           fieldConditions(query, "origin-dir"),
-		OriginClaudeSession: fieldConditions(query, "origin-claude-session"),
-		Limit:               limit,
-		Offset:              offset,
-	}
-	if values := query["order-by"]; len(values) != 0 {
-		switch values[0] {
-		case "modified":
-		case "created":
-			filter.OrderByCreation = true
-		default:
-			writeBadRequest(w, "order-by must be 'created' or 'modified'")
-			return
-		}
-	}
-	result, err := h.store.Search(r.Context(), filter)
+	tree, err := h.store.Tree(r.Context(), access, key,
+		includeSuperseded, int(limit))
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, tree)
 }

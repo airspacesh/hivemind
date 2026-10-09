@@ -1,7 +1,5 @@
-// ws is a thin client for ws-server: a shared, chronological work
-// stream of typed entries (notes, todos, decisions, ideas, ...) with
-// metadata key=value pairs pointing to other systems (Jira, PRs,
-// worklogs, paths).
+// ws is the client of ws-server, which hosts workspaces of typed
+// entries with metadata, links, and a chat on each entry.
 package main
 
 import (
@@ -9,590 +7,362 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
-	"os/user"
 	"strings"
 
-	"github.com/Sothatsit/work-stream/internal/api"
-	"github.com/Sothatsit/work-stream/internal/version"
+	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/workstream/internal/version"
 )
 
-const usage = `ws - a shared work stream of timestamped entries
+// The build settings. A build under another name sets them with
+// -ldflags "-X main.programName=forum -X main.envPrefix=... -X
+// main.defaultConfigPath=...". The linker sets only package-level
+// string variables with constant initializers, and silently ignores
+// -X for anything else, so these must stay that way.
+var (
+	programName       = "ws"
+	envPrefix         = "WORKSTREAM"
+	defaultConfigPath = "~/.config/workstream/config.yml"
+)
+
+const usage = `{program} - a client for workstream: shared workspaces of entries
 
 Usage:
-  ws add <type> <subject> [--body <b>] [--meta <key>=<value>]... [shorthands]
-         [--no-recent]
-  ws recent [search flags]
-  ws search [<text>] [search flags]
-  ws entry <id>
-  ws edit <id> [<subject>] [--type <t>] [--subject <s>] [--body <b>]
-          [--meta <key>=<value>]... [--project <p>] [--jira <k>] ...
-          [--no-recent]
-  ws delete <id> [--no-recent]
-  ws status
-  ws secret
-  ws --version
-  ws help
+  {program} add <type> <subject> --project <p> [--body <b>]
+         [--meta <key>=<value>]... [--parent <ref>] [--supersedes <ref>]...
+         [--link <name>=<ref>]... [--no-recent] [--workspace <name>]
+  {program} edit <ref> [<subject>] [--type <t>] [--body <b>]
+         [--meta <key>=<value>]... [--parent <ref>|""] [--supersedes <ref>]...
+         [--link <name>=<ref>]... [--unlink <name>[=<ref>]]... [--no-recent]
+  {program} entry <ref>
+  {program} tree <ref> [--limit 30] [--include-superseded]
+  {program} recent [--flat] [search filters] [--workspace <name>]
+  {program} search [<text>] [--under <ref>] [search filters] [--workspace <name>]
+  {program} list-workspaces
+  {program} list-projects [--workspace <name>]
+  {program} chat send <ref> <message>
+  {program} chat recent [<ref>] [--limit 20] [--workspace <name>]
+  {program} chat read <ref> --since <n> [--limit 20]
+  {program} chat wait <ref> --since <n> [--timeout 10m]
+  {program} chat edit <ref>-m<n> <message>
+  {program} status
+  {program} secret
+  {program} help
+  {program} --version
 
-Entries have a required type (e.g. note, todo, decision, idea), a
-short subject, an optional longer body, and any number of metadata
-key=value pairs (project, jira, pr, repo, ...). Keep the subject to a
-headline and put detail in the body. Lists show only the subject. Open
-an entry with 'ws entry' to see its body and metadata. IDs look like
-e123. Times are stored in UTC and shown in local time.
+Workspaces and entries:
+  A workspace is a named collection of entries, hosted on a server. An
+  entry has a type (e.g. note, todo, decision, idea), a short subject,
+  an optional longer body, and metadata: key=value pairs such as
+  project or jira. Every entry needs a project. An entry's id is its
+  workspace's prefix and a number, like e12, and is called <ref> above.
+  Keep the subject to a headline and put detail in the body. Listings
+  show only the subject, and '{program} entry' shows the rest.
 
-Each entry records its origin: the OS user, host, and directory of the
-ws client, plus the Claude Code session id when set. 'ws add' captures
-this automatically and 'ws entry' shows it. Search it with the origin-*
-flags below.
+  A command that takes a <ref> works in that entry's workspace. Any
+  other command works in the workspace --workspace names, or else the
+  workspace this variable names, or else the one called default:
+  {DEFAULT_WORKSPACE}. '{program} list-workspaces' shows them all.
 
-Metadata keys are lowercase slugs: letters, digits, and single dashes,
-starting with a letter (e.g. jira, build-id). For several of a kind,
-number them: jira-1, jira-2.
+  Each entry and message records the username, and as far as the
+  workspace's metadata_capture allows, the host, directory and Claude
+  Code session it was written from. '{program} entry' shows it, and
+  the origin-* filters search it.
 
-Field limits (characters): type 64, subject 128, body 2048, key 64,
-value 256. An entry can have 16 metadata pairs.
-Type, subject, and metadata values cannot contain control characters.
-
-Shorthands (on add, edit, and search) set or match a specific key:
-  --project, --jira, --confluence
-E.g. ws search --jira 'QUACK-*' is
-ws search --meta 'jira=QUACK-*'.
-
-Search flags:
-  Every filter takes an ASCII-case-insensitive GLOB pattern, using
-  '*', '?', and bracket classes for wildcards. Quote patterns so the
-  shell does not expand them. Nothing is escaped for you, so to match
-  a literal '*', '?', or '[', put it in a bracket class, like
-  --content '*[*]args*' to partial match '*args'.
-
-  --subject, --body, and --content search prose, so they match any
-  part of the text: --subject duck finds 'Count the Ducklings'.
-  --content searches the subject OR body, and a positional <text> is
-  the same as --content. An empty pattern matches only an empty
-  value, so --body "" finds the entries with no body.
-
-  --type, --key, --meta, and the origin filters --origin-user,
-  --origin-host, --origin-dir, and --origin-claude-session name one
-  of a known set, so they match the whole value: --type not does not
-  match 'note', while --type 'not*' does. --meta splits its key=value
-  pattern on the first '='. Shorthands take a value pattern.
-
-  Prefix a flag with 'no-' to exclude. All filters AND together,
-  including repeats.
-
-  --limit <n>, -n <n>    max entries to show (1..500, default 20)
-  --offset <n>           skip the first n matching entries
-  --order-by-modified    newest first by modification time (default)
-  --order-by-creation    newest first by creation time
-  --id-only              print one entry id per line (for scripting)
-
-'ws recent' is 'ws search' with no filters: the 20 most recently
-changed entries. Editing an entry lifts it back to the top, so a fact
-you correct resurfaces instead of staying buried under newer entries.
-
-After a change:
-  'ws add', 'ws edit', and 'ws delete' end by listing the 5 most
-  recently changed entries other than the one you touched, so you see
-  what others have been doing. --no-recent leaves the listing out.
+  Metadata keys are lowercase slugs: letters, digits, and single
+  dashes, starting with a letter (e.g. jira, build-id). For several of
+  a kind, number them: jira-1, jira-2. Field limits (characters): type
+  64, subject 128, body 2048, key 64, value 256, and 16 metadata pairs.
+  Every entry is kept. To withdraw one, edit it, for example to
+  "Retracted: sensitive information".
 
 Editing:
-  'ws edit' changes type, subject, body, and metadata. --body ""
-  clears the body, and type and subject cannot be cleared. Giving a
-  metadata key no value removes it, as in --meta jira= or --jira "".
-  An entry's id, timestamps, and origin record where it came from and
-  cannot be changed.
+  '{program} edit' changes the type, subject, body, metadata and links.
+  --body "" clears the body. Giving a metadata key no value removes it,
+  as in --meta jira= or --jira "". The project can change but not be
+  removed. An entry's id, times and origin cannot change. add and edit
+  end by listing the 5 most recently changed other entries in the
+  workspace, so you see what others are doing. --no-recent leaves the
+  listing out.
 
-Server location:
-  --address, --port, and --timeout before the command override
-  WORK_STREAM_ADDRESS, WORK_STREAM_PORT, and WORK_STREAM_TIMEOUT.
-  Defaults are ` + defaultAddress + `, port ` + defaultPort + `, and 5s.
-  WORK_STREAM_SECRET supplies the optional shared bearer secret.
+Links:
+  A link is a named relationship from one entry to another on the same
+  server, possibly in another workspace, such as --link depends-on=e40.
+  --parent <ref>      the entry this one belongs under. An entry has at
+                      most one parent. --parent "" on edit removes it.
+  --supersedes <ref>  this entry replaces that one, which then drops out
+                      of listings unless they pass --include-superseded.
+                      '{program} entry' still shows it.
+  Neither may loop. --unlink depends-on=e40 removes one link, and
+  --unlink depends-on every link of that name. Editing only links
+  leaves the modified time alone.
+
+Listings:
+  '{program} recent' lists top-level entries, those with no parent,
+  ordered by the latest change anywhere beneath them, with a count of
+  what is below. '{program} recent --flat' lists every entry by its own
+  last change. '{program} search' lists every level, with the path to
+  each match. --under <ref> keeps a search to an entry and what is
+  beneath it. '{program} tree <ref>' shows the path to an entry, then
+  its subtree, at most --limit entries, marking where it was cut. Times
+  show as 13:20 when an output's times all fall on one day, or else as
+  23/07/2025 13:20.
+
+Search filters (recent and search):
+  --subject --body --content --type --key --meta <key>=<value>
+  --origin-user --origin-host --origin-dir --origin-claude-session
+  --project --jira --confluence (shorthands for --meta <key>=<value>)
+  Each takes an ASCII-case-insensitive GLOB pattern: '*', '?' and
+  bracket classes. Quote patterns so the shell leaves them alone, and
+  use a bracket class like [*] for a literal wildcard. --subject, --body
+  and --content (subject or body, also a positional <text>) match any
+  part of the text. The others match the whole value, so --type not
+  does not match note. An empty pattern matches only an empty value.
+  Prefix a filter with no- to exclude, as in --no-type. Filters AND
+  together.
+  --limit <n>, -n <n>    entries to show (default 20)
+  --offset <n>           skip the first n matches
+  --order-by-modified    newest first by modification time (default)
+  --order-by-creation    newest first by creation time (with --flat)
+  --id-only              print one entry id per line
+  --include-superseded   include superseded entries
+
+Chat:
+  Every entry has a chat. A message's id is the entry id, -m, and a
+  number counted from 1 in that entry, like e40-m3. Messages stay in
+  the order they were sent, and an edit overwrites one in place. Your
+  cursor is the number of the last message you read. Keep it, since
+  the server keeps no read state.
+  '{program} chat send' sends a message and prints its id. It leaves
+  your cursor where it was, so keep reading or waiting from the cursor
+  of your last read, which also shows what others sent meanwhile.
+  '{program} chat recent <ref>' shows the newest messages, oldest first,
+  and the cursor. '{program} chat recent' alone shows the newest messages
+  across the workspace, under their entries.
+  '{program} chat read' shows the messages after --since a page at a
+  time, and says how to read the next page.
+  '{program} chat wait' returns as soon as messages arrive after
+  --since, polling every second for 10 seconds and then every 5. It
+  retries a failed connection with backoff, up to 6 times in a row.
+  A send or edit whose outcome is uncertain, like one that timed out,
+  is never retried. Check the chat before sending again.
+
+Config:
+  {program} reads the file {CONFIG_ENV} names, or else
+  {CONFIG}:
+
+    workspaces:
+      default:
+        server: http://localhost:7139
+        prefix: e                    # optional, saves asking servers
+        auth:
+          secret: <secret>           # optional, when the server needs it
+        metadata_capture: all        # all (default), none, or a list of
+                                     # hostname, directory and session
+      personal:
+        server: http://other-host:7140
+
+  A config holding a secret must be readable by its owner alone. A
+  workspace's secret goes only to its own server, for that workspace.
+  For an id whose prefix no workspace sets, {program} asks each
+  configured server in turn which prefixes it hosts. '{program} status'
+  checks every configured workspace, and '{program} secret' generates a
+  secret. This variable sets the request timeout (default 5s):
+  {TIMEOUT_ENV}.
 `
 
-func fail(err error) {
-	fmt.Fprintln(os.Stderr, "ws: "+err.Error())
-	os.Exit(1)
+// usageText is the help, naming this program and its settings.
+func usageText() string {
+	return strings.NewReplacer(
+		"{program}", programName,
+		"{CONFIG}", defaultConfigPath,
+		"{CONFIG_ENV}", configEnvironment(),
+		"{DEFAULT_WORKSPACE}", defaultWorkspaceEnvironment(),
+		"{TIMEOUT_ENV}", timeoutEnvironment(),
+	).Replace(usage)
 }
 
-func failf(format string, args ...any) {
-	fail(fmt.Errorf(format, args...))
+func usageError(synopsis string) error {
+	return fmt.Errorf("usage: %s %s", programName, synopsis)
 }
 
-func extractGlobalFlags(
-	args []string,
-) (rest []string, address, port, timeout string, err error) {
-	seen := map[string]bool{}
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			return args[i+1:], address, port, timeout, nil
-		}
-		name, value, hasValue := arg, "", false
-		if idx := strings.Index(arg, "="); idx >= 0 {
-			name = arg[:idx]
-			value = arg[idx+1:]
-			hasValue = true
-		}
-		if name != "--address" && name != "--port" && name != "--timeout" {
-			return args[i:], address, port, timeout, nil
-		}
-		if seen[name] {
-			return nil, "", "", "", fmt.Errorf("%s given more than once", name)
-		}
-		seen[name] = true
-		if !hasValue {
-			i++
-			if i >= len(args) {
-				return nil, "", "", "", fmt.Errorf("%s requires a value", name)
-			}
-			value = args[i]
-		}
-		if value == "" {
-			return nil, "", "", "", fmt.Errorf("%s requires a value", name)
-		}
-		if name == "--address" {
-			address = value
-		} else if name == "--port" {
-			port = value
-		} else {
-			timeout = value
-		}
+func cmdSecret(args []string) error {
+	if len(args) != 0 {
+		return usageError("secret")
 	}
-	return nil, address, port, timeout, nil
-}
-
-func main() {
-	if len(os.Args) < 2 {
-		fmt.Print(usage)
-		return
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return fmt.Errorf("generating a secret: %w", err)
 	}
-	args, address, port, timeout, err := extractGlobalFlags(os.Args[1:])
-	if err != nil {
-		fail(err)
-	}
-	if len(args) == 0 {
-		fmt.Print(usage)
-		return
-	}
-	command := args[0]
-	args = args[1:]
-
-	switch command {
-	case "help", "--help", "-h":
-		fmt.Print(usage)
-		return
-	case "--version":
-		if len(args) != 0 {
-			failf("usage: ws --version")
-		}
-		fmt.Printf("ws %s\n", version.Software)
-		return
-	case "secret":
-		cmdSecret(args)
-		return
-	}
-
-	c, err := newClient(address, port, timeout)
-	if err != nil {
-		fail(err)
-	}
-
-	switch command {
-	case "add":
-		cmdAdd(c, args)
-	case "recent", "search":
-		cmdSearch(c, command, args)
-	case "entry":
-		cmdEntry(c, args)
-	case "edit":
-		cmdEdit(c, args)
-	case "delete":
-		cmdDelete(c, args)
-	case "status":
-		cmdStatus(c, args)
-	default:
-		failf("unknown command %q (run 'ws help')", command)
-	}
-}
-
-const recentAfterChangeCount = 5
-
-// printRecentAfterChange lists the most recently changed entries other
-// than the one just added, edited, or deleted. Its id is dropped after
-// the fetch rather than skipped by offset, because another agent's
-// write can land between the change and the listing and take the top
-// slot.
-func printRecentAfterChange(c *client, changedID int64) error {
-	params := url.Values{}
-	params.Set("limit", fmt.Sprint(recentAfterChangeCount+1))
-	result, err := c.search(params)
-	if err != nil {
-		return err
-	}
-
-	var others []api.Entry
-	for _, e := range result.Entries {
-		if e.ID == changedID {
-			continue
-		}
-		if len(others) == recentAfterChangeCount {
-			break
-		}
-		others = append(others, e)
-	}
-	if len(others) == 0 {
-		return nil
-	}
-
-	fmt.Println()
-	fmt.Println("Other recent entries:")
-	printEntryLines(others, false)
+	fmt.Println(base64.RawURLEncoding.EncodeToString(secret))
 	return nil
 }
 
-func cmdAdd(c *client, args []string) {
-	spec := flagSpec{
-		strs:   []string{"--body"},
-		bools:  []string{"--no-recent"},
-		repeat: append([]string{"--meta"}, shorthandFlags()...),
-	}
-	p, err := parseArgs(args, spec)
-	if err != nil {
-		fail(err)
-	}
-	if len(p.pos) != 2 {
-		failf("usage: ws add <type> <subject> [--body <b>] " +
-			"[--meta <key>=<value>]... [--project <p>] [--jira <k>] ... " +
-			"[--no-recent]")
-	}
-	metadata := collectMetadata(p)
-	origin, err := captureOrigin()
-	if err != nil {
-		fail(err)
-	}
-	req := api.AddEntryRequest{
-		Type:     p.pos[0],
-		Subject:  p.pos[1],
-		Body:     p.strs["--body"],
-		Metadata: metadata,
-		Origin:   origin,
-	}
-	if err := req.Validate(); err != nil {
-		fail(err)
-	}
-	entry, err := c.addEntry(req)
-	if err != nil {
-		fail(err)
-	}
-	fmt.Printf("Added entry [e%d].\n", entry.ID)
-
-	if p.bools["--no-recent"] {
-		return
-	}
-	if err := printRecentAfterChange(c, entry.ID); err != nil {
-		failf("the entry was added, but listing recent entries "+
-			"failed: %w", err)
-	}
-}
-
-// collectMetadata gathers the pairs given by --meta and the shorthand
-// flags, which 'ws add' and 'ws edit' accept alike.
-func collectMetadata(p *parsedArgs) map[string]string {
-	metadata := map[string]string{}
-	set := func(key, value string) {
-		if _, exists := metadata[key]; exists {
-			failf("metadata key %q set more than once; for several use "+
-				"--meta %s-1=... --meta %s-2=...", key, key, key)
-		}
-		metadata[key] = value
-	}
-	for _, kv := range p.lists["--meta"] {
-		key, value, found := strings.Cut(kv, "=")
-		if !found {
-			failf("invalid --meta %q (expected <key>=<value>)", kv)
-		}
-		set(key, value)
-	}
-	for _, key := range shorthandKeys {
-		for _, value := range p.lists["--"+key] {
-			set(key, value)
-		}
-	}
-	return metadata
-}
-
-func shorthandFlags() []string {
-	flags := make([]string, len(shorthandKeys))
-	for i, key := range shorthandKeys {
-		flags[i] = "--" + key
-	}
-	return flags
-}
-
-const claudeSessionEnvironment = "CLAUDE_CODE_SESSION_ID"
-
-// captureOrigin records where this entry is being created. Host and
-// directory are required, so a failure to read either is fatal. User
-// falls back to $USER, and the Claude session is empty outside Claude
-// Code.
-func captureOrigin() (api.Origin, error) {
-	host, err := os.Hostname()
-	if err != nil {
-		return api.Origin{}, fmt.Errorf("reading hostname: %w", err)
-	}
-	dir, err := os.Getwd()
-	if err != nil {
-		return api.Origin{}, fmt.Errorf("reading working directory: %w", err)
-	}
-	name := ""
-	if current, err := user.Current(); err == nil {
-		name = current.Username
-	} else {
-		name = os.Getenv("USER")
-	}
-	return api.Origin{
-		User:          name,
-		Host:          host,
-		Dir:           dir,
-		ClaudeSession: os.Getenv(claudeSessionEnvironment),
-	}, nil
-}
-
-func cmdSearch(c *client, command string, args []string) {
-	p, err := parseArgs(args, searchFlagSpec())
-	if err != nil {
-		fail(err)
-	}
-	if len(p.pos) > 1 {
-		failf("at most one positional <text> argument is allowed "+
-			"(got %d)", len(p.pos))
-	}
-
-	params := url.Values{}
-	if len(p.pos) == 1 {
-		if command == "recent" {
-			failf("'ws recent' takes no <text> argument " +
-				"(use 'ws search <text>')")
-		}
-		params.Add("content", p.pos[0])
-	}
-	for flag, values := range p.lists {
-		if key, negate, ok := shorthandFor(flag); ok {
-			param := "meta"
-			if negate {
-				param = "no-meta"
-			}
-			for _, v := range values {
-				params.Add(param, key+"="+v)
-			}
-			continue
-		}
-		param := strings.TrimPrefix(flag, "--")
-		for _, v := range values {
-			if (param == "meta" || param == "no-meta") &&
-				!strings.Contains(v, "=") {
-				failf("%s requires <key>=<value>", flag)
-			}
-			params.Add(param, v)
-		}
-	}
-
-	if p.has("--order-by-creation") && p.has("--order-by-modified") {
-		failf("--order-by-creation and --order-by-modified " +
-			"cannot be combined")
-	}
-	limit := 20
-	if p.has("--limit") {
-		if limit, err = parseLimit(p.strs["--limit"]); err != nil {
-			fail(err)
-		}
-	}
-	offset := 0
-	if p.has("--offset") {
-		if offset, err = parseOffset(p.strs["--offset"]); err != nil {
-			fail(err)
-		}
-	}
-	params.Set("limit", fmt.Sprint(limit))
-	params.Set("offset", fmt.Sprint(offset))
-	orderByCreation := p.bools["--order-by-creation"]
-	if orderByCreation {
-		params.Set("order-by", "created")
-	}
-
-	result, err := c.search(params)
-	if err != nil {
-		fail(err)
-	}
-	printSearchResult(result, offset, limit, orderByCreation,
-		p.bools["--id-only"])
-}
-
-func cmdEntry(c *client, args []string) {
-	if len(args) != 1 {
-		failf("usage: ws entry <id>")
-	}
-	id, err := parseEntryID(args[0])
-	if err != nil {
-		fail(err)
-	}
-	entry, err := c.getEntry(id)
-	if err != nil {
-		fail(err)
-	}
-	printEntryDetail(entry)
-}
-
-func cmdEdit(c *client, args []string) {
-	spec := flagSpec{
-		strs:   []string{"--type", "--subject", "--body"},
-		bools:  []string{"--no-recent"},
-		repeat: append([]string{"--meta"}, shorthandFlags()...),
-	}
-	p, err := parseArgs(args, spec)
-	if err != nil {
-		fail(err)
-	}
-	if len(p.pos) < 1 || len(p.pos) > 2 {
-		failf("usage: ws edit <id> [<subject>] [--type <t>] " +
-			"[--subject <s>] [--body <b>] [--meta <key>=<value>]... " +
-			"[--project <p>] [--jira <k>] ... [--no-recent]")
-	}
-	id, err := parseEntryID(p.pos[0])
-	if err != nil {
-		fail(err)
-	}
-	req := api.EditEntryRequest{}
-	if p.has("--type") {
-		entryType := p.strs["--type"]
-		req.Type = &entryType
-	}
-	if len(p.pos) == 2 {
-		if p.has("--subject") {
-			failf("positional <subject> and --subject are both given; " +
-				"use one or the other")
-		}
-		req.Subject = &p.pos[1]
-	} else if p.has("--subject") {
-		subject := p.strs["--subject"]
-		req.Subject = &subject
-	}
-	if p.has("--body") {
-		body := p.strs["--body"]
-		req.Body = &body
-	}
-	if metadata := collectMetadata(p); len(metadata) > 0 {
-		req.Metadata = metadata
-	}
-	if err := req.Validate(); err != nil {
-		fail(err)
-	}
-	entry, err := c.editEntry(id, req)
-	if err != nil {
-		fail(err)
-	}
-	fmt.Printf("Edited entry [e%d].\n", entry.ID)
-
-	if p.bools["--no-recent"] {
-		return
-	}
-	if err := printRecentAfterChange(c, entry.ID); err != nil {
-		failf("the entry was edited, but listing recent entries "+
-			"failed: %w", err)
-	}
-}
-
-func cmdDelete(c *client, args []string) {
-	p, err := parseArgs(args, flagSpec{bools: []string{"--no-recent"}})
-	if err != nil {
-		fail(err)
-	}
-	if len(p.pos) != 1 {
-		failf("usage: ws delete <id> [--no-recent]")
-	}
-	id, err := parseEntryID(p.pos[0])
-	if err != nil {
-		fail(err)
-	}
-	if err := c.deleteEntry(id); err != nil {
-		fail(err)
-	}
-	fmt.Printf("Deleted entry [e%d].\n", id)
-
-	if p.bools["--no-recent"] {
-		return
-	}
-	if err := printRecentAfterChange(c, id); err != nil {
-		failf("the entry was deleted, but listing recent entries "+
-			"failed: %w", err)
-	}
-}
-
-func cmdStatus(c *client, args []string) {
+// cmdListWorkspaces shows the configured workspaces in config order,
+// each with the prefix its server gives it.
+func cmdListWorkspaces(c *client, args []string) error {
 	if len(args) != 0 {
-		failf("usage: ws status")
+		return usageError("list-workspaces")
 	}
-	status, err := c.status()
-	if err != nil {
-		var responseErr *serverResponseError
-		if errors.As(err, &responseErr) &&
-			responseErr.StatusCode == http.StatusUnauthorized {
-			fmt.Println("address: " + c.baseURL)
-			fmt.Println("connectivity: reachable")
-			if c.secret == "" {
-				fmt.Println("secret: required; WORK_STREAM_SECRET is not set")
-			} else {
-				fmt.Println("secret: WORK_STREAM_SECRET was rejected")
+	chosen := defaultWorkspace()
+	failed := false
+	for _, workspace := range c.config.workspaces {
+		line := workspace.name
+		if workspace.name == chosen {
+			line += " (default)"
+		}
+		listed, err := c.listWorkspaces(workspace.server)
+		prefix := workspace.prefix
+		if err != nil && prefix == "" {
+			prefix = "unknown"
+		}
+		if err == nil {
+			prefix = "not hosted there"
+			for _, hosted := range listed {
+				if hosted.Name == workspace.name {
+					prefix = hosted.Prefix
+				}
 			}
-			failf("authentication failed")
 		}
-		if errors.As(err, &responseErr) && c.secret != "" &&
-			responseErr.Message == "server authentication is disabled" {
-			fmt.Println("address: " + c.baseURL)
-			fmt.Println("connectivity: reachable")
-			fmt.Println("secret: disabled; WORK_STREAM_SECRET is set locally")
-			failf("server authentication is disabled")
+		line += ": prefix " + prefix + " on " + workspace.server
+		if workspace.secret != "" {
+			line += ", with a secret"
 		}
-		fail(err)
+		if err != nil {
+			line += fmt.Sprintf(" (the server cannot be asked: %v)", err)
+			failed = true
+		}
+		fmt.Println(line)
 	}
-
-	fmt.Println("address: " + c.baseURL)
-	fmt.Println("connectivity: ok")
-	fmt.Println("server: " + status.Version)
-	fmt.Println("database: " + status.Database)
-	fmt.Println("data: " + status.Data)
-	fmt.Printf("timeout: client %s, server %s\n", c.timeout, status.Timeout)
-	if status.Authentication {
-		fmt.Println("secret: enabled; local value accepted")
-		return
+	if failed {
+		return errors.New("some servers could not be asked")
 	}
-	if c.secret != "" {
-		fmt.Println("secret: disabled; WORK_STREAM_SECRET is set locally")
-		failf("server authentication is disabled")
-	}
-	fmt.Println("secret: disabled")
-	fmt.Println("hint: run 'ws secret' and set WORK_STREAM_SECRET on " +
-		"the server and clients")
+	return nil
 }
 
-func cmdSecret(args []string) {
-	if len(args) != 0 {
-		failf("usage: ws secret")
+// checkWorkspace checks one configured workspace: that its server is
+// up, hosts it under the configured prefix, and lets this client read
+// it.
+func (c *client) checkWorkspace(workspace workspaceConfig) (string, error) {
+	t := targetOf(workspace)
+	var status api.StatusResponse
+	if err := c.do(t, "GET", "/api/status", nil, &status); err != nil {
+		return "", err
 	}
-	secret := os.Getenv(secretEnvironment)
-	if secret != "" {
-		if err := validateSecret(secret); err != nil {
-			fail(err)
+	listed, err := c.listWorkspaces(workspace.server)
+	if err != nil {
+		return "", err
+	}
+	prefix := ""
+	for _, hosted := range listed {
+		if hosted.Name == workspace.name {
+			prefix = hosted.Prefix
 		}
-		fmt.Println("WORK_STREAM_SECRET is already set.")
-		return
 	}
-	secretBytes := make([]byte, 32)
-	if _, err := rand.Read(secretBytes); err != nil {
-		fail(fmt.Errorf("generating secret: %w", err))
+	if prefix == "" {
+		return "", fmt.Errorf("%s hosts no workspace %s", workspace.server,
+			workspace.name)
 	}
-	fmt.Println(base64.RawURLEncoding.EncodeToString(secretBytes))
+	if workspace.prefix != "" && workspace.prefix != prefix {
+		return "", fmt.Errorf("%s gives workspace %s prefix %s, but %s "+
+			"sets prefix %s", workspace.server, workspace.name, prefix,
+			c.config.path, workspace.prefix)
+	}
+	if _, err := c.projects(t); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("prefix %s on %s (ws-server %s, database %s), "+
+		"readable", prefix, workspace.server, status.Version,
+		status.Database), nil
+}
+
+func cmdStatus(c *client, args []string) error {
+	if len(args) != 0 {
+		return usageError("status")
+	}
+	fmt.Println("config: " + c.config.path)
+	fmt.Printf("timeout: %s\n", c.timeout)
+	failed := false
+	for _, workspace := range c.config.workspaces {
+		summary, err := c.checkWorkspace(workspace)
+		if err != nil {
+			summary = "FAILED: " + err.Error()
+			failed = true
+		}
+		fmt.Printf("%s: %s\n", workspace.name, summary)
+	}
+	if failed {
+		return errors.New("some workspaces failed their check")
+	}
+	return nil
+}
+
+// run runs one command line, apart from the program name.
+func run(args []string) error {
+	if len(args) == 0 {
+		fmt.Print(usageText())
+		return nil
+	}
+	command, args := args[0], args[1:]
+	switch command {
+	case "help", "--help", "-h":
+		fmt.Print(usageText())
+		return nil
+	case "--version":
+		if len(args) != 0 {
+			return usageError("--version")
+		}
+		fmt.Printf("%s %s\n", programName, version.Software)
+		return nil
+	case "secret":
+		return cmdSecret(args)
+	}
+
+	path, err := configPath()
+	if err != nil {
+		return err
+	}
+	config, err := loadConfig(path)
+	if errors.Is(err, errNoConfig) {
+		return errors.New(missingConfigHelp(path))
+	}
+	if err != nil {
+		return err
+	}
+	timeout, err := requestTimeout()
+	if err != nil {
+		return err
+	}
+	c := newClient(config, timeout)
+
+	switch command {
+	case "add":
+		return cmdAdd(c, args)
+	case "edit":
+		return cmdEdit(c, args)
+	case "entry":
+		return cmdEntry(c, args)
+	case "tree":
+		return cmdTree(c, args)
+	case "recent", "search":
+		return cmdSearch(c, command, args)
+	case "list-workspaces":
+		return cmdListWorkspaces(c, args)
+	case "list-projects":
+		return cmdListProjects(c, args)
+	case "chat":
+		return cmdChat(c, args)
+	case "status":
+		return cmdStatus(c, args)
+	default:
+		return fmt.Errorf("unknown command %q. Run '%s help'", command,
+			programName)
+	}
+}
+
+func main() {
+	if err := run(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", programName, err)
+		os.Exit(1)
+	}
 }

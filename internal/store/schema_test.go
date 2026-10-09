@@ -4,14 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/airspacesh/workstream/internal/api"
 )
 
-func TestOpenCreatesAndReopensVersionOne(t *testing.T) {
+func TestOpenCreatesAndReopensCurrentVersion(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "stream.db")
 	store := openStoreAt(t, path, testBusyTimeout)
@@ -37,7 +40,7 @@ func TestOpenCreatesAndReopensVersionOne(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatalf("closing first store: %v", err)
 	}
-	reopened, err := Open(ctx, path, testBusyTimeout)
+	reopened, err := Open(ctx, path, testBusyTimeout, testWorkspaces)
 	if err != nil {
 		t.Fatalf("reopening store: %v", err)
 	}
@@ -53,7 +56,7 @@ func TestOpenEscapesSQLitePath(t *testing.T) {
 		t.Fatalf("creating data directory: %v", err)
 	}
 	path := filepath.Join(dir, "stream#1%.db")
-	store, err := Open(ctx, path, testBusyTimeout)
+	store, err := Open(ctx, path, testBusyTimeout, testWorkspaces)
 	if err != nil {
 		t.Fatalf("opening store: %v", err)
 	}
@@ -65,35 +68,42 @@ func TestOpenEscapesSQLitePath(t *testing.T) {
 	}
 }
 
-func TestConcurrentFirstOpenCreatesOneSchema(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "stream.db")
-	start := make(chan struct{})
-	results := make(chan struct {
-		store *Store
-		err   error
-	}, 2)
-	for range 2 {
-		go func() {
-			<-start
-			ctx, cancel := context.WithTimeout(
-				context.Background(), 5*time.Second,
-			)
-			defer cancel()
-			store, err := Open(ctx, path, testBusyTimeout)
-			results <- struct {
-				store *Store
-				err   error
-			}{store, err}
-		}()
-	}
-	close(start)
-	for range 2 {
-		result := <-results
-		if result.err != nil {
-			t.Fatalf("concurrent open: %v", result.err)
+// TestConcurrentFirstOpensAllSucceed opens one new database from
+// several connections at once, many times over, since the race between
+// them is narrow.
+func TestConcurrentFirstOpensAllSucceed(t *testing.T) {
+	const rounds, opens = 20, 4
+	for round := range rounds {
+		path := filepath.Join(t.TempDir(), fmt.Sprintf("stream%d.db", round))
+		start := make(chan struct{})
+		results := make(chan error, opens)
+		for range opens {
+			go func() {
+				<-start
+				ctx, cancel := context.WithTimeout(
+					context.Background(), 2*contendedOpenBusyTimeout,
+				)
+				defer cancel()
+				store, err := Open(ctx, path, contendedOpenBusyTimeout,
+					testWorkspaces)
+				if err == nil {
+					var mode string
+					err = store.db.QueryRow(`PRAGMA journal_mode`).Scan(&mode)
+					if err == nil && mode != "wal" {
+						err = fmt.Errorf("journal mode %q, want wal", mode)
+					}
+					if closeErr := store.Close(); err == nil {
+						err = closeErr
+					}
+				}
+				results <- err
+			}()
 		}
-		if err := result.store.Close(); err != nil {
-			t.Fatalf("closing store: %v", err)
+		close(start)
+		for range opens {
+			if err := <-results; err != nil {
+				t.Fatalf("round %d: concurrent first open: %v", round, err)
+			}
 		}
 	}
 }
@@ -120,6 +130,16 @@ func TestOpenRejectsUnrecognizedDatabases(t *testing.T) {
 			"empty database",
 		},
 		{
+			"database from before workspaces",
+			func(t *testing.T, path string) {
+				rawExec(t, path, fmt.Sprintf(`
+					CREATE TABLE entries(id INTEGER PRIMARY KEY);
+					PRAGMA application_id = %d;
+					PRAGMA user_version = 3`, legacyApplicationID))
+			},
+			"starts fresh databases only",
+		},
+		{
 			"wrong application",
 			func(t *testing.T, path string) {
 				rawExec(t, path, `
@@ -133,7 +153,8 @@ func TestOpenRejectsUnrecognizedDatabases(t *testing.T) {
 			"newer version",
 			func(t *testing.T, path string) {
 				createValidDatabase(t, path)
-				rawExec(t, path, `PRAGMA user_version = 2`)
+				rawExec(t, path, fmt.Sprintf(
+					`PRAGMA user_version = %d`, databaseVersion+1))
 			},
 			"newer",
 		},
@@ -158,7 +179,7 @@ func TestOpenRejectsUnrecognizedDatabases(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "test.db")
 			test.setup(t, path)
-			store, err := Open(ctx, path, testBusyTimeout)
+			store, err := Open(ctx, path, testBusyTimeout, testWorkspaces)
 			if store != nil {
 				store.Close()
 				t.Fatal("Open returned a store for invalid database")
@@ -170,6 +191,70 @@ func TestOpenRejectsUnrecognizedDatabases(t *testing.T) {
 				t.Fatalf("Open error = %q, want text %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestOpenSyncsWorkspacesWithTheConfig(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "sync.db")
+	reopen := func(workspaces ...api.Workspace) *Store {
+		t.Helper()
+		store, err := Open(ctx, path, testBusyTimeout, workspaces)
+		if err != nil {
+			t.Fatalf("opening with %v: %v", workspaces, err)
+		}
+		return store
+	}
+	first := reopen(api.Workspace{Name: "default", Prefix: "e"},
+		api.Workspace{Name: "personal", Prefix: "p"})
+	work := addTo(t, first, "default",
+		api.AddEntryRequest{Type: "note", Subject: "work"})
+	private := addTo(t, first, "personal",
+		api.AddEntryRequest{Type: "note", Subject: "private"})
+	ids := map[string]int64{}
+	for _, workspace := range first.Workspaces() {
+		ids[workspace.Name] = workspace.ID
+	}
+	first.Close()
+
+	swapped := reopen(api.Workspace{Name: "default", Prefix: "p"},
+		api.Workspace{Name: "personal", Prefix: "e"})
+	for _, workspace := range swapped.Workspaces() {
+		if ids[workspace.Name] != workspace.ID {
+			t.Fatalf("workspace %s changed id on reopening",
+				workspace.Name)
+		}
+	}
+	got := mustGet(t, swapped, api.Ref{Prefix: "p", ID: work.Ref.ID})
+	if got.Subject != "work" {
+		t.Fatalf("after swapping prefixes, p1 = %q, want the work entry",
+			got.Subject)
+	}
+	swapped.Close()
+
+	renamed := reopen(api.Workspace{Name: "default", Prefix: "e"},
+		api.Workspace{Name: "private", Prefix: "p"})
+	if got := renamed.Unconfigured(); !reflect.DeepEqual(
+		got, []string{"personal"}) {
+		t.Fatalf("unconfigured = %v, want personal", got)
+	}
+	if _, err := renamed.Detail(ctx, everyAccess(renamed), Key{
+		Workspace: workspaceID(t, renamed, "private"), ID: private.Ref.ID,
+	}); !errors.Is(err, ErrEntryNotFound) {
+		t.Fatalf("a new workspace reached another's entry: %v", err)
+	}
+	renamed.Close()
+
+	restored := reopen(api.Workspace{Name: "default", Prefix: "e"},
+		api.Workspace{Name: "personal", Prefix: "q"})
+	defer restored.Close()
+	if got := restored.Unconfigured(); !reflect.DeepEqual(
+		got, []string{"private"}) {
+		t.Fatalf("unconfigured = %v, want private", got)
+	}
+	if got := mustGet(t, restored, api.Ref{Prefix: "q",
+		ID: private.Ref.ID}); got.Subject != "private" {
+		t.Fatalf("q1 = %q, want the restored private entry", got.Subject)
 	}
 }
 
@@ -194,7 +279,8 @@ func rawExec(t *testing.T, path, statement string) {
 
 func createValidDatabase(t *testing.T, path string) {
 	t.Helper()
-	store, err := Open(context.Background(), path, testBusyTimeout)
+	store, err := Open(context.Background(), path, testBusyTimeout,
+		testWorkspaces)
 	if err != nil {
 		t.Fatalf("creating valid database: %v", err)
 	}

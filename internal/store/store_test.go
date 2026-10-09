@@ -2,25 +2,37 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/Sothatsit/work-stream/internal/api"
+	"github.com/airspacesh/workstream/internal/api"
 )
 
 const testBusyTimeout = time.Second
 
-func openStoreAt(
+// contendedOpenBusyTimeout is how long an open waits while another
+// open creates the schema. That holds the write lock across fsyncs,
+// which take over a second each on slow shared
+// storage, so testBusyTimeout is too short.
+const contendedOpenBusyTimeout = 30 * time.Second
+
+var testWorkspaces = []api.Workspace{
+	{Name: "default", Prefix: "e"},
+	{Name: "personal", Prefix: "p"},
+}
+
+func openStoreWith(
 	t *testing.T,
 	path string,
 	busyTimeout time.Duration,
+	workspaces []api.Workspace,
 ) *Store {
 	t.Helper()
-	store, err := Open(context.Background(), path, busyTimeout)
+	store, err := Open(context.Background(), path, busyTimeout, workspaces)
 	if err != nil {
 		t.Fatalf("opening store: %v", err)
 	}
@@ -32,6 +44,13 @@ func openStoreAt(
 	return store
 }
 
+func openStoreAt(
+	t *testing.T, path string, busyTimeout time.Duration,
+) *Store {
+	t.Helper()
+	return openStoreWith(t, path, busyTimeout, testWorkspaces)
+}
+
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	return openStoreAt(
@@ -39,6 +58,48 @@ func openTestStore(t *testing.T) *Store {
 	)
 }
 
+func workspaceID(t *testing.T, store *Store, name string) int64 {
+	t.Helper()
+	for _, workspace := range store.Workspaces() {
+		if workspace.Name == name {
+			return workspace.ID
+		}
+	}
+	t.Fatalf("no workspace %s", name)
+	return 0
+}
+
+// accessTo can read the named workspaces.
+func accessTo(t *testing.T, store *Store, names ...string) Access {
+	t.Helper()
+	var ids []int64
+	for _, name := range names {
+		ids = append(ids, workspaceID(t, store, name))
+	}
+	return NewAccess(ids...)
+}
+
+func everyAccess(store *Store) Access {
+	var ids []int64
+	for _, workspace := range store.Workspaces() {
+		ids = append(ids, workspace.ID)
+	}
+	return NewAccess(ids...)
+}
+
+func addTo(
+	t *testing.T, store *Store, workspace string, req api.AddEntryRequest,
+) api.Entry {
+	t.Helper()
+	entry, err := store.Add(context.Background(), everyAccess(store),
+		workspaceID(t, store, workspace), req)
+	if err != nil {
+		t.Fatalf("adding entry: %v", err)
+	}
+	return entry
+}
+
+// mustAdd adds an entry to the default workspace.
 func mustAdd(
 	t *testing.T,
 	store *Store,
@@ -48,13 +109,102 @@ func mustAdd(
 	metadata map[string]string,
 ) api.Entry {
 	t.Helper()
-	entry, err := store.Add(context.Background(), api.AddEntryRequest{
+	return addTo(t, store, "default", api.AddEntryRequest{
 		Type: typ, Subject: subject, Body: body, Metadata: metadata,
 	})
+}
+
+func link(name string, ref api.Ref) api.Link {
+	return api.Link{Name: name, Ref: ref}
+}
+
+func addLinks(
+	t *testing.T, store *Store, ref api.Ref, links ...api.Link,
+) error {
+	t.Helper()
+	_, err := store.Edit(context.Background(), everyAccess(store),
+		store.mustKey(ref), api.EditEntryRequest{AddLinks: links})
+	return err
+}
+
+func mustGet(t *testing.T, store *Store, ref api.Ref) api.EntryDetail {
+	t.Helper()
+	detail, err := store.Detail(context.Background(), everyAccess(store),
+		store.mustKey(ref))
 	if err != nil {
-		t.Fatalf("adding entry: %v", err)
+		t.Fatalf("getting %s: %v", ref, err)
 	}
-	return entry
+	return detail
+}
+
+func entryRefsOf(entries []api.ListedEntry) []string {
+	refs := make([]string, len(entries))
+	for i, entry := range entries {
+		refs[i] = entry.Ref.String()
+	}
+	return refs
+}
+
+func refStrings(refs ...api.Ref) []string {
+	texts := make([]string, len(refs))
+	for i, ref := range refs {
+		texts[i] = ref.String()
+	}
+	return texts
+}
+
+func TestEntryIDsCountFromOnePerWorkspace(t *testing.T) {
+	store := openTestStore(t)
+	var got []string
+	for _, workspace := range []string{"default", "personal", "default",
+		"default", "personal"} {
+		entry := addTo(t, store, workspace,
+			api.AddEntryRequest{Type: "note", Subject: "s"})
+		got = append(got, entry.Ref.String())
+	}
+	want := fmt.Sprint([]string{"e1", "p1", "e2", "e3", "p2"})
+	if fmt.Sprint(got) != want {
+		t.Fatalf("issued %v, want %v", got, want)
+	}
+}
+
+func TestConcurrentAddsGetUniqueIDsCountingFromOne(t *testing.T) {
+	store := openTestStore(t)
+	const perWorkspace = 15
+	var wg sync.WaitGroup
+	refs := make(chan api.Ref, 2*perWorkspace)
+	for i := range 2 * perWorkspace {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			workspace := []string{"default", "personal"}[i%2]
+			entry, err := store.Add(context.Background(),
+				everyAccess(store), workspaceID(t, store, workspace),
+				api.AddEntryRequest{Type: "note", Subject: "s"})
+			if err != nil {
+				t.Errorf("adding entry: %v", err)
+				return
+			}
+			refs <- entry.Ref
+		}()
+	}
+	wg.Wait()
+	close(refs)
+
+	seen := map[api.Ref]bool{}
+	for ref := range refs {
+		if seen[ref] {
+			t.Fatalf("%s was issued twice", ref)
+		}
+		seen[ref] = true
+	}
+	for _, prefix := range []string{"e", "p"} {
+		for id := int64(1); id <= perWorkspace; id++ {
+			if !seen[api.Ref{Prefix: prefix, ID: id}] {
+				t.Fatalf("%s%d was never issued: %v", prefix, id, seen)
+			}
+		}
+	}
 }
 
 func TestGeneratedColumnsFollowWrites(t *testing.T) {
@@ -76,8 +226,10 @@ func TestGeneratedColumnsFollowWrites(t *testing.T) {
 			SELECT e.type_lower, e.subject_lower, e.body_lower,
 				metadata.value_lower
 			FROM entries AS e
-			JOIN entry_metadata AS metadata ON metadata.entry_id = e.id
-			WHERE e.id = ?`, entry.ID,
+			JOIN entry_metadata AS metadata
+				ON metadata.workspace_id = e.workspace_id
+				AND metadata.entry_id = e.id
+			WHERE e.id = ?`, entry.Ref.ID,
 		).Scan(&typ, &subject, &body, &value)
 		if err != nil {
 			t.Fatalf("reading folded values: %v", err)
@@ -96,10 +248,11 @@ func TestGeneratedColumnsFollowWrites(t *testing.T) {
 	entryType := "NOTE"
 	subject := "CHANGED Æ"
 	body := "CHANGED Σ"
-	if _, err := store.Edit(ctx, entry.ID, api.EditEntryRequest{
-		Type: &entryType, Subject: &subject, Body: &body,
-		Metadata: map[string]string{"jira": "CHANGED Æ"},
-	}); err != nil {
+	if _, err := store.Edit(ctx, everyAccess(store),
+		store.mustKey(entry.Ref), api.EditEntryRequest{
+			Type: &entryType, Subject: &subject, Body: &body,
+			Metadata: map[string]string{"jira": "CHANGED Æ"},
+		}); err != nil {
 		t.Fatalf("editing entry: %v", err)
 	}
 	assertFolded("note", "changed Æ", "changed Σ", "changed Æ")
@@ -111,14 +264,15 @@ func TestMutationRollsBackWhenResultCannotBeRead(t *testing.T) {
 	_, err := store.db.ExecContext(ctx, `
 		CREATE TRIGGER corrupt_new_entry AFTER INSERT ON entries
 		BEGIN
-			UPDATE entries SET created_utc = 'bad' WHERE id = NEW.id;
+			UPDATE entries SET created_utc = 'bad'
+			WHERE workspace_id = NEW.workspace_id AND id = NEW.id;
 		END`)
 	if err != nil {
 		t.Fatalf("creating trigger: %v", err)
 	}
-	_, err = store.Add(ctx, api.AddEntryRequest{
-		Type: "note", Subject: "must roll back",
-	})
+	_, err = store.Add(ctx, everyAccess(store),
+		workspaceID(t, store, "default"),
+		api.AddEntryRequest{Type: "note", Subject: "must roll back"})
 	if err == nil {
 		t.Fatal("add succeeded despite unreadable result")
 	}
@@ -133,39 +287,7 @@ func TestMutationRollsBackWhenResultCannotBeRead(t *testing.T) {
 	}
 }
 
-func TestDeletedIDsAreNotReused(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t)
-	first := mustAdd(t, store, "note", "first", "", nil)
-	if err := store.Delete(ctx, first.ID); err != nil {
-		t.Fatalf("deleting entry: %v", err)
-	}
-	second := mustAdd(t, store, "note", "second", "", nil)
-	if second.ID <= first.ID {
-		t.Fatalf("id %d reused after deleting %d", second.ID, first.ID)
-	}
-}
-
-func TestDeleteCascadesMetadata(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t)
-	entry := mustAdd(t, store, "note", "entry", "",
-		map[string]string{"jira": "QUACK-1"})
-	if err := store.Delete(ctx, entry.ID); err != nil {
-		t.Fatalf("deleting entry: %v", err)
-	}
-	var count int
-	if err := store.db.QueryRowContext(ctx, `
-		SELECT count(*) FROM entry_metadata`,
-	).Scan(&count); err != nil {
-		t.Fatalf("counting metadata: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("metadata count = %d, want 0", count)
-	}
-}
-
-func TestMetadataMutationsReturnTouchedEntry(t *testing.T) {
+func TestMetadataEditsRefreshModifiedAndApply(t *testing.T) {
 	ctx := context.Background()
 	tests := []struct {
 		name string
@@ -200,31 +322,21 @@ func TestMetadataMutationsReturnTouchedEntry(t *testing.T) {
 				map[string]string{"jira": "QUACK-1"})
 			oldTime := "2000-01-01T00:00:00.000000000Z"
 			if _, err := store.db.ExecContext(ctx, `
-				UPDATE entries SET modified_utc = ? WHERE id = ?`,
-				oldTime, entry.ID,
+				UPDATE entries SET modified_utc = ?`, oldTime,
 			); err != nil {
 				t.Fatalf("setting old modification time: %v", err)
 			}
-			got, err := store.Edit(ctx, entry.ID, api.EditEntryRequest{
-				Metadata: test.set,
-			})
+			got, err := store.Edit(ctx, everyAccess(store),
+				store.mustKey(entry.Ref),
+				api.EditEntryRequest{Metadata: test.set})
 			if err != nil {
 				t.Fatalf("changing metadata: %v", err)
 			}
-			oldModified, err := time.Parse(time.RFC3339, oldTime)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !got.Modified.After(oldModified) {
+			if got.Modified.Year() == 2000 {
 				t.Fatalf("modified was not refreshed: %v", got.Modified)
 			}
-			if len(got.Metadata) != len(test.want) {
+			if fmt.Sprint(got.Metadata) != fmt.Sprint(test.want) {
 				t.Fatalf("metadata = %v, want %v", got.Metadata, test.want)
-			}
-			for key, value := range test.want {
-				if got.Metadata[key] != value {
-					t.Fatalf("metadata = %v, want %v", got.Metadata, test.want)
-				}
 			}
 		})
 	}
@@ -234,9 +346,9 @@ func TestCanceledMutationDoesNotWrite(t *testing.T) {
 	store := openTestStore(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := store.Add(ctx, api.AddEntryRequest{
-		Type: "note", Subject: "canceled",
-	})
+	_, err := store.Add(ctx, everyAccess(store),
+		workspaceID(t, store, "default"),
+		api.AddEntryRequest{Type: "note", Subject: "canceled"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("add error = %v, want context.Canceled", err)
 	}
@@ -256,77 +368,25 @@ func TestBusyDatabaseIsRecognized(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "busy.db")
 	first := openStoreAt(t, path, testBusyTimeout)
 	second := openStoreAt(t, path, 5*time.Millisecond)
-	entry := mustAdd(t, first, "note", "locked", "", nil)
+	mustAdd(t, first, "note", "locked", "", nil)
 
 	tx, err := first.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("starting lock transaction: %v", err)
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE entries SET subject = subject WHERE id = ?`, entry.ID,
-	); err != nil {
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE entries SET subject = subject`); err != nil {
 		t.Fatalf("locking database: %v", err)
 	}
-	_, err = second.Add(ctx, api.AddEntryRequest{
-		Type: "note", Subject: "blocked",
-	})
+	_, err = second.Add(ctx, everyAccess(second),
+		workspaceID(t, second, "default"),
+		api.AddEntryRequest{Type: "note", Subject: "blocked"})
 	if !IsBusy(err) {
 		t.Fatalf("add error = %v, want SQLite busy/locked", err)
 	}
 	if !IsBusy(errors.Join(errors.New("wrapper"), err)) {
 		t.Fatal("IsBusy did not inspect wrapped error")
-	}
-}
-
-func TestConcurrentMetadataWritesSerialize(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t)
-	first := mustAdd(t, store, "note", "first", "", nil)
-	second := mustAdd(t, store, "note", "second", "", nil)
-
-	start := make(chan struct{})
-	results := make(chan error, 2)
-	for _, id := range []int64{first.ID, second.ID} {
-		go func() {
-			<-start
-			_, err := store.Edit(ctx, id, api.EditEntryRequest{
-				Metadata: map[string]string{"review": "done"},
-			})
-			results <- err
-		}()
-	}
-	close(start)
-	for range 2 {
-		if err := <-results; err != nil {
-			t.Fatalf("parallel metadata write: %v", err)
-		}
-	}
-
-	start = make(chan struct{})
-	for _, value := range []string{"QUACK-1", "QUACK-2"} {
-		go func() {
-			<-start
-			_, err := store.Edit(ctx, first.ID, api.EditEntryRequest{
-				Metadata: map[string]string{"jira": value},
-			})
-			results <- err
-		}()
-	}
-	close(start)
-	for range 2 {
-		if err := <-results; err != nil {
-			t.Fatalf("competing metadata write: %v", err)
-		}
-	}
-	got, err := store.Get(ctx, first.ID)
-	if err != nil {
-		t.Fatalf("getting entry: %v", err)
-	}
-	if got.Metadata["jira"] != "QUACK-1" &&
-		got.Metadata["jira"] != "QUACK-2" {
-		t.Fatalf("jira = %q, want one of the competing values",
-			got.Metadata["jira"])
 	}
 }
 
@@ -338,16 +398,18 @@ func TestMetadataLimitStopsEntryGrowth(t *testing.T) {
 	}
 	entry := mustAdd(t, store, "note", "bounded", "", metadata)
 	ctx := context.Background()
-	_, err := store.Edit(ctx, entry.ID, api.EditEntryRequest{
+	key := store.mustKey(entry.Ref)
+	_, err := store.Edit(ctx, everyAccess(store), key, api.EditEntryRequest{
 		Metadata: map[string]string{"overflow": "value"},
 	})
 	if !errors.Is(err, ErrMetadataLimit) {
 		t.Fatalf("Edit error = %v, want ErrMetadataLimit", err)
 	}
 
-	edited, err := store.Edit(ctx, entry.ID, api.EditEntryRequest{
-		Metadata: map[string]string{"key-0": "replaced"},
-	})
+	edited, err := store.Edit(ctx, everyAccess(store), key,
+		api.EditEntryRequest{
+			Metadata: map[string]string{"key-0": "replaced"},
+		})
 	if err != nil {
 		t.Fatalf("overwriting a metadata value at the limit: %v", err)
 	}
@@ -356,4 +418,20 @@ func TestMetadataLimitStopsEntryGrowth(t *testing.T) {
 	}
 }
 
-var _ databaseReader = (*sql.DB)(nil)
+func TestProjectsCountOneWorkspace(t *testing.T) {
+	store := openTestStore(t)
+	pond := map[string]string{"project": "pond"}
+	mustAdd(t, store, "note", "a", "", pond)
+	mustAdd(t, store, "note", "b", "", pond)
+	addTo(t, store, "personal", api.AddEntryRequest{
+		Type: "note", Subject: "c", Metadata: pond})
+
+	projects, err := store.Projects(context.Background(),
+		workspaceID(t, store, "default"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 1 || projects[0].Entries != 2 {
+		t.Fatalf("projects = %+v, want pond with 2 entries", projects)
+	}
+}
