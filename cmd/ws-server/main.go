@@ -238,7 +238,8 @@ func (h *handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) projects(w http.ResponseWriter, r *http.Request) {
-	if !requireNoQuery(w, r) {
+	query, ok := parseQueryOf(w, r, "name")
+	if !ok {
 		return
 	}
 	access, ok := h.access(w, r)
@@ -249,7 +250,8 @@ func (h *handler) projects(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	projects, err := h.store.Projects(r.Context(), workspace.ID)
+	projects, err := h.store.Projects(r.Context(), workspace.ID,
+		query.Get("name"))
 	if err != nil {
 		writeStoreError(w, err)
 		return

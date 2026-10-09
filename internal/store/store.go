@@ -90,6 +90,12 @@ CREATE TABLE entry_metadata (
 	FOREIGN KEY (workspace_id, entry_id) REFERENCES entries(workspace_id, id)
 ) WITHOUT ROWID`
 
+// createMetadataValueIndex finds the entries with one metadata value,
+// such as the entries of one project.
+const createMetadataValueIndex = `
+CREATE INDEX entry_metadata_values
+ON entry_metadata(workspace_id, key, value)`
+
 const createCreatedIndex = `
 CREATE INDEX entries_created_order
 ON entries(workspace_id, created_utc DESC, id DESC)`
@@ -190,6 +196,7 @@ var schemaSteps = []schemaStep{
 	{
 		statements: []string{
 			createWorkspaces, createEntries, createMetadata,
+			createMetadataValueIndex,
 			createCreatedIndex, createModifiedIndex, createTypeIndex,
 			createSubjectIndex, createLinks, createLinkTargetIndex,
 			createOneParentIndex, createMessages, createMessageOrderIndex,
@@ -204,6 +211,8 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createSubjectIndex)},
 			{"index", "entries_type_search", "entries",
 				normalizeSchemaSQL(createTypeIndex)},
+			{"index", "entry_metadata_values", "entry_metadata",
+				normalizeSchemaSQL(createMetadataValueIndex)},
 			{"index", "entry_links_one_parent", "entry_links",
 				normalizeSchemaSQL(createOneParentIndex)},
 			{"index", "entry_links_target", "entry_links",

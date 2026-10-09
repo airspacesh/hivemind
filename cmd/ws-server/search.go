@@ -50,9 +50,14 @@ var chatQueryParameters = map[string]bool{
 	"limit":  true,
 }
 
+// projectsQueryParameters are the parameters of a projects listing.
+var projectsQueryParameters = map[string]bool{
+	"name": true,
+}
+
 func knownQueryParameter(name string) bool {
 	return repeatedQueryParameters[name] || singleQueryParameters[name] ||
-		chatQueryParameters[name]
+		chatQueryParameters[name] || projectsQueryParameters[name]
 }
 
 func validateSearchQuery(w http.ResponseWriter, query url.Values) bool {

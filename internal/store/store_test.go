@@ -421,18 +421,45 @@ func TestMetadataLimitStopsEntryGrowth(t *testing.T) {
 func TestProjectsCountOneWorkspace(t *testing.T) {
 	store := openTestStore(t)
 	pond := map[string]string{"project": "pond"}
-	mustAdd(t, store, "note", "a", "", pond)
+	first := mustAdd(t, store, "note", "a", "", pond)
 	mustAdd(t, store, "note", "b", "", pond)
 	addTo(t, store, "personal", api.AddEntryRequest{
 		Type: "note", Subject: "c", Metadata: pond})
 
+	mustAdd(t, store, "note", "d", "", map[string]string{"project": "nest"})
+
 	projects, err := store.Projects(context.Background(),
-		workspaceID(t, store, "default"))
+		workspaceID(t, store, "default"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(projects) != 1 || projects[0].Entries != 2 {
-		t.Fatalf("projects = %+v, want pond with 2 entries", projects)
+	if len(projects) != 2 || projects[0].Name != "nest" ||
+		projects[1].Entries != 2 {
+		t.Fatalf("projects = %+v, want nest, then pond with 2 entries",
+			projects)
+	}
+	projects, err = store.Projects(context.Background(),
+		workspaceID(t, store, "default"), "pond")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 1 || projects[0].Name != "pond" ||
+		projects[0].Entries != 2 {
+		t.Fatalf("projects named pond = %+v, want pond with 2 entries",
+			projects)
+	}
+
+	// Chat counts as activity, so a message to an old entry brings its
+	// project to the top.
+	mustPost(t, store, first.Ref, "still here")
+	projects, err = store.Projects(context.Background(),
+		workspaceID(t, store, "default"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 2 || projects[0].Name != "pond" {
+		t.Fatalf("projects after a message = %+v, want pond first",
+			projects)
 	}
 }
 

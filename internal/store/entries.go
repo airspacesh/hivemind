@@ -296,19 +296,45 @@ func (s *Store) Edit(
 	return entry, nil
 }
 
-// Projects lists the projects of a workspace's entries, the most
-// recently active first.
-func (s *Store) Projects(
-	ctx context.Context, workspace int64,
-) ([]api.Project, error) {
-	rows, err := s.reads.QueryContext(ctx, `
-		SELECT m.value, count(*), max(`+activityExpr+`) AS latest
-		FROM entry_metadata AS m JOIN entries AS e
-			ON e.workspace_id = m.workspace_id AND e.id = m.entry_id
-		WHERE m.workspace_id = ? AND m.key = ?
-		GROUP BY m.value
-		ORDER BY latest DESC, m.value`, workspace, api.ProjectKey,
+// allProjectsSQL lists every project of workspace ?1. It reads the
+// entries in id order, and each entry's latest chat activity from one
+// grouped pass, since lookups in project order land all over the file.
+const allProjectsSQL = `
+	WITH chat(entry_id, latest) AS (
+		SELECT entry_id, max(modified_utc) FROM entry_messages
+		WHERE workspace_id = ?1 GROUP BY entry_id
 	)
+	SELECT m.value, count(*),
+		max(max(e.modified_utc, coalesce(chat.latest, ''))) AS latest
+	FROM entries AS e CROSS JOIN entry_metadata AS m
+		ON m.workspace_id = e.workspace_id AND m.entry_id = e.id
+		AND m.key = ?2
+	LEFT JOIN chat ON chat.entry_id = e.id
+	WHERE e.workspace_id = ?1
+	GROUP BY m.value
+	ORDER BY latest DESC, m.value`
+
+// oneProjectSQL lists project ?3 of workspace ?1, reading only its
+// entries.
+const oneProjectSQL = `
+	SELECT m.value, count(*), max(` + activityExpr + `) AS latest
+	FROM entry_metadata AS m JOIN entries AS e
+		ON e.workspace_id = m.workspace_id AND e.id = m.entry_id
+	WHERE m.workspace_id = ?1 AND m.key = ?2 AND m.value = ?3
+	GROUP BY m.value`
+
+// Projects lists the projects of a workspace's entries, the most
+// recently active first. A name other than "" lists only that project.
+func (s *Store) Projects(
+	ctx context.Context, workspace int64, name string,
+) ([]api.Project, error) {
+	query := allProjectsSQL
+	args := []any{workspace, api.ProjectKey}
+	if name != "" {
+		query = oneProjectSQL
+		args = append(args, name)
+	}
+	rows, err := s.reads.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing projects: %w", err)
 	}

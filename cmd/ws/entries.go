@@ -198,10 +198,21 @@ func (c *client) projects(t target) (api.ProjectsResponse, error) {
 	return projects, err
 }
 
+// project reads one project of a workspace, which costs the server
+// time in proportion to that project, not to the workspace.
+func (c *client) project(
+	t target, name string,
+) (api.ProjectsResponse, error) {
+	var projects api.ProjectsResponse
+	path := workspacePath(t, "/projects?"+url.Values{"name": {name}}.Encode())
+	err := c.do(t, "GET", path, nil, &projects)
+	return projects, err
+}
+
 // noticeNewProject says when an entry is the first in its project,
 // which catches a mistyped project without refusing a new one.
 func (c *client) noticeNewProject(t target, project string) error {
-	result, err := c.projects(t)
+	result, err := c.project(t, project)
 	if err != nil {
 		return err
 	}
