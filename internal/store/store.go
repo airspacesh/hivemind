@@ -228,7 +228,12 @@ func expectedSchema(version int) []schemaObject {
 }
 
 type Store struct {
+	// db holds the one connection every write goes through, so writes
+	// take turns and no two take the same entry or message number.
 	db *sql.DB
+	// reads holds the connections reads go through. In WAL mode they
+	// read beside the writer, so a slow listing holds up no write.
+	reads *sql.DB
 	// workspaces are the configured workspaces, in config order.
 	workspaces []Workspace
 	// unconfigured names the workspaces the database holds but the
@@ -244,7 +249,7 @@ func Open(
 	busyTimeout time.Duration,
 	configured []api.Workspace,
 ) (_ *Store, retErr error) {
-	dsn, err := sqliteDSN(path, busyTimeout)
+	dsn, err := sqliteDSN(path, busyTimeout, false)
 	if err != nil {
 		return nil, err
 	}
@@ -279,14 +284,33 @@ func Open(
 	if foreignKeys != 1 {
 		return nil, errors.New("SQLite foreign keys are disabled")
 	}
+	if err := checkIntegrity(ctx, db); err != nil {
+		return nil, err
+	}
+
+	readDSN, err := sqliteDSN(path, busyTimeout, true)
+	if err != nil {
+		return nil, err
+	}
+	reads, err := sql.Open("sqlite", readDSN)
+	if err != nil {
+		return nil, fmt.Errorf("opening database for reads: %w", err)
+	}
+	reads.SetMaxOpenConns(maxReadConnections)
+	reads.SetMaxIdleConns(maxReadConnections)
 	stream := &Store{
-		db: db, workspaces: workspaces, unconfigured: unconfigured,
+		db: db, reads: reads,
+		workspaces: workspaces, unconfigured: unconfigured,
 	}
 	if err := stream.Ping(ctx); err != nil {
-		return nil, fmt.Errorf("checking database health: %w", err)
+		reads.Close()
+		return nil, fmt.Errorf("opening database for reads: %w", err)
 	}
 	return stream, nil
 }
+
+// maxReadConnections bounds how many reads run at once.
+const maxReadConnections = 8
 
 // walRetryInterval is how long enableWAL waits between attempts.
 const walRetryInterval = 10 * time.Millisecond
@@ -323,7 +347,11 @@ func enableWAL(
 	}
 }
 
-func sqliteDSN(path string, busyTimeout time.Duration) (string, error) {
+// sqliteDSN names the database at path for the driver. A readOnly
+// connection refuses every write, through query_only.
+func sqliteDSN(
+	path string, busyTimeout time.Duration, readOnly bool,
+) (string, error) {
 	if busyTimeout < 0 {
 		return "", errors.New("busy timeout must not be negative")
 	}
@@ -343,6 +371,9 @@ func sqliteDSN(path string, busyTimeout time.Duration) (string, error) {
 	// not left behind in the database file's free pages.
 	query.Add("_pragma", "secure_delete(1)")
 	query.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", msecs))
+	if readOnly {
+		query.Add("_pragma", "query_only(1)")
+	}
 	fileURL.RawQuery = query.Encode()
 	return fileURL.String(), nil
 }
@@ -533,13 +564,27 @@ func sameSchema(got, want []schemaObject) bool {
 }
 
 func (s *Store) Close() error {
-	return s.db.Close()
+	return errors.Join(s.reads.Close(), s.db.Close())
 }
 
+// Ping checks that the database answers a read.
 func (s *Store) Ping(ctx context.Context) error {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	var count int
+	if err := s.reads.QueryRowContext(
+		ctx, `SELECT count(*) FROM workspaces`,
+	).Scan(&count); err != nil {
+		return fmt.Errorf("reading the database: %w", err)
+	}
+	return nil
+}
+
+// checkIntegrity reads the whole database to check its structure and
+// its foreign keys. It takes time in proportion to the database, so it
+// runs once, when the server opens it.
+func checkIntegrity(ctx context.Context, db *sql.DB) error {
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return fmt.Errorf("starting database health check: %w", err)
+		return fmt.Errorf("starting database integrity check: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -565,12 +610,9 @@ func (s *Store) Ping(ctx context.Context) error {
 		return fmt.Errorf("checking database foreign keys: %w", err)
 	}
 	if err := rows.Close(); err != nil {
-		return fmt.Errorf("closing database health check: %w", err)
+		return fmt.Errorf("closing database integrity check: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("finishing database health check: %w", err)
-	}
-	return nil
+	return tx.Commit()
 }
 
 func IsBusy(err error) bool {

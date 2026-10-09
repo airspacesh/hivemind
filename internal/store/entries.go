@@ -16,10 +16,16 @@ type view struct {
 	access Access
 }
 
+// begin starts a transaction seen through access, on a read
+// connection when it is readOnly and on the write connection otherwise.
 func (s *Store) begin(
 	ctx context.Context, access Access, readOnly bool,
 ) (view, error) {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: readOnly})
+	db := s.db
+	if readOnly {
+		db = s.reads
+	}
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: readOnly})
 	if err != nil {
 		return view{}, err
 	}
@@ -295,7 +301,7 @@ func (s *Store) Edit(
 func (s *Store) Projects(
 	ctx context.Context, workspace int64,
 ) ([]api.Project, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.reads.QueryContext(ctx, `
 		SELECT m.value, count(*), max(`+activityExpr+`) AS latest
 		FROM entry_metadata AS m JOIN entries AS e
 			ON e.workspace_id = m.workspace_id AND e.id = m.entry_id

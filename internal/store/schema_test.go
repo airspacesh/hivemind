@@ -260,7 +260,7 @@ func TestOpenSyncsWorkspacesWithTheConfig(t *testing.T) {
 
 func rawExec(t *testing.T, path, statement string) {
 	t.Helper()
-	dsn, err := sqliteDSN(path, testBusyTimeout)
+	dsn, err := sqliteDSN(path, testBusyTimeout, false)
 	if err != nil {
 		t.Fatal(err)
 	}

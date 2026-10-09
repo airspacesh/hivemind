@@ -435,3 +435,36 @@ func TestProjectsCountOneWorkspace(t *testing.T) {
 		t.Fatalf("projects = %+v, want pond with 2 entries", projects)
 	}
 }
+
+// A read holds a read connection, so a write goes ahead beside it, and
+// the read connections refuse writes.
+func TestWritesProceedWhileAReadIsOpen(t *testing.T) {
+	store := openTestStore(t)
+	mustAdd(t, store, "note", "before the read", "", nil)
+	ctx := context.Background()
+	read, err := store.begin(ctx, everyAccess(store), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer read.tx.Rollback()
+	var count int
+	if err := read.tx.QueryRowContext(
+		ctx, `SELECT count(*) FROM entries`,
+	).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+
+	writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := store.Add(writeCtx, everyAccess(store),
+		workspaceID(t, store, "default"), api.AddEntryRequest{
+			Type: "note", Subject: "during the read",
+		}); err != nil {
+		t.Fatalf("adding while a read is open: %v", err)
+	}
+	if _, err := store.reads.ExecContext(
+		ctx, `DELETE FROM entry_metadata`,
+	); err == nil {
+		t.Fatal("a read connection accepted a write")
+	}
+}

@@ -193,7 +193,7 @@ func (s *Store) readChatPage(
 func (s *Store) Messages(
 	ctx context.Context, entry Key, since int64, limit int,
 ) (api.ChatPage, error) {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := s.reads.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return api.ChatPage{}, fmt.Errorf("reading chat: %w", err)
 	}
@@ -214,7 +214,7 @@ func (s *Store) Messages(
 func (s *Store) LatestMessages(
 	ctx context.Context, entry Key, count int,
 ) (api.ChatPage, error) {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := s.reads.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return api.ChatPage{}, fmt.Errorf("reading chat: %w", err)
 	}
