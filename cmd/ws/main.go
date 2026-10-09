@@ -268,7 +268,12 @@ func (c *client) checkWorkspace(workspace workspaceConfig) (string, error) {
 			"sets prefix %s", workspace.server, workspace.name, prefix,
 			c.config.path, workspace.prefix)
 	}
-	if _, err := c.projects(t); err != nil {
+	// Any read of the workspace proves access. The newest message is
+	// the cheapest, since an index finds it.
+	var overview api.ChatOverview
+	err = c.do(t, "GET", workspacePath(t, "/messages?limit=1"), nil,
+		&overview)
+	if err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("prefix %s on %s (ws-server %s, database %s), "+
