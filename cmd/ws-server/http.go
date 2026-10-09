@@ -81,6 +81,9 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrLinkNotFound):
 		status, code, message = http.StatusNotFound,
 			api.CodeLinkNotFound, err.Error()
+	case errors.Is(err, store.ErrParentWorkspace):
+		status, code, message = http.StatusBadRequest,
+			api.CodeBadRequest, err.Error()
 	case errors.Is(err, store.ErrLinkTarget):
 		status, code, message = http.StatusBadRequest,
 			api.CodeLinkTargetNotFound, err.Error()

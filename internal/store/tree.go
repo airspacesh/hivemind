@@ -16,17 +16,16 @@ var ErrInvalidTreeLimit = errors.New("invalid tree limit")
 
 // subtreeCTE names an entry and its descendants as
 // name(workspace_id, id). It takes the entry's workspace id and id as
-// its two arguments. It walks down only into entries the request can
-// read, so an unreadable entry and everything under it are left out.
-func subtreeCTE(name string, access Access) string {
+// its two arguments. A parent is always in its child's workspace, so
+// the subtree is too.
+func subtreeCTE(name string) string {
 	return name + `(workspace_id, id) AS (
 	SELECT ?, ?
 	UNION ALL
 	SELECT l.source_workspace_id, l.source_id FROM entry_links AS l
 	JOIN ` + name + ` ON l.target_workspace_id = ` + name + `.workspace_id
 		AND l.target_id = ` + name + `.id
-	WHERE l.name = 'parent' AND ` +
-		access.readableSQL("l.source_workspace_id") + `
+	WHERE l.name = 'parent'
 )`
 }
 
@@ -45,7 +44,7 @@ func (v view) readTreeFacts(ctx context.Context, key Key) (treeFacts, error) {
 	var facts treeFacts
 	var activity string
 	err := v.tx.QueryRowContext(ctx, `
-		WITH RECURSIVE `+subtreeCTE("subtree", v.access)+`
+		WITH RECURSIVE `+subtreeCTE("subtree")+`
 		SELECT max(`+activityExpr+`), count(*) - 1
 		FROM subtree JOIN entries AS e
 			ON e.workspace_id = subtree.workspace_id
@@ -98,11 +97,11 @@ type treeNode struct {
 	shown bool
 }
 
-// readSubtree reads the readable subtree under root, each node's
+// readSubtree reads the subtree under root, each node's
 // children oldest first.
 func (v view) readSubtree(ctx context.Context, root Key) (*treeNode, error) {
 	rows, err := v.tx.QueryContext(ctx, `
-		WITH RECURSIVE `+subtreeCTE("subtree", v.access)+`
+		WITH RECURSIVE `+subtreeCTE("subtree")+`
 		SELECT e.workspace_id, e.id, e.created_utc, `+supersededClause+`,
 			p.target_workspace_id, p.target_id
 		FROM subtree JOIN entries AS e

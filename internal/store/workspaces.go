@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
-	"strings"
 
 	"github.com/airspacesh/workstream/internal/api"
 )
@@ -41,17 +39,6 @@ func NewAccess(workspaces ...int64) Access {
 
 func (a Access) CanRead(workspace int64) bool {
 	return slices.Contains(a.workspaces, workspace)
-}
-
-// readableSQL is an SQL condition true when the workspace id in column
-// is readable. The ids are the database's own integers, so formatting
-// them into the SQL is safe.
-func (a Access) readableSQL(column string) string {
-	ids := make([]string, len(a.workspaces))
-	for i, id := range a.workspaces {
-		ids[i] = strconv.FormatInt(id, 10)
-	}
-	return column + ` IN (` + strings.Join(ids, ", ") + `)`
 }
 
 // syncWorkspaces adds each configured workspace the database lacks and

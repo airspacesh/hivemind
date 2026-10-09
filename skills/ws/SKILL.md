@@ -41,8 +41,9 @@ to leave the listing out.
 `--parent <ref>` files an entry under the entry it follows up, and
 `--supersedes <ref>` marks an older entry as replaced, which hides it
 from listings. `--link <name>=<ref>` records any other relationship,
-such as `--link depends-on=e40`. A link can reach another workspace on
-the same server. `ws edit --unlink <name>[=<ref>]` removes links, and
+such as `--link depends-on=e40`. A parent is always in its child's
+workspace, so `ws add --parent` puts the entry there. Other links can
+reach another workspace on the same server. `ws edit --unlink <name>[=<ref>]` removes links, and
 `--parent ""` removes the parent. `ws entry` shows links in both
 directions.
 

@@ -13,6 +13,9 @@ var (
 	ErrLinkLoop     = errors.New("link would form a loop")
 	ErrLinkNotFound = errors.New("link not found")
 	ErrLinkLimit    = errors.New("link limit reached")
+	// ErrParentWorkspace refuses a parent in another workspace, so a
+	// tree never leaves its workspace.
+	ErrParentWorkspace = errors.New("a parent must be in the same workspace")
 )
 
 // acyclicLinks are the link names whose chains must never loop: an
@@ -66,6 +69,10 @@ func (v view) addLink(ctx context.Context, source Key, link api.Link) error {
 	target, err := v.store.Resolve(link.Ref)
 	if err != nil {
 		return err
+	}
+	if link.Name == api.ParentLink && target.Workspace != source.Workspace {
+		return fmt.Errorf("%w: %s is in another workspace than %s",
+			ErrParentWorkspace, link.Ref, v.store.mustRef(source))
 	}
 	if !v.access.CanRead(target.Workspace) {
 		return fmt.Errorf("%w: %s", ErrLinkTarget, link.Ref)
@@ -292,12 +299,8 @@ func (v view) entryRef(ctx context.Context, key Key) (api.EntryRef, error) {
 	return described, err
 }
 
-// ancestors lists an entry's ancestors, from the root down to its
-// parent. The path stops below an ancestor in a workspace the config no
-// longer names, since that has no ref.
-func (v view) ancestors(
-	ctx context.Context, key Key,
-) ([]api.EntryRef, error) {
+// pathUp lists an entry's ancestors, its parent first.
+func (v view) pathUp(ctx context.Context, key Key) ([]Key, error) {
 	rows, err := v.tx.QueryContext(ctx, `
 		WITH RECURSIVE up(workspace_id, id, depth) AS (
 			SELECT target_workspace_id, target_id, 1 FROM entry_links
@@ -311,24 +314,29 @@ func (v view) ancestors(
 			WHERE l.name = 'parent'
 		)
 		SELECT workspace_id, id FROM up ORDER BY depth`,
-		key.Workspace, key.ID,
-	)
+		key.Workspace, key.ID)
 	if err != nil {
 		return nil, fmt.Errorf("reading ancestors: %w", err)
 	}
-	var upward []Key
+	defer rows.Close()
+	var path []Key
 	for rows.Next() {
 		var ancestor Key
 		if err := rows.Scan(&ancestor.Workspace, &ancestor.ID); err != nil {
-			rows.Close()
 			return nil, err
 		}
-		if _, ok := v.store.ref(ancestor); !ok {
-			break
-		}
-		upward = append(upward, ancestor)
+		path = append(path, ancestor)
 	}
-	if err := rows.Close(); err != nil {
+	return path, rows.Err()
+}
+
+// ancestors lists an entry's ancestors, from the root down to its
+// parent.
+func (v view) ancestors(
+	ctx context.Context, key Key,
+) ([]api.EntryRef, error) {
+	upward, err := v.pathUp(ctx, key)
+	if err != nil {
 		return nil, err
 	}
 
@@ -369,8 +377,7 @@ func (s *Store) Detail(
 	if err := v.tx.QueryRowContext(ctx, `
 		SELECT count(*) FROM entry_links
 		WHERE target_workspace_id = ? AND target_id = ?
-			AND name = 'parent' AND `+
-		access.readableSQL("source_workspace_id"),
+			AND name = 'parent'`,
 		key.Workspace, key.ID,
 	).Scan(&detail.Children); err != nil {
 		return api.EntryDetail{}, fmt.Errorf("counting children: %w", err)

@@ -255,8 +255,8 @@ func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 }
 
 // TestUnreadableEntriesShowNoTextOverHTTP links open entries every way
-// to protected ones holding SECRET, then reads every open route
-// without a credential.
+// a link may cross workspaces to protected ones holding SECRET, then
+// reads every open route without a credential.
 func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
 	s := startServer(t, testConfig(t))
 	addOpen := func(subject string, links ...string) {
@@ -272,12 +272,11 @@ func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
 		s.must(t, "POST", "/api/workspaces/personal/entries", body+"}",
 			personalSecret, http.StatusCreated)
 	}
-	addOpen("open root")                      // e1
-	addSecret(`{"name":"parent","ref":"e1"}`) // p1
-	addOpen("open grandchild", `{"name":"parent","ref":"p1"}`)
-	addSecret(`{"name":"see","ref":"e1"}`,
-		`{"name":"supersedes","ref":"p1"}`) // p2
-	addOpen("open child", `{"name":"parent","ref":"p2"}`) // e3
+	addOpen("open root")                                  // e1
+	addSecret(`{"name":"see","ref":"e1"}`)                // p1
+	addOpen("open see", `{"name":"see","ref":"p1"}`)      // e2
+	addOpen("open child", `{"name":"parent","ref":"e1"}`) // e3
+	addSecret(`{"name":"supersedes","ref":"e3"}`)         // p2
 	for _, entry := range []string{"p1", "p2"} {
 		s.must(t, "POST", "/api/entries/"+entry+"/messages",
 			`{"body":"SECRET","origin":{"user":"SECRET"}}`, personalSecret,
@@ -306,8 +305,21 @@ func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
 		}
 	}
 	if text := s.must(t, "GET", "/api/entries/e3", "", "",
-		http.StatusOK); !strings.Contains(text, `"ancestors":[{"ref":"p2"}]`) {
-		t.Fatalf("e3 does not show its parent as a bare ref: %s", text)
+		http.StatusOK); !strings.Contains(text, `"superseded_by":["p2"]`) {
+		t.Fatalf("e3 does not show what supersedes it as a bare ref: %s",
+			text)
+	}
+	if text := s.must(t, "GET", "/api/entries/e2", "", "",
+		http.StatusOK); !strings.Contains(text,
+		`"links":[{"name":"see","ref":"p1"}]`) {
+		t.Fatalf("e2 does not show its link as a bare ref: %s", text)
+	}
+
+	_, crossParent := s.do(t, "POST", "/api/workspaces/default/entries",
+		entryBody("child", `{"name":"parent","ref":"p1"}`), personalSecret)
+	if !strings.Contains(crossParent, "a parent must be in the same "+
+		"workspace") {
+		t.Fatalf("a parent in another workspace gave %s", crossParent)
 	}
 
 	_, unreadable := s.do(t, "POST", "/api/workspaces/default/entries",

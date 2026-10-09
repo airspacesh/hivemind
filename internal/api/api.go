@@ -11,8 +11,8 @@ const MaxResponseBytes = 64 << 20
 const ProjectKey = "project"
 
 // Link names with a meaning to the server. Every other name only
-// links. An entry has at most one parent, and a superseded entry is
-// hidden from listings unless they ask for it.
+// links. An entry has at most one parent, in its own workspace, and a
+// superseded entry is hidden from listings unless they ask for it.
 const (
 	ParentLink     = "parent"
 	SupersedesLink = "supersedes"

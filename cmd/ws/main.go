@@ -59,10 +59,10 @@ Workspaces and entries:
   Keep the subject to a headline and put detail in the body. Listings
   show only the subject, and '{program} entry' shows the rest.
 
-  A command that takes a <ref> works in that entry's workspace. Any
-  other command works in the workspace --workspace names, or else the
-  workspace this variable names, or else the one called default:
-  {DEFAULT_WORKSPACE}. '{program} list-workspaces' shows them all.
+  A command that takes a <ref> works in that entry's workspace, and
+  add with --parent works in the parent's. Any other command works in
+  the workspace --workspace names, or else the workspace this variable
+  names, or else the one called default: {DEFAULT_WORKSPACE}. '{program} list-workspaces' shows them all.
 
   Each entry and message records the username, and as far as the
   workspace's metadata_capture allows, the host, directory and Claude
@@ -88,8 +88,9 @@ Editing:
 Links:
   A link is a named relationship from one entry to another on the same
   server, possibly in another workspace, such as --link depends-on=e40.
-  --parent <ref>      the entry this one belongs under. An entry has at
-                      most one parent. --parent "" on edit removes it.
+  --parent <ref>      the entry this one belongs under, in the same
+                      workspace. An entry has at most one parent.
+                      --parent "" on edit removes it.
   --supersedes <ref>  this entry replaces that one, which then drops out
                       of listings unless they pass --include-superseded.
                       '{program} entry' still shows it.

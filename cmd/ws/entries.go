@@ -226,6 +226,24 @@ func (c *client) noticeNewProject(t target, project string) error {
 	return nil
 }
 
+// addTarget is where add puts a new entry: in the workspace
+// --workspace names, or else in its parent's, since a parent is always
+// in its child's workspace, or else in the default workspace.
+func (c *client) addTarget(p *parsedArgs) (target, error) {
+	if p.strs["--workspace"] == "" && p.has("--parent") {
+		parent, err := api.ParseRef(p.strs["--parent"])
+		if err != nil {
+			return target{}, err
+		}
+		return c.resolve(parent)
+	}
+	workspace, err := c.config.chooseWorkspace(p.strs["--workspace"])
+	if err != nil {
+		return target{}, err
+	}
+	return targetOf(workspace), nil
+}
+
 func cmdAdd(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
 		strs:  []string{"--body", "--parent", "--workspace"},
@@ -254,11 +272,10 @@ func cmdAdd(c *client, args []string) error {
 	if p.has("--parent") && p.strs["--parent"] == "" {
 		return fmt.Errorf("--parent needs an entry id")
 	}
-	workspace, err := c.config.chooseWorkspace(p.strs["--workspace"])
+	t, err := c.addTarget(p)
 	if err != nil {
 		return err
 	}
-	t := targetOf(workspace)
 	links, err := c.collectLinks(t, p)
 	if err != nil {
 		return err

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -49,28 +50,48 @@ func TestLinksJoinWorkspacesOnOneServer(t *testing.T) {
 	work := mustAdd(t, store, "note", "work", "", nil)
 	private := addTo(t, store, "personal", api.AddEntryRequest{
 		Type: "note", Subject: "private",
-		Links: []api.Link{link("parent", work.Ref)},
+		Links: []api.Link{link("see", work.Ref)},
 	})
 	if err := addLinks(t, store, work.Ref,
-		link("see", private.Ref)); err != nil {
+		link(api.SupersedesLink, private.Ref)); err != nil {
 		t.Fatal(err)
 	}
 
 	got := mustGet(t, store, work.Ref)
-	if !reflect.DeepEqual(got.Links, []api.Link{link("see", private.Ref)}) ||
+	if !reflect.DeepEqual(got.Links,
+		[]api.Link{link(api.SupersedesLink, private.Ref)}) ||
 		!reflect.DeepEqual(got.Backlinks,
-			[]api.Link{link("parent", private.Ref)}) ||
-		got.Children != 1 {
-		t.Fatalf("e1 links %v, backlinks %v, children %d", got.Links,
-			got.Backlinks, got.Children)
+			[]api.Link{link("see", private.Ref)}) {
+		t.Fatalf("e1 links %v, backlinks %v", got.Links, got.Backlinks)
 	}
-	path := mustGet(t, store, private.Ref).Ancestors
-	if len(path) != 1 || path[0].Ref != work.Ref || path[0].Subject != "work" {
-		t.Fatalf("p1's path = %+v, want e1", path)
+}
+
+// A parent stays in its child's workspace, so a tree never leaves it.
+// The refusal is the same whether the other entry exists or not.
+func TestParentsStayInTheirWorkspace(t *testing.T) {
+	store := openTestStore(t)
+	work := mustAdd(t, store, "note", "work", "", nil)
+	private := addTo(t, store, "personal", api.AddEntryRequest{
+		Type: "note", Subject: "private",
+	})
+
+	_, err := store.Add(context.Background(), everyAccess(store),
+		workspaceID(t, store, "personal"), api.AddEntryRequest{
+			Type: "note", Subject: "child",
+			Links: []api.Link{link(api.ParentLink, work.Ref)},
+		})
+	if !errors.Is(err, ErrParentWorkspace) {
+		t.Fatalf("adding under a parent in another workspace = %v", err)
 	}
-	if err := addLinks(t, store, work.Ref,
-		link("parent", private.Ref)); !errors.Is(err, ErrLinkLoop) {
-		t.Fatalf("a parent loop across workspaces = %v", err)
+	existing := addLinks(t, store, private.Ref,
+		link(api.ParentLink, work.Ref))
+	missing := addLinks(t, store, private.Ref,
+		link(api.ParentLink, api.Ref{Prefix: "e", ID: 99}))
+	if !errors.Is(existing, ErrParentWorkspace) ||
+		strings.Replace(missing.Error(), "e99", work.Ref.String(), 1) !=
+			existing.Error() {
+		t.Fatalf("editing in a parent in another workspace = %v, and "+
+			"for a missing one %v", existing, missing)
 	}
 }
 

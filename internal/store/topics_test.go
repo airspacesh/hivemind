@@ -17,7 +17,6 @@ import (
 func referenceTopics(
 	t *testing.T,
 	store *Store,
-	access Access,
 	workspace int64,
 	typ string,
 	includeSuperseded bool,
@@ -36,8 +35,7 @@ func referenceTopics(
 			FROM entry_links AS l JOIN tree
 				ON l.target_workspace_id = tree.workspace_id
 				AND l.target_id = tree.entry_id
-			WHERE l.name = 'parent' AND `+
-		access.readableSQL("l.source_workspace_id")+`
+			WHERE l.name = 'parent'
 		),
 		roots(id, activity_utc, current_under) AS (
 			SELECT tree.root_id, max(`+activityExpr+`),
@@ -68,9 +66,9 @@ func referenceTopics(
 	return ids
 }
 
-// addRandomForest adds entries to both workspaces with random parents,
-// supersessions, messages and edits, then spreads their times over a
-// year. When onDays is set, every time falls on midnight, so many
+// addRandomForest adds entries to both workspaces with random parents
+// in the same workspace, supersessions across them, messages and
+// edits, then spreads their times over a year. When onDays is set, every time falls on midnight, so many
 // trees share their latest activity.
 func addRandomForest(
 	t *testing.T, store *Store, random *rand.Rand, onDays bool,
@@ -78,15 +76,17 @@ func addRandomForest(
 	t.Helper()
 	ctx := context.Background()
 	var refs []api.Ref
+	inWorkspace := map[string][]api.Ref{}
 	for i := 0; i < 80; i++ {
 		workspace := "default"
 		if random.Intn(3) == 0 {
 			workspace = "personal"
 		}
 		var links []api.Link
-		if len(refs) > 0 && random.Intn(10) < 6 {
+		if parents := inWorkspace[workspace]; len(parents) > 0 &&
+			random.Intn(10) < 6 {
 			links = append(links, link(api.ParentLink,
-				refs[random.Intn(len(refs))]))
+				parents[random.Intn(len(parents))]))
 		}
 		if len(refs) > 0 && random.Intn(7) == 0 {
 			links = append(links, link(api.SupersedesLink,
@@ -97,6 +97,7 @@ func addRandomForest(
 			Subject: fmt.Sprintf("entry %d", i), Links: links,
 		})
 		refs = append(refs, entry.Ref)
+		inWorkspace[workspace] = append(inWorkspace[workspace], entry.Ref)
 	}
 	for i := 0; i < 60; i++ {
 		mustPost(t, store, refs[random.Intn(len(refs))], "hello")
@@ -161,8 +162,8 @@ func TestTopicsMatchTheReference(t *testing.T) {
 		} {
 			for _, typ := range []string{"", "a"} {
 				for _, include := range []bool{false, true} {
-					want := referenceTopics(t, store, access, defaultID,
-						typ, include)
+					want := referenceTopics(t, store, defaultID, typ,
+						include)
 					filter := Filter{View: ViewTopics, Limit: 500,
 						IncludeSuperseded: include}
 					if typ != "" {

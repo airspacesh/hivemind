@@ -300,15 +300,22 @@ check "a missing entry is reported as missing" "entry not found: e999" \
     "$(ws entry e999 2>&1 || true)"
 
 # An open workspace linked to a protected one shows the protected entry
-# as a bare id at most, through every path that crosses workspaces.
-ws add note "Protected child PROTECTEDMARK" --project mine \
-    --workspace personal --parent "$root" --no-recent >/dev/null # p2
+# as a bare id at most, through every path that crosses workspaces. A
+# parent never crosses them, and add takes its parent's workspace.
+check "a parent cannot cross workspaces" \
+    "a parent must be in the same workspace" \
+    "$(ws add note "Protected child" --project mine --workspace personal \
+        --parent "$root" 2>&1 || true)"
+ws add note "Protected see PROTECTEDMARK" --project mine \
+    --workspace personal --link "see=$root" --no-recent >/dev/null # p2
+check "add takes its parent's workspace" "Added entry [p3]." \
+    "$(ws add note "Protected child" --project mine --parent p2 --no-recent)"
 curl -fsS -X POST -H "Workstream-API-Version: $api_version" \
     -H "Authorization: Bearer $test_secret" \
-    --data "{\"type\":\"note\",\"subject\":\"Open under protected\",\"metadata\":{\"project\":\"views\"},\"origin\":{},\"links\":[{\"name\":\"parent\",\"ref\":\"p1\"}]}" \
+    --data "{\"type\":\"note\",\"subject\":\"Open linking protected\",\"metadata\":{\"project\":\"views\"},\"origin\":{},\"links\":[{\"name\":\"see\",\"ref\":\"p1\"}]}" \
     "$main_url/api/workspaces/default/entries" >/dev/null
-under_protected="$(ws search 'Open under protected' --id-only)"
-check "a protected parent shows as its bare id" "Path: p1" \
+under_protected="$(ws search 'Open linking protected' --id-only)"
+check "a protected link shows as its bare id" "see p1" \
     "$(ws entry "$under_protected")"
 check "a protected backlink shows as its bare id" "p1 see this entry" \
     "$(ws entry "$root")"
@@ -321,7 +328,7 @@ open_views="$(ws entry "$root"; ws tree "$root"; ws search --under "$root"
     ws entry "$under_protected"; ws chat recent; ws chat recent "$root")"
 check_equal "no protected content reaches the open workspace" "" \
     "$(echo "$open_views" | grep PROTECTEDMARK || true)"
-check_equal "a tree leaves out the protected child" "" \
+check_equal "a tree holds no protected entry" "" \
     "$(ws tree "$root" | grep -E '\[p[0-9]+\]' || true)"
 
 # Chat.

@@ -291,7 +291,7 @@ func (s *Store) Search(
 	if err != nil {
 		return api.SearchResult{}, err
 	}
-	from, fromArgs := joinedFrom(filter.Under, access)
+	from, fromArgs := joinedFrom(filter.Under)
 	where.args = append(fromArgs, where.args...)
 	where.clauses = append(where.clauses, `e.workspace_id = ?`)
 	where.args = append(where.args, workspace)

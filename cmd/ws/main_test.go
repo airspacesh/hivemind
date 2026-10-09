@@ -314,6 +314,35 @@ func TestConfiguredPrefixSkipsAskingServers(t *testing.T) {
 	}
 }
 
+// A parent is always in its child's workspace, so add puts a new entry
+// in its parent's workspace unless --workspace names one.
+func TestAddTakesItsParentsWorkspace(t *testing.T) {
+	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" &&
+			r.URL.Path == "/api/workspaces/personal/entries":
+			reply(w, http.StatusCreated, entryDetail("p4").Entry)
+		case r.URL.Path == "/api/workspaces/personal/projects":
+			reply(w, http.StatusOK, api.ProjectsResponse{
+				Projects: []api.Project{}})
+		default:
+			refuse(w, http.StatusNotFound, api.CodeRouteNotFound, "no route")
+		}
+	})
+	config := writeConfig(t, fmt.Sprintf("workspaces:\n  default:\n    "+
+		"server: %s\n    prefix: e\n  personal:\n    server: %s\n    "+
+		"prefix: p\n", server.URL, server.URL), 0o600)
+	got := ws(t, config, "add", "note", "Answer", "--project", "pond",
+		"--parent", "p3", "--no-recent")
+	if !got.ok || !strings.Contains(got.stdout, "Added entry [p4].") {
+		t.Fatal(got)
+	}
+	if posted := server.recorded()[0]; posted.path !=
+		"/api/workspaces/personal/entries" {
+		t.Fatalf("the add went to %s", posted.path)
+	}
+}
+
 // TestResolutionMovesOnOnlyForAnAbsentPrefix checks that an id goes to
 // the first server listing its prefix, and that only that server's own
 // workspace's secret travels, and only with the entry request.

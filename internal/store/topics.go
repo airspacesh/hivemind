@@ -30,13 +30,11 @@ const (
 	activityBatch = 256
 )
 
-// topLevelClause is true for an entry e with no parent in its own
-// workspace, which makes it top-level there.
+// topLevelClause is true for an entry e with no parent.
 const topLevelClause = `NOT EXISTS (
 	SELECT 1 FROM entry_links AS p
 	WHERE p.source_workspace_id = e.workspace_id
 		AND p.source_id = e.id AND p.name = 'parent'
-		AND p.target_workspace_id = e.workspace_id
 )`
 
 // idsJSON encodes entry ids for json_each, so a query can take any
@@ -51,9 +49,8 @@ func idsJSON(ids []int64) string {
 
 // treeCTE names the trees under the seed entries of a workspace as
 // name(workspace_id, entry_id, root_id). It takes the workspace id and
-// the seed ids as JSON, and walks down only into entries the request
-// can read.
-func treeCTE(name string, access Access) string {
+// the seed ids as JSON.
+func treeCTE(name string) string {
 	return name + `(workspace_id, entry_id, root_id) AS (
 	SELECT ?, value, value FROM json_each(?)
 	UNION ALL
@@ -61,8 +58,7 @@ func treeCTE(name string, access Access) string {
 	FROM entry_links AS l JOIN ` + name + `
 		ON l.target_workspace_id = ` + name + `.workspace_id
 		AND l.target_id = ` + name + `.entry_id
-	WHERE l.name = 'parent' AND ` +
-		access.readableSQL("l.source_workspace_id") + `
+	WHERE l.name = 'parent'
 )`
 }
 
@@ -105,7 +101,7 @@ func (v view) topicCandidates(
 	}
 
 	rows, err = v.tx.QueryContext(ctx, `
-		WITH RECURSIVE `+treeCTE("down", v.access)+`
+		WITH RECURSIVE `+treeCTE("down")+`
 		SELECT DISTINCT down.root_id FROM down JOIN entries AS e
 			ON e.workspace_id = down.workspace_id AND e.id = down.entry_id
 		WHERE NOT (e.workspace_id = ? AND e.id = down.root_id)
@@ -139,7 +135,7 @@ func (v view) rankTopics(
 		return nil, nil
 	}
 	rows, err := v.tx.QueryContext(ctx, `
-		WITH RECURSIVE `+treeCTE("tree", v.access)+`
+		WITH RECURSIVE `+treeCTE("tree")+`
 		SELECT tree.root_id FROM tree JOIN entries AS e
 			ON e.workspace_id = tree.workspace_id AND e.id = tree.entry_id
 		GROUP BY tree.root_id
@@ -166,24 +162,23 @@ type change struct {
 	entry Key
 }
 
-// changesBetween reads the changes in readable workspaces at or after
-// from and, unless to is empty, before to, the newest first.
+// changesBetween reads the changes in a workspace at or after from
+// and, unless to is empty, before to, the newest first.
 func (v view) changesBetween(
-	ctx context.Context, from, to string,
+	ctx context.Context, workspace int64, from, to string,
 ) ([]change, error) {
-	bound := `modified_utc >= ?`
-	args := []any{from}
+	bound := `workspace_id = ? AND modified_utc >= ?`
+	args := []any{workspace, from}
 	if to != "" {
 		bound += ` AND modified_utc < ?`
 		args = append(args, to)
 	}
-	readable := v.access.readableSQL("workspace_id")
 	rows, err := v.tx.QueryContext(ctx, `
 		SELECT modified_utc, workspace_id, id FROM entries
-		WHERE `+readable+` AND `+bound+`
+		WHERE `+bound+`
 		UNION ALL
 		SELECT modified_utc, workspace_id, entry_id FROM entry_messages
-		WHERE `+readable+` AND `+bound+`
+		WHERE `+bound+`
 		ORDER BY 1 DESC`, append(args, args...)...)
 	if err != nil {
 		return nil, fmt.Errorf("reading recent changes: %w", err)
@@ -201,65 +196,30 @@ func (v view) changesBetween(
 	return changes, rows.Err()
 }
 
-// changeSpan is when the first and the latest changes in readable
-// workspaces happened. The first entry's creation comes before every
-// change, since an entry exists before it is edited or its chat is
-// posted to. Both are empty when there are no entries.
-func (v view) changeSpan(ctx context.Context) (string, string, error) {
-	var earliest, latest string
-	for _, workspace := range v.access.workspaces {
-		var created, modified, posted *string
-		if err := v.tx.QueryRowContext(ctx, `
-			SELECT (SELECT min(created_utc) FROM entries
-					WHERE workspace_id = ?1),
-				(SELECT max(modified_utc) FROM entries
-					WHERE workspace_id = ?1),
-				(SELECT max(modified_utc) FROM entry_messages
-					WHERE workspace_id = ?1)`, workspace,
-		).Scan(&created, &modified, &posted); err != nil {
-			return "", "", fmt.Errorf("reading the span of changes: %w", err)
-		}
-		if created != nil && (earliest == "" || *created < earliest) {
-			earliest = *created
-		}
-		for _, at := range []*string{modified, posted} {
-			if at != nil && *at > latest {
-				latest = *at
-			}
-		}
+// changeSpan is when the first and the latest changes in a workspace
+// happened. The first entry's creation comes before every change,
+// since an entry exists before it is edited or its chat is posted to.
+// Both are empty when there are no entries.
+func (v view) changeSpan(
+	ctx context.Context, workspace int64,
+) (string, string, error) {
+	var created, modified, posted *string
+	if err := v.tx.QueryRowContext(ctx, `
+		SELECT (SELECT min(created_utc) FROM entries WHERE workspace_id = ?1),
+			(SELECT max(modified_utc) FROM entries WHERE workspace_id = ?1),
+			(SELECT max(modified_utc) FROM entry_messages
+				WHERE workspace_id = ?1)`, workspace,
+	).Scan(&created, &modified, &posted); err != nil {
+		return "", "", fmt.Errorf("reading the span of changes: %w", err)
 	}
-	return earliest, latest, nil
-}
-
-// pathUp lists an entry's ancestors, its parent first.
-func (v view) pathUp(ctx context.Context, key Key) ([]Key, error) {
-	rows, err := v.tx.QueryContext(ctx, `
-		WITH RECURSIVE up(workspace_id, id, depth) AS (
-			SELECT target_workspace_id, target_id, 1 FROM entry_links
-			WHERE source_workspace_id = ? AND source_id = ?
-				AND name = 'parent'
-			UNION ALL
-			SELECT l.target_workspace_id, l.target_id, up.depth + 1
-			FROM entry_links AS l JOIN up
-				ON l.source_workspace_id = up.workspace_id
-				AND l.source_id = up.id
-			WHERE l.name = 'parent'
-		)
-		SELECT workspace_id, id FROM up ORDER BY depth`,
-		key.Workspace, key.ID)
-	if err != nil {
-		return nil, fmt.Errorf("reading ancestors: %w", err)
+	if created == nil {
+		return "", "", nil
 	}
-	defer rows.Close()
-	var path []Key
-	for rows.Next() {
-		var ancestor Key
-		if err := rows.Scan(&ancestor.Workspace, &ancestor.ID); err != nil {
-			return nil, err
-		}
-		path = append(path, ancestor)
+	latest := *modified
+	if posted != nil && *posted > latest {
+		latest = *posted
 	}
-	return path, rows.Err()
+	return *created, latest, nil
 }
 
 // topicWalk maps changes, newest first, to the top-level entries whose
@@ -271,8 +231,8 @@ type topicWalk struct {
 	workspace  int64
 	candidates map[int64]bool
 	// walked holds every entry whose path up has been followed. A
-	// later, older change to it, or a path up that meets it, reaches
-	// only top-level entries already found.
+	// later, older change to it, or a path up that meets it, reaches a
+	// top-level entry already considered.
 	walked map[Key]bool
 	found  map[int64]bool
 	ranked []int64
@@ -281,9 +241,9 @@ type topicWalk struct {
 	walksLeft int
 }
 
-// reach follows a changed entry's path up, and adds the top-level
-// entries it reaches to sameTime. It reports false when the walk has
-// run out of paths to follow.
+// reach follows a changed entry's path up to its top-level entry, and
+// adds that to sameTime if it is a candidate not yet found. It reports
+// false when the walk has run out of paths to follow.
 func (w *topicWalk) reach(
 	ctx context.Context, entry Key, sameTime *[]int64,
 ) (bool, error) {
@@ -300,19 +260,16 @@ func (w *topicWalk) reach(
 	}
 
 	path := append([]Key{entry}, ancestors...)
-	for i, node := range path {
-		if i > 0 && (w.walked[node] || !w.view.access.CanRead(node.Workspace)) {
-			break
+	for _, node := range path {
+		if w.walked[node] {
+			return true, nil
 		}
 		w.walked[node] = true
-		if node.Workspace != w.workspace {
-			continue
-		}
-		topLevel := i+1 == len(path) || path[i+1].Workspace != w.workspace
-		if topLevel && w.candidates[node.ID] && !w.found[node.ID] {
-			w.found[node.ID] = true
-			*sameTime = append(*sameTime, node.ID)
-		}
+	}
+	top := path[len(path)-1].ID
+	if w.candidates[top] && !w.found[top] {
+		w.found[top] = true
+		*sameTime = append(*sameTime, top)
 	}
 	return true, nil
 }
@@ -327,7 +284,7 @@ func (v view) walkTopics(
 	count int,
 	maxWalks int,
 ) ([]int64, bool, error) {
-	earliest, latest, err := v.changeSpan(ctx)
+	earliest, latest, err := v.changeSpan(ctx, workspace)
 	if err != nil {
 		return nil, false, err
 	}
@@ -358,7 +315,8 @@ func (v view) walkTopics(
 		if from.Before(floor) {
 			from = floor
 		}
-		changes, err := v.changesBetween(ctx, from.Format(timeLayout), to)
+		changes, err := v.changesBetween(ctx, workspace,
+			from.Format(timeLayout), to)
 		if err != nil {
 			return nil, false, err
 		}
@@ -445,11 +403,11 @@ func (v view) searchTopics(
 
 // joinedFrom is the FROM clause of a search: every entry, or with
 // under, the entries of that subtree.
-func joinedFrom(under *Key, access Access) (string, []any) {
+func joinedFrom(under *Key) (string, []any) {
 	if under == nil {
 		return `entries AS e`, nil
 	}
-	return `(WITH RECURSIVE ` + subtreeCTE("under", access) +
+	return `(WITH RECURSIVE ` + subtreeCTE("under") +
 			` SELECT workspace_id, id FROM under) AS under
 		JOIN entries AS e
 			ON e.workspace_id = under.workspace_id AND e.id = under.id`,

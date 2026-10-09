@@ -14,7 +14,8 @@ Use these words, and no others for the same things.
 - **project**: the metadata key every entry must have.
 - **link**: a named relationship from one entry to another on the same
   server, possibly in another workspace.
-- **parent**: the link an entry belongs under. At most one.
+- **parent**: the link an entry belongs under. At most one, and always
+  in the entry's own workspace.
 - **top-level entry**: an entry with no parent.
 - **supersede**: the link saying an entry replaces an older one, which
   then drops out of listings but stays readable by id.
