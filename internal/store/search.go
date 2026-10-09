@@ -64,39 +64,6 @@ const (
 	ViewTopics
 )
 
-// topicsCTEs name each entry's top-level entry in the workspace as
-// tree(workspace_id, entry_id, root_id), and each top-level entry's
-// activity, and whether a current entry is under it, as
-// roots(id, activity_utc, has_current_descendant). They take the
-// workspace id as their two arguments, and walk down only into
-// entries the request can read.
-func topicsCTEs(access Access) string {
-	return `tree(workspace_id, entry_id, root_id) AS (
-	SELECT e.workspace_id, e.id, e.id FROM entries AS e
-	WHERE e.workspace_id = ? AND NOT EXISTS (
-		SELECT 1 FROM entry_links AS p
-		WHERE p.source_workspace_id = e.workspace_id
-			AND p.source_id = e.id AND p.name = 'parent'
-			AND p.target_workspace_id = e.workspace_id
-	)
-	UNION ALL
-	SELECT l.source_workspace_id, l.source_id, tree.root_id
-	FROM entry_links AS l JOIN tree
-		ON l.target_workspace_id = tree.workspace_id
-		AND l.target_id = tree.entry_id
-	WHERE l.name = 'parent' AND ` +
-		access.readableSQL("l.source_workspace_id") + `
-),
-roots(id, activity_utc, has_current_descendant) AS (
-	SELECT tree.root_id, max(` + activityExpr + `),
-		coalesce(max(NOT (e.workspace_id = ? AND e.id = tree.root_id)
-			AND NOT ` + supersededClause + `), 0)
-	FROM tree JOIN entries AS e
-		ON e.workspace_id = tree.workspace_id AND e.id = tree.entry_id
-	GROUP BY tree.root_id
-)`
-}
-
 type whereBuilder struct {
 	clauses []string
 	args    []any
@@ -324,64 +291,57 @@ func (s *Store) Search(
 	if err != nil {
 		return api.SearchResult{}, err
 	}
-
-	var ctes []string
-	var cteArgs []any
-	from := `entries AS e`
-	orderKey := `e.modified_utc`
-	if filter.OrderByCreation {
-		orderKey = `e.created_utc`
-	}
-	visible := `NOT ` + supersededClause
-	if filter.View == ViewTopics {
-		ctes = append(ctes, topicsCTEs(access))
-		cteArgs = append(cteArgs, workspace, workspace)
-		from = `entries AS e JOIN roots ON roots.id = e.id`
-		orderKey = `roots.activity_utc`
-		visible = `(NOT ` + supersededClause +
-			` OR roots.has_current_descendant)`
-	}
-	if filter.Under != nil {
-		ctes = append(ctes, subtreeCTE("under", access))
-		cteArgs = append(cteArgs, filter.Under.Workspace, filter.Under.ID)
-		where.clauses = append(where.clauses, `EXISTS (
-			SELECT 1 FROM under
-			WHERE under.workspace_id = e.workspace_id AND under.id = e.id
-		)`)
-	}
-	if !filter.IncludeSuperseded {
-		where.clauses = append(where.clauses, visible)
-	}
+	from, fromArgs := joinedFrom(filter.Under, access)
+	where.args = append(fromArgs, where.args...)
 	where.clauses = append(where.clauses, `e.workspace_id = ?`)
 	where.args = append(where.args, workspace)
-	with := `WITH RECURSIVE `
-	if len(ctes) > 0 {
-		with += strings.Join(ctes, ",\n") + ",\n"
-	}
-	args := append(append([]any{}, cteArgs...), where.args...)
 
 	v, err := s.begin(ctx, access, true)
 	if err != nil {
 		return api.SearchResult{}, fmt.Errorf("starting search: %w", err)
 	}
 	defer v.tx.Rollback()
-
 	if filter.Under != nil {
 		if err := v.checkEntryExists(ctx, *filter.Under); err != nil {
 			return api.SearchResult{}, err
 		}
 	}
+	var result api.SearchResult
+	if filter.View == ViewTopics {
+		result, err = v.searchTopics(ctx, workspace, filter, from, where)
+	} else {
+		result, err = v.searchFlat(ctx, filter, from, where)
+	}
+	if err != nil {
+		return api.SearchResult{}, err
+	}
+	if err := v.tx.Commit(); err != nil {
+		return api.SearchResult{}, fmt.Errorf("finishing search: %w", err)
+	}
+	return result, nil
+}
+
+// searchFlat lists a page of every matching entry, by its own change
+// or creation time, with how many entries match.
+func (v view) searchFlat(
+	ctx context.Context, filter Filter, from string, where whereBuilder,
+) (api.SearchResult, error) {
+	if !filter.IncludeSuperseded {
+		where.clauses = append(where.clauses, `NOT `+supersededClause)
+	}
 	var total int
-	countQuery := with + `counted AS (SELECT e.id FROM ` + from +
-		where.sql() + `) SELECT count(*) FROM counted`
-	if err := v.tx.QueryRowContext(
-		ctx, countQuery, args...,
+	if err := v.tx.QueryRowContext(ctx,
+		`SELECT count(*) FROM `+from+where.sql(), where.args...,
 	).Scan(&total); err != nil {
 		return api.SearchResult{}, fmt.Errorf(
 			"counting search results: %w", err)
 	}
 
-	pageQuery := with + fmt.Sprintf(`page AS (
+	orderKey := `e.modified_utc`
+	if filter.OrderByCreation {
+		orderKey = `e.created_utc`
+	}
+	pageQuery := fmt.Sprintf(`WITH page AS (
 			SELECT %s, %s AS sort_key
 			FROM %s%s
 			ORDER BY sort_key DESC, e.id DESC
@@ -395,7 +355,7 @@ func (s *Store) Search(
 		ORDER BY page.sort_key DESC, page.id DESC, metadata.key`,
 		entryColumns, orderKey, from, where.sql(),
 	)
-	pageArgs := append(args, filter.Limit, filter.Offset)
+	pageArgs := append(where.args, filter.Limit, filter.Offset)
 	rows, err := v.tx.QueryContext(ctx, pageQuery, pageArgs...)
 	if err != nil {
 		return api.SearchResult{}, fmt.Errorf(
@@ -411,9 +371,6 @@ func (s *Store) Search(
 	listed, err := v.listEntries(ctx, entries)
 	if err != nil {
 		return api.SearchResult{}, err
-	}
-	if err := v.tx.Commit(); err != nil {
-		return api.SearchResult{}, fmt.Errorf("finishing search: %w", err)
 	}
 	return api.SearchResult{Entries: listed, Total: total}, nil
 }

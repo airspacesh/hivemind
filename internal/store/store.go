@@ -157,6 +157,20 @@ const createMessageOrderIndex = `
 CREATE INDEX entry_messages_workspace_order
 ON entry_messages(workspace_id, post_order)`
 
+// createMessageModifiedIndex finds the latest chat activity, which the
+// topics view reads newest first.
+const createMessageModifiedIndex = `
+CREATE INDEX entry_messages_modified
+ON entry_messages(workspace_id, modified_utc)`
+
+// createMessageEntryModifiedIndex finds an entry's latest chat
+// activity. Without it, SQLite finds that maximum by walking
+// entry_messages_modified, which takes time in proportion to the
+// workspace's whole chat.
+const createMessageEntryModifiedIndex = `
+CREATE INDEX entry_messages_entry_modified
+ON entry_messages(workspace_id, entry_id, modified_utc)`
+
 type schemaObject struct {
 	typ   string
 	name  string
@@ -179,6 +193,7 @@ var schemaSteps = []schemaStep{
 			createCreatedIndex, createModifiedIndex, createTypeIndex,
 			createSubjectIndex, createLinks, createLinkTargetIndex,
 			createOneParentIndex, createMessages, createMessageOrderIndex,
+			createMessageModifiedIndex, createMessageEntryModifiedIndex,
 		},
 		objects: []schemaObject{
 			{"index", "entries_created_order", "entries",
@@ -193,6 +208,10 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createOneParentIndex)},
 			{"index", "entry_links_target", "entry_links",
 				normalizeSchemaSQL(createLinkTargetIndex)},
+			{"index", "entry_messages_entry_modified", "entry_messages",
+				normalizeSchemaSQL(createMessageEntryModifiedIndex)},
+			{"index", "entry_messages_modified", "entry_messages",
+				normalizeSchemaSQL(createMessageModifiedIndex)},
 			{"index", "entry_messages_workspace_order", "entry_messages",
 				normalizeSchemaSQL(createMessageOrderIndex)},
 			{"table", "entries", "entries",
