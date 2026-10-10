@@ -1,6 +1,6 @@
 ---
 name: ws
-description: "Record and search the work stream: shared workspaces of typed entries, such as note, todo, decision, idea, and artifact, each with a chat. Use it to get broader context on recent work, such as when planning, to log decisions, useful progress, and artifacts another session may need, and to talk with other agents about an entry. Do not use the ws CLI without loading this skill first."
+description: "Record and search the work stream: shared workspaces of entries, each with a chat. Use it to get broader context on recent work, such as when planning, to log decisions, useful progress, and artifacts another session may need, and to talk with other agents about an entry. Do not use the ws CLI without loading this skill first."
 ---
 
 # Work Stream
@@ -23,7 +23,7 @@ command works in `--workspace <name>`, or else the default workspace.
 ### add
 
 ```
-ws add <type> <subject> --project <p> [--body <b>] [--meta <key>=<value>]... [--jira <k>] [--confluence <u>] [--workspace <name>]
+ws add <subject> --project <p> [--body <b>] [--meta <key>=<value>]... [--jira <k>] [--confluence <u>] [--workspace <name>]
 ```
 
 Adds an entry. `ws list-projects` lists the projects in the workspace,
@@ -82,12 +82,12 @@ what is beneath it. `--id-only` prints an entry id per line.
 
 ```
 ws entry <ref>
-ws edit <ref> [<subject>] [--type <t>] [--project <p>] [--body <b>] [--meta <key>=<value>]... [--no-recent]
+ws edit <ref> [<subject>] [--project <p>] [--body <b>] [--meta <key>=<value>]... [--no-recent]
 ```
 
-`ws entry` shows one entry in full. `ws edit` changes the type,
-project, subject, body, metadata and links. `--body ""` clears the
-body, and a metadata key given no value is removed, as in `--jira ""`.
+`ws entry` shows one entry in full. `ws edit` changes the project,
+subject, body, metadata and links. `--body ""` clears the body, and a
+metadata key given no value is removed, as in `--jira ""`.
 Every entry is kept. To withdraw an entry, edit it to say why, for
 example `ws edit e12 "Retracted: sensitive information" --body ""`.
 
@@ -138,11 +138,12 @@ so they match any part of the value: `--subject duck` finds "Count the
 Ducklings". An empty pattern matches only an empty value, so
 `--body ""` finds the entries with no body.
 
-`--type`, `--project`, `--key`, `--meta <key>=<value>`, the origin
-filters `--origin-user`, `--origin-host`, `--origin-dir`,
+`--project`, `--key`, `--meta <key>=<value>`, the origin filters
+`--origin-user`, `--origin-host`, `--origin-dir`,
 `--origin-claude-session`, and the metadata shorthands `--jira` and
 `--confluence` each name one of a known set, so they match the whole
-value: `--type not` does not match `note`, while `--type 'not*'` does.
+value: `--project duck` does not match `duck-pond`, while
+`--project 'duck*'` does.
 
 Prefix any flag with `--no-` to exclude (e.g., `--no-subject`).
 Repeated filters AND together. Patterns use `*`, `?`, and bracket
@@ -157,8 +158,6 @@ To find what your current Claude session logged:
 ## Conventions
 
 Adapt these to how you work.
-
-Types: `note`, `todo`, `decision`, `idea`, `artifact`, `status`.
 
 `--project`: the repository or project the work belongs to, or a
 representative name when there is no repository. Every entry needs

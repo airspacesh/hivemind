@@ -16,8 +16,6 @@ var repeatedQueryParameters = map[string]bool{
 	"no-subject": true,
 	"body":       true,
 	"no-body":    true,
-	"type":       true,
-	"no-type":    true,
 	"project":    true,
 	"no-project": true,
 	"key":        true,
@@ -182,7 +180,6 @@ func searchFilter(query url.Values) (store.Filter, error) {
 	filter := store.Filter{
 		Subject:             fieldConditions(query, "subject"),
 		Body:                fieldConditions(query, "body"),
-		Type:                fieldConditions(query, "type"),
 		Project:             fieldConditions(query, "project"),
 		Key:                 fieldConditions(query, "key"),
 		Content:             fieldConditions(query, "content"),

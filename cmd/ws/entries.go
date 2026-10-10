@@ -258,8 +258,8 @@ func cmdAdd(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(p.pos) != 2 {
-		return usageError("add <type> <subject> --project <p> " +
+	if len(p.pos) != 1 {
+		return usageError("add <subject> --project <p> " +
 			"[--body <b>] [--meta <key>=<value>]... [--parent <ref>] " +
 			"[--supersedes <ref>]... [--link <name>=<ref>]... [--no-recent] " +
 			"[--workspace <name>]")
@@ -289,9 +289,8 @@ func cmdAdd(c *client, args []string) error {
 		return err
 	}
 	request := api.AddEntryRequest{
-		Type:     p.pos[0],
 		Project:  p.strs["--project"],
-		Subject:  p.pos[1],
+		Subject:  p.pos[0],
 		Body:     p.strs["--body"],
 		Metadata: metadata,
 		Origin:   origin,
@@ -324,8 +323,7 @@ func cmdAdd(c *client, args []string) error {
 
 func cmdEdit(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs: []string{"--type", "--project", "--subject", "--body",
-			"--parent"},
+		strs:  []string{"--project", "--subject", "--body", "--parent"},
 		bools: []string{"--no-recent"},
 		repeat: append(
 			[]string{"--meta", "--supersedes", "--link", "--unlink"},
@@ -335,8 +333,8 @@ func cmdEdit(c *client, args []string) error {
 		return err
 	}
 	if len(p.pos) < 1 || len(p.pos) > 2 {
-		return usageError("edit <ref> [<subject>] [--type <t>] " +
-			"[--project <p>] [--body <b>] [--meta <key>=<value>]... " +
+		return usageError("edit <ref> [<subject>] [--project <p>] " +
+			"[--body <b>] [--meta <key>=<value>]... " +
 			"[--parent <ref>|\"\"] [--supersedes <ref>]... " +
 			"[--link <name>=<ref>]... [--unlink <name>[=<ref>]]... " +
 			"[--no-recent]")
@@ -347,10 +345,6 @@ func cmdEdit(c *client, args []string) error {
 	}
 
 	request := api.EditEntryRequest{}
-	if p.has("--type") {
-		entryType := p.strs["--type"]
-		request.Type = &entryType
-	}
 	if p.has("--project") {
 		project := p.strs["--project"]
 		request.Project = &project

@@ -103,14 +103,13 @@ func addTo(
 func mustAdd(
 	t *testing.T,
 	store *Store,
-	typ string,
 	subject string,
 	body string,
 	metadata map[string]string,
 ) api.Entry {
 	t.Helper()
 	return addTo(t, store, "default", api.AddEntryRequest{
-		Type: typ, Subject: subject, Body: body, Metadata: metadata,
+		Subject: subject, Body: body, Metadata: metadata,
 	})
 }
 
@@ -159,7 +158,7 @@ func TestEntryIDsCountFromOnePerWorkspace(t *testing.T) {
 	for _, workspace := range []string{"default", "personal", "default",
 		"default", "personal"} {
 		entry := addTo(t, store, workspace,
-			api.AddEntryRequest{Type: "note", Subject: "s"})
+			api.AddEntryRequest{Subject: "s"})
 		got = append(got, entry.Ref.String())
 	}
 	want := fmt.Sprint([]string{"e1", "p1", "e2", "e3", "p2"})
@@ -180,7 +179,7 @@ func TestConcurrentAddsGetUniqueIDsCountingFromOne(t *testing.T) {
 			workspace := []string{"default", "personal"}[i%2]
 			entry, err := store.Add(context.Background(),
 				everyAccess(store), workspaceID(t, store, workspace),
-				api.AddEntryRequest{Type: "note", Subject: "s"})
+				api.AddEntryRequest{Subject: "s"})
 			if err != nil {
 				t.Errorf("adding entry: %v", err)
 				return
@@ -211,51 +210,47 @@ func TestGeneratedColumnsFollowWrites(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	entry := mustAdd(
-		t, store, "TODO", "COUNT Æ", "BODY Σ",
+		t, store, "COUNT Æ", "BODY Σ",
 		map[string]string{"jira": "QUACK Æ"},
 	)
 	assertFolded := func(
-		wantType string,
 		wantSubject string,
 		wantBody string,
 		wantValue string,
 	) {
 		t.Helper()
-		var typ, subject, body, value string
+		var subject, body, value string
 		err := store.db.QueryRowContext(ctx, `
-			SELECT e.type_lower, e.subject_lower, e.body_lower,
-				metadata.value_lower
+			SELECT e.subject_lower, e.body_lower, metadata.value_lower
 			FROM entries AS e
 			JOIN entry_metadata AS metadata
 				ON metadata.workspace_id = e.workspace_id
 				AND metadata.entry_id = e.id
 			WHERE e.id = ?`, entry.Ref.ID,
-		).Scan(&typ, &subject, &body, &value)
+		).Scan(&subject, &body, &value)
 		if err != nil {
 			t.Fatalf("reading folded values: %v", err)
 		}
-		if typ != wantType || subject != wantSubject ||
-			body != wantBody || value != wantValue {
+		if subject != wantSubject || body != wantBody ||
+			value != wantValue {
 			t.Fatalf(
-				"folded values = %q, %q, %q, %q; want %q, %q, %q, %q",
-				typ, subject, body, value,
-				wantType, wantSubject, wantBody, wantValue,
+				"folded values = %q, %q, %q; want %q, %q, %q",
+				subject, body, value, wantSubject, wantBody, wantValue,
 			)
 		}
 	}
-	assertFolded("todo", "count Æ", "body Σ", "quack Æ")
+	assertFolded("count Æ", "body Σ", "quack Æ")
 
-	entryType := "NOTE"
 	subject := "CHANGED Æ"
 	body := "CHANGED Σ"
 	if _, err := store.Edit(ctx, everyAccess(store),
 		store.mustKey(entry.Ref), api.EditEntryRequest{
-			Type: &entryType, Subject: &subject, Body: &body,
+			Subject: &subject, Body: &body,
 			Metadata: map[string]string{"jira": "CHANGED Æ"},
 		}); err != nil {
 		t.Fatalf("editing entry: %v", err)
 	}
-	assertFolded("note", "changed Æ", "changed Σ", "changed Æ")
+	assertFolded("changed Æ", "changed Σ", "changed Æ")
 }
 
 func TestMutationRollsBackWhenResultCannotBeRead(t *testing.T) {
@@ -272,7 +267,7 @@ func TestMutationRollsBackWhenResultCannotBeRead(t *testing.T) {
 	}
 	_, err = store.Add(ctx, everyAccess(store),
 		workspaceID(t, store, "default"),
-		api.AddEntryRequest{Type: "note", Subject: "must roll back"})
+		api.AddEntryRequest{Subject: "must roll back"})
 	if err == nil {
 		t.Fatal("add succeeded despite unreadable result")
 	}
@@ -318,7 +313,7 @@ func TestMetadataEditsRefreshModifiedAndApply(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			store := openTestStore(t)
-			entry := mustAdd(t, store, "note", "entry", "",
+			entry := mustAdd(t, store, "entry", "",
 				map[string]string{"jira": "QUACK-1"})
 			oldTime := "2000-01-01T00:00:00.000000000Z"
 			if _, err := store.db.ExecContext(ctx, `
@@ -348,7 +343,7 @@ func TestCanceledMutationDoesNotWrite(t *testing.T) {
 	cancel()
 	_, err := store.Add(ctx, everyAccess(store),
 		workspaceID(t, store, "default"),
-		api.AddEntryRequest{Type: "note", Subject: "canceled"})
+		api.AddEntryRequest{Subject: "canceled"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("add error = %v, want context.Canceled", err)
 	}
@@ -368,7 +363,7 @@ func TestBusyDatabaseIsRecognized(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "busy.db")
 	first := openStoreAt(t, path, testBusyTimeout)
 	second := openStoreAt(t, path, 5*time.Millisecond)
-	mustAdd(t, first, "note", "locked", "", nil)
+	mustAdd(t, first, "locked", "", nil)
 
 	tx, err := first.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -381,7 +376,7 @@ func TestBusyDatabaseIsRecognized(t *testing.T) {
 	}
 	_, err = second.Add(ctx, everyAccess(second),
 		workspaceID(t, second, "default"),
-		api.AddEntryRequest{Type: "note", Subject: "blocked"})
+		api.AddEntryRequest{Subject: "blocked"})
 	if !IsBusy(err) {
 		t.Fatalf("add error = %v, want SQLite busy/locked", err)
 	}
@@ -396,7 +391,7 @@ func TestMetadataLimitStopsEntryGrowth(t *testing.T) {
 	for index := range api.MaxMetadata {
 		metadata[fmt.Sprintf("key-%d", index)] = "value"
 	}
-	entry := mustAdd(t, store, "note", "bounded", "", metadata)
+	entry := mustAdd(t, store, "bounded", "", metadata)
 	ctx := context.Background()
 	key := store.mustKey(entry.Ref)
 	_, err := store.Edit(ctx, everyAccess(store), key, api.EditEntryRequest{
@@ -422,7 +417,7 @@ func TestMetadataLimitStopsEntryGrowth(t *testing.T) {
 // the read connections refuse writes.
 func TestWritesProceedWhileAReadIsOpen(t *testing.T) {
 	store := openTestStore(t)
-	mustAdd(t, store, "note", "before the read", "", nil)
+	mustAdd(t, store, "before the read", "", nil)
 	ctx := context.Background()
 	read, err := store.begin(ctx, everyAccess(store), true)
 	if err != nil {
@@ -440,7 +435,7 @@ func TestWritesProceedWhileAReadIsOpen(t *testing.T) {
 	defer cancel()
 	if _, err := store.Add(writeCtx, everyAccess(store),
 		workspaceID(t, store, "default"), api.AddEntryRequest{
-			Type: "note", Subject: "during the read",
+			Subject: "during the read",
 		}); err != nil {
 		t.Fatalf("adding while a read is open: %v", err)
 	}

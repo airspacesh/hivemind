@@ -50,10 +50,10 @@ func addFiller(t *testing.T, store *Store) {
 		)
 		INSERT INTO entries (
 			workspace_id, id, created_utc, modified_utc, activity_utc,
-			type, project, subject
+			project, subject
 		)
 		SELECT ?2, (SELECT max(id) FROM entries WHERE workspace_id = ?2) + i,
-			?3, ?3, ?3, 'note', 'pond', '0'
+			?3, ?3, ?3, 'pond', '0'
 		FROM n`,
 		changesBeforeIndex+changesPerMatch*100,
 		workspaceID(t, store, "default"), nowUTC()); err != nil {
@@ -63,15 +63,15 @@ func addFiller(t *testing.T, store *Store) {
 
 func TestTextIndexKeepsGlobSemantics(t *testing.T) {
 	store := openTestStore(t)
-	mustAdd(t, store, "note", "Count the Ducklings", "", nil)
-	mustAdd(t, store, "note", "Fix Nest", "Ducklings are safe", nil)
-	mustAdd(t, store, "note", `Say "quack" ]twice[`, "", nil)
-	mustAdd(t, store, "note", "Æther pond", "a\nduck", nil)
-	chatty := mustAdd(t, store, "note", "Chat", "", nil)
+	mustAdd(t, store, "Count the Ducklings", "", nil)
+	mustAdd(t, store, "Fix Nest", "Ducklings are safe", nil)
+	mustAdd(t, store, `Say "quack" ]twice[`, "", nil)
+	mustAdd(t, store, "Æther pond", "a\nduck", nil)
+	chatty := mustAdd(t, store, "Chat", "", nil)
 	mustPost(t, store, chatty.Ref, "The ducklings hid in the reeds")
 	mustPost(t, store, chatty.Ref, "fix the nest by noon")
 	// Every run of a pattern is in this subject, but in another order.
-	mustAdd(t, store, "note", "nest fix", "", nil)
+	mustAdd(t, store, "nest fix", "", nil)
 	addFiller(t, store)
 
 	patterns := []string{
@@ -129,8 +129,7 @@ func TestTextIndexKeepsGlobSemantics(t *testing.T) {
 func TestTextIndexFollowsEdits(t *testing.T) {
 	store := openTestStore(t)
 	ctx := context.Background()
-	entry := mustAdd(t, store, "note", "Count the herons", "In the reeds",
-		nil)
+	entry := mustAdd(t, store, "Count the herons", "In the reeds", nil)
 	message := mustPost(t, store, entry.Ref, "Saw an egret")
 	subject, body := "Count the ducks", "On the pond"
 	if _, err := store.Edit(ctx, everyAccess(store),
@@ -167,7 +166,7 @@ func TestTextIndexForgetsOverwrittenText(t *testing.T) {
 	// No other text holds this character, so its trigram is stored
 	// whole, not as a suffix of another term.
 	const secret = "ǂǂǂ"
-	entry := mustAdd(t, store, "note", "Heron "+secret, "", nil)
+	entry := mustAdd(t, store, "Heron "+secret, "", nil)
 	message := mustPost(t, store, entry.Ref, "Egret "+secret)
 	subject := "Heron"
 	if _, err := store.Edit(ctx, everyAccess(store),
@@ -200,10 +199,10 @@ func TestTextIndexForgetsOverwrittenText(t *testing.T) {
 // find the older matches the later pages need.
 func TestSearchPagesFromTheNewestChangesOnToTheIndex(t *testing.T) {
 	store := openTestStore(t)
-	oldest := mustAdd(t, store, "note", "Heron at dawn", "", nil)
+	oldest := mustAdd(t, store, "Heron at dawn", "", nil)
 	addFiller(t, store)
-	older := mustAdd(t, store, "note", "Heron at noon", "", nil)
-	newest := mustAdd(t, store, "note", "Count", "", nil)
+	older := mustAdd(t, store, "Heron at noon", "", nil)
+	newest := mustAdd(t, store, "Count", "", nil)
 	mustPost(t, store, newest.Ref, "A heron at dusk")
 
 	for offset, want := range []api.Ref{newest.Ref, older.Ref, oldest.Ref} {

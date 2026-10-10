@@ -54,7 +54,7 @@ func addToProject(
 ) api.Entry {
 	t.Helper()
 	return addTo(t, store, workspace, api.AddEntryRequest{
-		Type: "note", Subject: "duck", Project: project})
+		Subject: "duck", Project: project})
 }
 
 func TestProjectsCountOneWorkspace(t *testing.T) {

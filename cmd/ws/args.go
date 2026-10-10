@@ -9,7 +9,7 @@ import (
 
 // flagSpec declares the flags a subcommand accepts. The parser is
 // hand-rolled instead of using the flag package so flags can appear
-// after positional arguments (`ws add todo "text" --project x`).
+// after positional arguments (`ws add "text" --project x`).
 type flagSpec struct {
 	strs   []string          // flags taking a value
 	bools  []string          // flags taking no value
@@ -99,7 +99,7 @@ func parseArgs(args []string, spec flagSpec) (*parsedArgs, error) {
 }
 
 var searchFields = []string{
-	"subject", "body", "content", "type", "project", "key", "meta",
+	"subject", "body", "content", "project", "key", "meta",
 	"origin-user", "origin-host", "origin-dir", "origin-claude-session",
 }
 

@@ -1,5 +1,5 @@
-// ws is the client of ws-server, which hosts workspaces of typed
-// entries with metadata, links, and a chat on each entry.
+// ws is the client of ws-server, which hosts workspaces of entries
+// with metadata, links, and a chat on each entry.
 package main
 
 import (
@@ -28,11 +28,11 @@ var (
 const usage = `{program} - a client for workstream: shared workspaces of entries
 
 Usage:
-  {program} add <type> <subject> --project <p> [--body <b>]
+  {program} add <subject> --project <p> [--body <b>]
          [--meta <key>=<value>]... [--parent <ref>] [--supersedes <ref>]...
          [--link <name>=<ref>]... [--no-recent] [--workspace <name>]
-  {program} edit <ref> [<subject>] [--type <t>] [--project <p>]
-         [--body <b>] [--meta <key>=<value>]... [--parent <ref>|""]
+  {program} edit <ref> [<subject>] [--project <p>] [--body <b>]
+         [--meta <key>=<value>]... [--parent <ref>|""]
          [--supersedes <ref>]... [--link <name>=<ref>]...
          [--unlink <name>[=<ref>]]... [--no-recent]
   {program} entry <ref>
@@ -53,12 +53,12 @@ Usage:
 
 Workspaces and entries:
   A workspace is a named collection of entries, hosted on a server. An
-  entry has a type (e.g. note, todo, decision, idea), a project, a short
-  subject, an optional longer body, and metadata: key=value pairs such
-  as jira. Every entry needs a project. An entry's id is its
-  workspace's prefix and a number, like e12, and is called <ref> above.
-  Keep the subject to a headline and put detail in the body. Listings
-  show only the subject, and '{program} entry' shows the rest.
+  entry has a project, a short subject, an optional longer body, and
+  metadata: key=value pairs such as jira. Every entry needs a project.
+  An entry's id is its workspace's prefix and a number, like e12, and
+  is called <ref> above. Keep the subject to a headline and put detail
+  in the body. Listings show only the subject, and '{program} entry'
+  shows the rest.
 
   A command that takes a <ref> works in that entry's workspace, and
   add with --parent works in the parent's. Any other command works in
@@ -74,13 +74,13 @@ Workspaces and entries:
   dashes, starting with a letter (e.g. jira, build-id). For several of
   a kind, number them: jira-1, jira-2. The key project is reserved,
   since the project is a field of its own. Field limits (characters):
-  type 64, project 256, subject 128, body 2048, key 64, value 256, and
-  16 metadata pairs. Every entry is kept. To withdraw one, edit it, for
+  project 256, subject 128, body 2048, key 64, value 256, and 16
+  metadata pairs. Every entry is kept. To withdraw one, edit it, for
   example to "Retracted: sensitive information".
 
 Editing:
-  '{program} edit' changes the type, project, subject, body, metadata
-  and links. --body "" clears the body. Giving a metadata key no value
+  '{program} edit' changes the project, subject, body, metadata and
+  links. --body "" clears the body. Giving a metadata key no value
   removes it, as in --meta jira= or --jira "". The project can change
   but not be removed. An entry's id, times and origin cannot change.
   add and edit end by listing the 5 most recently changed other
@@ -115,17 +115,17 @@ Listings:
   output's times all fall on one day, or else as 23/07/2025 13:20.
 
 Search filters (recent and search):
-  --subject --body --content --type --project --key --meta <key>=<value>
+  --subject --body --content --project --key --meta <key>=<value>
   --origin-user --origin-host --origin-dir --origin-claude-session
   --jira --confluence (shorthands for --meta <key>=<value>)
   Each takes an ASCII-case-insensitive GLOB pattern: '*', '?' and
   bracket classes. Quote patterns so the shell leaves them alone, and
   use a bracket class like [*] for a literal wildcard. --subject, --body
   and --content (subject or body, also a positional <text>) match any
-  part of the text. The others match the whole value, so --type not
-  does not match note. An empty pattern matches only an empty value.
-  Prefix a filter with no- to exclude, as in --no-type. Filters AND
-  together.
+  part of the text. The others match the whole value, so --project
+  duck does not match duck-pond. An empty pattern matches only an
+  empty value. Prefix a filter with no- to exclude, as in --no-project.
+  Filters AND together.
   '{program} search' and '{program} recent --flat' also match <text> and
   --content against each message in an entry's chat, while the other
   filters still apply to the entry. An entry ranks by its newest match.

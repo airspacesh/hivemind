@@ -58,9 +58,6 @@ CREATE TABLE entries (
 	created_utc TEXT NOT NULL,
 	modified_utc TEXT NOT NULL,
 	activity_utc TEXT NOT NULL,
-	type TEXT NOT NULL,
-	type_lower TEXT COLLATE BINARY
-		GENERATED ALWAYS AS (lower(type)) STORED,
 	project TEXT NOT NULL,
 	project_lower TEXT COLLATE BINARY
 		GENERATED ALWAYS AS (lower(project)) STORED,
@@ -104,9 +101,6 @@ ON entries(workspace_id, created_utc DESC, id DESC)`
 const createModifiedIndex = `
 CREATE INDEX entries_modified_order
 ON entries(workspace_id, modified_utc DESC, id DESC)`
-
-const createTypeIndex = `
-CREATE INDEX entries_type_search ON entries(type_lower)`
 
 const createSubjectIndex = `
 CREATE INDEX entries_subject_search ON entries(subject_lower)`
@@ -287,7 +281,7 @@ var schemaSteps = []schemaStep{
 	{
 		statements: []string{
 			createWorkspaces, createEntries, createMetadata,
-			createCreatedIndex, createModifiedIndex, createTypeIndex,
+			createCreatedIndex, createModifiedIndex,
 			createSubjectIndex, createProjectIndex,
 			createProjectCreatedIndex, createLinks,
 			createLinkTargetIndex, createOneParentIndex, createMessages,
@@ -307,8 +301,6 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createProjectCreatedIndex)},
 			{"index", "entries_subject_search", "entries",
 				normalizeSchemaSQL(createSubjectIndex)},
-			{"index", "entries_type_search", "entries",
-				normalizeSchemaSQL(createTypeIndex)},
 			{"index", "entry_links_one_parent", "entry_links",
 				normalizeSchemaSQL(createOneParentIndex)},
 			{"index", "entry_links_target", "entry_links",

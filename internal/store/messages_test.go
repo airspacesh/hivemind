@@ -52,10 +52,10 @@ func chatText(page api.ChatPage) string {
 
 func TestMessageNumbersCountFromOnePerEntry(t *testing.T) {
 	store := openTestStore(t)
-	first := mustAdd(t, store, "note", "first", "", nil)
-	second := mustAdd(t, store, "note", "second", "", nil)
+	first := mustAdd(t, store, "first", "", nil)
+	second := mustAdd(t, store, "second", "", nil)
 	private := addTo(t, store, "personal",
-		api.AddEntryRequest{Type: "note", Subject: "private"})
+		api.AddEntryRequest{Subject: "private"})
 
 	var got []string
 	for _, entry := range []api.Ref{first.Ref, second.Ref, first.Ref,
@@ -70,8 +70,8 @@ func TestMessageNumbersCountFromOnePerEntry(t *testing.T) {
 
 func TestConcurrentPostsGetUniqueNumbersCountingFromOne(t *testing.T) {
 	store := openTestStore(t)
-	first := mustAdd(t, store, "note", "first", "", nil)
-	second := mustAdd(t, store, "note", "second", "", nil)
+	first := mustAdd(t, store, "first", "", nil)
+	second := mustAdd(t, store, "second", "", nil)
 
 	const perEntry = 10
 	var wg sync.WaitGroup
@@ -110,7 +110,7 @@ func TestConcurrentPostsGetUniqueNumbersCountingFromOne(t *testing.T) {
 
 func TestChatReadsPageAfterTheCursor(t *testing.T) {
 	store := openTestStore(t)
-	entry := mustAdd(t, store, "note", "thread", "", nil)
+	entry := mustAdd(t, store, "thread", "", nil)
 	if got := chatText(readChat(t, store, entry.Ref, 0, 2)); got !=
 		" cursor=0 remaining=0" {
 		t.Fatalf("empty chat = %q", got)
@@ -157,7 +157,7 @@ func TestChatReadsPageAfterTheCursor(t *testing.T) {
 func TestEditsKeepTheirPlaceAndAreNotReadAgain(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	entry := mustAdd(t, store, "note", "thread", "", nil)
+	entry := mustAdd(t, store, "thread", "", nil)
 	question := mustPost(t, store, entry.Ref, "question")
 	mustPost(t, store, entry.Ref, "answer")
 	cursor := readChat(t, store, entry.Ref, 0, 20).Cursor
@@ -216,8 +216,8 @@ func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	pond := mustAdd(t, store, "note", "pond", "", nil)
-	nest := mustAdd(t, store, "note", "nest", "", nil)
+	pond := mustAdd(t, store, "pond", "", nil)
+	nest := mustAdd(t, store, "nest", "", nil)
 	checkActivity("adding")
 
 	mustPost(t, store, pond.Ref, "first")
@@ -244,11 +244,11 @@ func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
 func TestOverviewGroupsTheNewestMessagesByEntry(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	a := mustAdd(t, store, "note", "a", "", nil)
-	b := mustAdd(t, store, "note", "b", "", nil)
-	c := mustAdd(t, store, "note", "c", "", nil)
+	a := mustAdd(t, store, "a", "", nil)
+	b := mustAdd(t, store, "b", "", nil)
+	c := mustAdd(t, store, "c", "", nil)
 	private := addTo(t, store, "personal",
-		api.AddEntryRequest{Type: "note", Subject: "private"})
+		api.AddEntryRequest{Subject: "private"})
 	first := mustPost(t, store, a.Ref, "a1")
 	mustPost(t, store, b.Ref, "b1")
 	mustPost(t, store, a.Ref, "a2")
@@ -282,7 +282,7 @@ func TestOverwrittenTextLeavesNoCopyInTheDatabase(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	store := openStoreAt(t, filepath.Join(dir, "ws.db"), testBusyTimeout)
-	entry := mustAdd(t, store, "note", "SUBJECTMARK "+
+	entry := mustAdd(t, store, "SUBJECTMARK "+
 		strings.Repeat("x", 100), "", nil)
 	message := mustPost(t, store, entry.Ref, "EDITEDAWAYMARK "+
 		strings.Repeat("x", 200))

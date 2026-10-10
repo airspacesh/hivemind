@@ -52,7 +52,6 @@ type Entry struct {
 	Ref      Ref               `json:"ref"`
 	Created  time.Time         `json:"created"`
 	Modified time.Time         `json:"modified"`
-	Type     string            `json:"type"`
 	Project  string            `json:"project"`
 	Subject  string            `json:"subject"`
 	Body     string            `json:"body,omitempty"`
@@ -67,7 +66,6 @@ type Entry struct {
 // An entry the request cannot read carries its ref alone.
 type EntryRef struct {
 	Ref          Ref    `json:"ref"`
-	Type         string `json:"type,omitempty"`
 	Subject      string `json:"subject,omitempty"`
 	SupersededBy []Ref  `json:"superseded_by,omitempty"`
 }
@@ -165,7 +163,6 @@ type ChatOverview struct {
 }
 
 type AddEntryRequest struct {
-	Type     string            `json:"type"`
 	Project  string            `json:"project"`
 	Subject  string            `json:"subject"`
 	Body     string            `json:"body,omitempty"`
@@ -181,7 +178,6 @@ type AddEntryRequest struct {
 // Links are removed before they are added. A parent that is added
 // replaces the old one, since an entry has at most one.
 type EditEntryRequest struct {
-	Type     *string           `json:"type,omitempty"`
 	Project  *string           `json:"project,omitempty"`
 	Subject  *string           `json:"subject,omitempty"`
 	Body     *string           `json:"body,omitempty"`
@@ -196,8 +192,8 @@ type EditEntryRequest struct {
 // ChangesContent reports whether the edit changes the entry itself,
 // rather than only its links.
 func (r EditEntryRequest) ChangesContent() bool {
-	return r.Type != nil || r.Project != nil || r.Subject != nil ||
-		r.Body != nil || len(r.Metadata) > 0
+	return r.Project != nil || r.Subject != nil || r.Body != nil ||
+		len(r.Metadata) > 0
 }
 
 // MatchedEntry is an entry a listing shows. Messages come oldest

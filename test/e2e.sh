@@ -171,31 +171,28 @@ check_status "old routes are absent" "404" \
     -H "Workstream-API-Version: $api_version" "$main_url/api/entries"
 
 # Search filters reach the server as given.
-ws add todo "Find a Stock Image of a Duck" --project Duck-Pond >/dev/null # e1
-ws add note "Reviewed the duck PR" --project pond \
+ws add "Find a Stock Image of a Duck" --project Duck-Pond >/dev/null # e1
+ws add "Reviewed the duck PR" --project pond \
     --meta pr=https://example.com/pr/7 --jira QUACK-1 >/dev/null # e2
-ws add note "Handle [duck]? literally" --project pond >/dev/null # e3
+ws add "Handle [duck]? literally" --project pond >/dev/null # e3
 check_equal "GLOB reaches the server" "e1" \
     "$(ws search --subject '*stock*' --id-only)"
 check_equal "GLOB is ASCII case-insensitive" "e2" \
     "$(ws search --jira 'quack-*' --id-only)"
 check_equal "prose filters match part of the value" "e1" \
     "$(ws search Stock --id-only)"
-check_equal "enum-like filters do not match a prefix" "" \
-    "$(ws search --type not --id-only)"
-check_equal "a wildcard widens an enum-like filter" "e3
-e2" "$(ws search --type 'not*' --id-only)"
+check_equal "whole-value filters do not match a prefix" "" \
+    "$(ws search --project pon --id-only)"
+check_equal "a wildcard widens a whole-value filter" "e3
+e2" "$(ws search --project 'pon*' --id-only)"
 check_equal "bracket class matches a literal wildcard" "e3" \
     "$(ws search '[?]' --id-only)"
 check_equal "negation reaches the server" "e1" \
-    "$(ws search --no-type note --id-only)"
+    "$(ws search --no-project pond --id-only)"
 check_equal "the project filter ignores ASCII case" "e1" \
     "$(ws search --project duck-pond --id-only)"
 
 # Edits.
-ws edit e3 --type decision --no-recent >/dev/null
-check_equal "a retyped entry is found under its new type" "e3" \
-    "$(ws search --type decision --id-only)"
 ws edit e3 --project nest --no-recent >/dev/null
 check_equal "a moved entry is found under its new project" "e3" \
     "$(ws search --project nest --id-only)"
@@ -209,28 +206,28 @@ ws edit e1 --body "The Long Form Detail" --no-recent >/dev/null
 check "entry shows the body" "The Long Form Detail" "$(ws entry e1)"
 check "a listing hides the body" "0" \
     "$(ws search Stock | grep -c 'Long Form Detail' || true)"
-after_add="$(ws add note "Fourth duck" --project pond)"
+after_add="$(ws add "Fourth duck" --project pond)"
 check_equal "a change lists the other recent entries" "e1
 e2
 e3" "$(echo "$after_add" | sed -n 's/^\[\(e[0-9]*\)\].*/\1/p')"
 
 # Projects.
 check "add needs a project" "add needs --project" \
-    "$(ws add note "No project" 2>&1 || true)"
+    "$(ws add "No project" 2>&1 || true)"
 check "the project is not metadata" "project is not a metadata key" \
-    "$(ws add note "Meta project" --project pond --meta project=pond \
+    "$(ws add "Meta project" --project pond --meta project=pond \
         2>&1 || true)"
 check "the first entry in a project is noticed" \
     'first entry in project "lake-shore"' \
-    "$(ws add note "Shore duck" --project lake-shore --no-recent)"
+    "$(ws add "Shore duck" --project lake-shore --no-recent)"
 check "list-projects counts a project's recent entries" "1 entry" \
     "$(ws list-projects | grep lake-shore)"
 
 # Links: one parent, supersession hides the older entry, no loops.
-topic="$(ws add idea "Topic" --project links --no-recent | added)"
-old_note="$(ws add note "Old finding" --project links --parent "$topic" \
+topic="$(ws add "Topic" --project links --no-recent | added)"
+old_note="$(ws add "Old finding" --project links --parent "$topic" \
     --no-recent | added)"
-fix_a="$(ws add note "Corrected finding" --project links \
+fix_a="$(ws add "Corrected finding" --project links \
     --supersedes "$old_note" --link "see=$topic" --no-recent | added)"
 check "the older entry names its successor" "Superseded by $fix_a" \
     "$(ws entry "$old_note")"
@@ -245,20 +242,20 @@ check_equal "unlinking by name removes the link" "" \
     "$(ws entry "$topic" | grep 'see this entry' || true)"
 
 # Views and tree cuts.
-root="$(ws add idea "Count the ducklings" --project views --no-recent |
+root="$(ws add "Count the ducklings" --project views --no-recent |
     added)"
-pond_a="$(ws add note "Pond A counted" --project views --parent "$root" \
+pond_a="$(ws add "Pond A counted" --project views --parent "$root" \
     --no-recent | added)"
-recount="$(ws add note "Recount needed" --project views \
+recount="$(ws add "Recount needed" --project views \
     --parent "$pond_a" --no-recent | added)"
 for index in 1 2 3; do
-    ws add note "Recount $index" --project views --parent "$recount" \
+    ws add "Recount $index" --project views --parent "$recount" \
         --no-recent >/dev/null
 done
-pond_1="$(ws add note "Pond 1" --project views --parent "$root" \
+pond_1="$(ws add "Pond 1" --project views --parent "$root" \
     --no-recent | added)"
 for index in 2 3; do
-    ws add note "Pond $index" --project views --parent "$root" \
+    ws add "Pond $index" --project views --parent "$root" \
         --no-recent >/dev/null
 done
 check "a top-level entry counts what is below it" \
@@ -268,15 +265,15 @@ check "search shows each hit's path" \
     "$(ws search 'Recount needed' --project views)"
 check_equal "search under a subtree stays inside it" "4" \
     "$(ws search --under "$recount" --id-only | wc -l | tr -d ' ')"
-check "the tree indents grandchildren" "    [$recount] (note)" \
+check "the tree indents grandchildren" "    [$recount] " \
     "$(ws tree "$root")"
 tree_output="$(ws tree "$root" --limit 3)"
-check_equal "a tree cut at its limit marks where" "[$root] (idea)
-  [$pond_a] (note)
+check_equal "a tree cut at its limit marks where" "[$root]
+  [$pond_a]
     ... 4 more below $pond_a
-  [$pond_1] (note)
+  [$pond_1]
   ... 2 more under $root" \
-    "$(echo "$tree_output" | sed -E 's/^( *(\[[a-z0-9]*\] \([a-z]*\)|\.\.\. .*)).*/\1/')"
+    "$(echo "$tree_output" | sed -E 's/^( *(\[[a-z0-9]*\]|\.\.\. .*)).*/\1/')"
 check_equal "tree cut markers carry no command hints" "" \
     "$(echo "$tree_output" | grep -E '\.\.\..*(ws|tree|--)' || true)"
 check_equal "times on one day show the clock alone" "" \
@@ -284,7 +281,7 @@ check_equal "times on one day show the clock alone" "" \
 
 # Two workspaces on one server count their entries apart, and an id
 # picks its workspace.
-private="$(ws add note "Private PROTECTEDMARK" --project mine \
+private="$(ws add "Private PROTECTEDMARK" --project mine \
     --workspace personal --link "see=$root" --no-recent | added)"
 check_equal "the second workspace counts from 1" "p1" "$private"
 check "an id picks its workspace" "Private PROTECTEDMARK" \
@@ -294,7 +291,7 @@ check_equal "a workspace lists only its own entries" "p1" \
 
 # A second server: its ids resolve by asking the servers in turn, and a
 # link cannot reach across.
-remote="$(ws add note "Remote entry" --project remote --workspace remote \
+remote="$(ws add "Remote entry" --project remote --workspace remote \
     --no-recent | added)"
 check_equal "the second server's workspace has its own prefix" "r1" \
     "$remote"
@@ -313,15 +310,15 @@ check "a missing entry is reported as missing" "entry not found: e999" \
 # parent never crosses them, and add takes its parent's workspace.
 check "a parent cannot cross workspaces" \
     "a parent must be in the same workspace" \
-    "$(ws add note "Protected child" --project mine --workspace personal \
+    "$(ws add "Protected child" --project mine --workspace personal \
         --parent "$root" 2>&1 || true)"
-ws add note "Protected see PROTECTEDMARK" --project mine \
+ws add "Protected see PROTECTEDMARK" --project mine \
     --workspace personal --link "see=$root" --no-recent >/dev/null # p2
 check "add takes its parent's workspace" "Added entry [p3]." \
-    "$(ws add note "Protected child" --project mine --parent p2 --no-recent)"
+    "$(ws add "Protected child" --project mine --parent p2 --no-recent)"
 curl -fsS -X POST -H "Workstream-API-Version: $api_version" \
     -H "Authorization: Bearer $test_secret" \
-    --data "{\"type\":\"note\",\"subject\":\"Open linking protected\",\"project\":\"views\",\"origin\":{},\"links\":[{\"name\":\"see\",\"ref\":\"p1\"}]}" \
+    --data "{\"subject\":\"Open linking protected\",\"project\":\"views\",\"origin\":{},\"links\":[{\"name\":\"see\",\"ref\":\"p1\"}]}" \
     "$main_url/api/workspaces/default/entries" >/dev/null
 under_protected="$(ws search 'Open linking protected' --id-only)"
 check "a protected link shows as its bare id" "see p1" \
@@ -329,7 +326,7 @@ check "a protected link shows as its bare id" "see p1" \
 check "a protected backlink shows as its bare id" "p1 see this entry" \
     "$(ws entry "$root")"
 check "a link to an unreadable entry is refused" "link target not found" \
-    "$(ws add note "Probe" --project views --link see=p1 2>&1 || true)"
+    "$(ws add "Probe" --project views --link see=p1 2>&1 || true)"
 ws chat send p2 "Protected message PROTECTEDMARK" >/dev/null
 ws chat send "$root" "Open message" >/dev/null
 open_views="$(ws entry "$root"; ws tree "$root"; ws search --under "$root"
@@ -341,7 +338,7 @@ check_equal "a tree holds no protected entry" "" \
     "$(ws tree "$root" | grep -E '\[p[0-9]+\]' || true)"
 
 # Chat.
-chat="$(ws add note "Chat thread" --project chat --no-recent | added)"
+chat="$(ws add "Chat thread" --project chat --no-recent | added)"
 check_equal "a send prints only the message id" "Sent [$chat-m1]." \
     "$(ws chat send "$chat" "First QUESTIONMARK")"
 ws chat send "$chat" "Second" >/dev/null
@@ -364,10 +361,10 @@ check_equal "no read returns the old text" "" \
     "$(ws chat read "$chat" --since 0 | grep QUESTIONMARK || true)"
 overview="$(ws chat recent)"
 check_equal "the overview lists the entry with the newest message last" \
-    "[$chat] (note) Chat thread" "$(echo "$overview" | grep '^\[' | tail -1)"
+    "[$chat] Chat thread" "$(echo "$overview" | grep '^\[' | tail -1)"
 # A send is not a read: read to 1, a peer sends 2, you send 3, and
 # reading on from 1 must still show the peer's message.
-race="$(ws add note "Cursor race" --project chat --no-recent | added)"
+race="$(ws add "Cursor race" --project chat --no-recent | added)"
 ws chat send "$race" "Read first" >/dev/null
 ws chat send "$race" "From a peer" >/dev/null
 ws chat send "$race" "My own" >/dev/null
@@ -388,12 +385,12 @@ check "search shows the matching messages" "  [$chat-m4]" \
     "$(ws search Woken)"
 
 # The server log keeps no client text, and records each issued id.
-ws add note "Subject OLDSUBJECTMARK" --body "Body OLDBODYMARK" \
+ws add "Subject OLDSUBJECTMARK" --body "Body OLDBODYMARK" \
     --project pond --no-recent >/dev/null
 ws search SEARCHMARK >/dev/null
 check_status "an unknown field is refused" "400" \
     -X POST -H "Workstream-API-Version: $api_version" \
-    --data '{"type":"note","UNKNOWNFIELDMARK":1}' \
+    --data '{"subject":"note","UNKNOWNFIELDMARK":1}' \
     "$main_url/api/workspaces/default/entries"
 check_equal "the server log holds no client text" "" \
     "$(grep -oE '[A-Z]*MARK' -- "$test_dir/main.log" || true)"
@@ -413,7 +410,7 @@ workspaces:
 EOF
 forum_entry="$(cd "$test_dir/private-project" &&
     CLAUDE_CODE_SESSION_ID=private-session-id \
-        forum add note "Forum question" --project chat --no-recent | added)"
+        forum add "Forum question" --project chat --no-recent | added)"
 check_equal "forum records the user alone" \
     "\"origin\":{\"user\":\"$(id -un)\"}" \
     "$(curl -fsS -H "Workstream-API-Version: $api_version" \
@@ -423,7 +420,7 @@ check_equal "the private context never reached the server" "" \
     "$(curl -fsS -H "Workstream-API-Version: $api_version" \
         "$main_url/api/entries/$forum_entry/messages?since=0" |
         grep -oE 'private-[a-z-]*|"host"|"dir"' || true)"
-check "forum help names forum" "  forum add <type> <subject>" \
+check "forum help names forum" "  forum add <subject>" \
     "$(forum help)"
 check_equal "forum help never suggests ws" "" \
     "$(forum help | grep -E "(^|[ '])ws " || true)"
@@ -444,7 +441,7 @@ workspaces:
 EOF
 check "an unreachable server is named" "request to http://127.0.0.1:1 failed" \
     "$(FORUM_CONFIG="$test_dir/forum-down.yml" \
-        forum add note "Lost" --project chat 2>&1 || true)"
+        forum add "Lost" --project chat 2>&1 || true)"
 
 echo
 if [[ "$failures" -gt 0 ]]; then

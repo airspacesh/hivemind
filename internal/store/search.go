@@ -35,7 +35,6 @@ type MetaCond struct {
 type Filter struct {
 	Subject             []FieldCond
 	Body                []FieldCond
-	Type                []FieldCond
 	Project             []FieldCond
 	Key                 []FieldCond
 	Content             []FieldCond
@@ -76,9 +75,9 @@ type whereBuilder struct {
 }
 
 func conditionCount(filter Filter) int {
-	return len(filter.Subject) + len(filter.Body) + len(filter.Type) +
-		len(filter.Project) + len(filter.Key) + len(filter.Content) +
-		len(filter.Meta) + len(filter.OriginUser) + len(filter.OriginHost) +
+	return len(filter.Subject) + len(filter.Body) + len(filter.Project) +
+		len(filter.Key) + len(filter.Content) + len(filter.Meta) +
+		len(filter.OriginUser) + len(filter.OriginHost) +
 		len(filter.OriginDir) + len(filter.OriginClaudeSession)
 }
 
@@ -171,9 +170,9 @@ func (builder *whereBuilder) addMetadata(conditions []MetaCond) error {
 }
 
 // matchAnywhere widens patterns for the fields holding prose, so they
-// match any part of the text the way a search box does. Type, project,
-// key, origin, and metadata patterns stay whole-value matches, because
-// they name one of a known set rather than describe its contents.
+// match any part of the text the way a search box does. Project, key,
+// origin, and metadata patterns stay whole-value matches, because they
+// name one of a known set rather than describe its contents.
 //
 // An empty pattern is left alone, so it matches only an empty value.
 // Widening it would match everything, which is what leaving the filter
@@ -199,7 +198,6 @@ func buildWhere(filter Filter) (whereBuilder, error) {
 	}{
 		{"subject", "e.subject_lower", matchAnywhere(filter.Subject)},
 		{"body", "e.body_lower", matchAnywhere(filter.Body)},
-		{"type", "e.type_lower", filter.Type},
 		{"project", "e.project_lower", filter.Project},
 		{"origin-user", "e.origin_user_lower", filter.OriginUser},
 		{"origin-host", "e.origin_host_lower", filter.OriginHost},

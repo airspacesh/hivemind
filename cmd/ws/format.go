@@ -103,7 +103,7 @@ func printEntryLine(e api.ListedEntry, order listOrder, layout string) {
 	if order == byActivity && e.Descendants > 0 {
 		below = fmt.Sprintf(" (+%d below)", e.Descendants)
 	}
-	fmt.Printf("[%s] (%s) %s: %s%s%s\n", e.Ref, e.Type,
+	fmt.Printf("[%s] %s: %s%s%s\n", e.Ref,
 		listTime(e, order).Local().Format(layout), oneLine(e.Subject),
 		supersededLabel(e.SupersededBy), below)
 	if len(e.Ancestors) > 0 {
@@ -218,7 +218,7 @@ func printBacklinks(backlinks []api.Link) {
 
 func printEntryDetail(d api.EntryDetail) {
 	e := d.Entry
-	fmt.Printf("[%s] (%s) %s\n", e.Ref, e.Type, e.Subject)
+	fmt.Printf("[%s] %s\n", e.Ref, e.Subject)
 	if len(e.SupersededBy) > 0 {
 		fmt.Println("Superseded by " + joinRefs(e.SupersededBy))
 	}
@@ -283,7 +283,7 @@ func printTree(tree api.TreeResponse, root api.Ref) {
 	var printFrom func(e api.TreeEntry, depth int)
 	printFrom = func(e api.TreeEntry, depth int) {
 		indent := strings.Repeat("  ", depth)
-		fmt.Printf("%s[%s] (%s) %s: %s%s\n", indent, e.Ref, e.Type,
+		fmt.Printf("%s[%s] %s: %s%s\n", indent, e.Ref,
 			e.Modified.Local().Format(layout), oneLine(e.Subject),
 			supersededLabel(e.SupersededBy))
 		if e.MoreBelow > 0 {
@@ -368,7 +368,7 @@ func printOverview(overview api.ChatOverview, workspace string) {
 	}
 	layout := timeLayout(times)
 	for _, chat := range overview.Chats {
-		fmt.Printf("[%s] (%s) %s%s\n", chat.Entry.Ref, chat.Entry.Type,
+		fmt.Printf("[%s] %s%s\n", chat.Entry.Ref,
 			oneLine(chat.Entry.Subject),
 			supersededLabel(chat.Entry.SupersededBy))
 		// Message numbers count from 1 in each entry, and the overview

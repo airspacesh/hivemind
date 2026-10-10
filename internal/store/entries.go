@@ -33,7 +33,7 @@ func (s *Store) begin(
 }
 
 const entryColumns = `e.workspace_id, e.id, e.created_utc,
-	e.modified_utc, e.type, e.project, e.subject, e.body, e.origin_user,
+	e.modified_utc, e.project, e.subject, e.body, e.origin_user,
 	e.origin_host, e.origin_dir, e.origin_claude_session`
 
 type rowScanner interface {
@@ -47,7 +47,7 @@ func (v view) scanEntry(row rowScanner, extra ...any) (api.Entry, error) {
 	var created, modified string
 	err := row.Scan(append([]any{
 		&key.Workspace, &key.ID, &created, &modified,
-		&entry.Type, &entry.Project, &entry.Subject, &entry.Body,
+		&entry.Project, &entry.Subject, &entry.Body,
 		&entry.Origin.User, &entry.Origin.Host,
 		&entry.Origin.Dir, &entry.Origin.ClaudeSession,
 	}, extra...)...)
@@ -189,11 +189,11 @@ func (s *Store) Add(
 	now := nowUTC()
 	if _, err := v.tx.ExecContext(ctx, `
 		INSERT INTO entries (
-			workspace_id, id, created_utc, modified_utc, activity_utc, type,
+			workspace_id, id, created_utc, modified_utc, activity_utc,
 			project, subject, body, origin_user, origin_host, origin_dir,
 			origin_claude_session
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		key.Workspace, key.ID, now, now, now, req.Type, req.Project,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		key.Workspace, key.ID, now, now, now, req.Project,
 		req.Subject, req.Body, req.Origin.User, req.Origin.Host,
 		req.Origin.Dir, req.Origin.ClaudeSession,
 	); err != nil {
@@ -224,10 +224,6 @@ func (v view) editContent(
 	now := nowUTC()
 	query := `UPDATE entries SET modified_utc = ?, activity_utc = ?`
 	args := []any{now, now}
-	if req.Type != nil {
-		query += `, type = ?`
-		args = append(args, *req.Type)
-	}
 	if req.Project != nil {
 		query += `, project = ?`
 		args = append(args, *req.Project)

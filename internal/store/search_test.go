@@ -24,24 +24,23 @@ func newSearchEntries(t *testing.T) searchEntries {
 	t.Helper()
 	store := openTestStore(t)
 	add := func(
-		typ, project, subject, body string, metadata map[string]string,
+		project, subject, body string, metadata map[string]string,
 	) api.Entry {
 		t.Helper()
 		return addTo(t, store, "default", api.AddEntryRequest{
-			Type: typ, Project: project, Subject: subject, Body: body,
+			Project: project, Subject: subject, Body: body,
 			Metadata: metadata,
 		})
 	}
 	return searchEntries{
 		store: store,
-		first: add("TODO", "duck-pond", "Count the Ducklings", "",
+		first: add("duck-pond", "Count the Ducklings", "",
 			map[string]string{"jira": "QUACK-1"}),
-		second: add("todo", "Duck-Nest", "Fix Nest", "Ducklings are safe",
-			nil),
-		third: add("note", "duck-pond", "Ducklings restless", "",
+		second: add("Duck-Nest", "Fix Nest", "Ducklings are safe", nil),
+		third: add("duck-pond", "Ducklings restless", "",
 			map[string]string{"jira": "QUACK-2"}),
-		fourth: add("idea", "feed", "Cache feed", "", nil),
-		fifth:  add("note", "æther", "Æther", "", nil),
+		fourth: add("feed", "Cache feed", "", nil),
+		fifth:  add("æther", "Æther", "", nil),
 	}
 }
 
@@ -98,19 +97,6 @@ func TestSearchUsesRawCaseFoldedGlobPatterns(t *testing.T) {
 			assertEntryRefs(t, result.Entries, test.want...)
 		})
 	}
-}
-
-func TestSearchMatchesTypeWholeValue(t *testing.T) {
-	entries := newSearchEntries(t)
-	result := runSearch(t, entries.store, Filter{
-		Type: []FieldCond{{Value: "not"}},
-	})
-	assertEntryRefs(t, result.Entries)
-
-	result = runSearch(t, entries.store, Filter{
-		Type: []FieldCond{{Value: "not*"}},
-	})
-	assertEntryRefs(t, result.Entries, entries.fifth.Ref, entries.third.Ref)
 }
 
 func TestSearchSetAndPairNegationUsesNotExists(t *testing.T) {
@@ -275,7 +261,7 @@ func TestSearchByOrigin(t *testing.T) {
 	add := func(subject string, origin api.Origin) api.Entry {
 		t.Helper()
 		return addTo(t, store, "default", api.AddEntryRequest{
-			Type: "note", Subject: subject, Origin: origin,
+			Subject: subject, Origin: origin,
 		})
 	}
 	first := add("on the first host", api.Origin{
@@ -314,9 +300,9 @@ func TestSearchByOrigin(t *testing.T) {
 // match only the metadata of the entry in the searched workspace.
 func TestSearchMetadataStaysInItsWorkspace(t *testing.T) {
 	store := openTestStore(t)
-	inDefault := mustAdd(t, store, "note", "in default", "", nil)
+	inDefault := mustAdd(t, store, "in default", "", nil)
 	addTo(t, store, "personal", api.AddEntryRequest{
-		Type: "note", Subject: "in personal", Project: "secret",
+		Subject: "in personal", Project: "secret",
 		Metadata: map[string]string{"jira": "QUACK-9"},
 	})
 
@@ -344,9 +330,9 @@ func messageBodies(messages []api.Message) []string {
 
 func TestSearchMatchesChatMessages(t *testing.T) {
 	store := openTestStore(t)
-	pond := mustAdd(t, store, "note", "Pond notes", "", nil)
-	sighting := mustAdd(t, store, "idea", "Heron sighting", "", nil)
-	quiet := mustAdd(t, store, "note", "Count ducks", "", nil)
+	pond := mustAdd(t, store, "Pond notes", "", nil)
+	sighting := mustAdd(t, store, "Heron sighting", "", nil)
+	quiet := mustAdd(t, store, "Count ducks", "", nil)
 	for _, body := range []string{"a heron landed", "nothing here",
 		"HERON again", "heron thrice", "heron four"} {
 		mustPost(t, store, pond.Ref, body)
@@ -386,10 +372,10 @@ func TestSearchMatchesChatMessages(t *testing.T) {
 	assertEntryRefs(t, entriesOnly.Entries, sighting.Ref)
 
 	// The other filters apply to the entry a message is in.
-	ideas := runSearch(t, store, Filter{
-		Content: heron, Type: []FieldCond{{Value: "idea"}},
+	sightings := runSearch(t, store, Filter{
+		Content: heron, Subject: []FieldCond{{Value: "sighting"}},
 	})
-	assertEntryRefs(t, ideas.Entries, sighting.Ref)
+	assertEntryRefs(t, sightings.Entries, sighting.Ref)
 
 	// Excluding text alone does not search chat, or every entry with
 	// one message lacking the text would match.
@@ -409,10 +395,10 @@ func TestSearchMatchesChatMessages(t *testing.T) {
 // excluded, on its own.
 func TestSearchMatchesEachMessageOnItsOwn(t *testing.T) {
 	store := openTestStore(t)
-	split := mustAdd(t, store, "note", "Split", "", nil)
+	split := mustAdd(t, store, "Split", "", nil)
 	mustPost(t, store, split.Ref, "heron")
 	mustPost(t, store, split.Ref, "egret")
-	both := mustAdd(t, store, "note", "Both", "", nil)
+	both := mustAdd(t, store, "Both", "", nil)
 	mustPost(t, store, both.Ref, "heron and egret")
 	mustPost(t, store, both.Ref, "heron alone")
 
@@ -446,9 +432,9 @@ func messageRefs(messages []api.Message) []string {
 func TestSearchSharesOneMessageBudgetAcrossThePage(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	oldest := mustAdd(t, store, "note", "Oldest", "", nil)
-	busy := mustAdd(t, store, "note", "Busy", "", nil)
-	quiet := mustAdd(t, store, "note", "Quiet", "", nil)
+	oldest := mustAdd(t, store, "Oldest", "", nil)
+	busy := mustAdd(t, store, "Busy", "", nil)
+	quiet := mustAdd(t, store, "Quiet", "", nil)
 	mustPost(t, store, oldest.Ref, "heron at dawn")
 	for i := range matchingMessageBudget {
 		mustPost(t, store, busy.Ref, fmt.Sprintf("heron %d", i+1))

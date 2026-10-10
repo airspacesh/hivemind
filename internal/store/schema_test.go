@@ -162,7 +162,7 @@ func TestOpenRejectsUnrecognizedDatabases(t *testing.T) {
 			"changed schema",
 			func(t *testing.T, path string) {
 				createValidDatabase(t, path)
-				rawExec(t, path, `DROP INDEX entries_type_search`)
+				rawExec(t, path, `DROP INDEX entries_subject_search`)
 			},
 			"schema does not match",
 		},
@@ -208,9 +208,9 @@ func TestOpenSyncsWorkspacesWithTheConfig(t *testing.T) {
 	first := reopen(api.Workspace{Name: "default", Prefix: "e"},
 		api.Workspace{Name: "personal", Prefix: "p"})
 	work := addTo(t, first, "default",
-		api.AddEntryRequest{Type: "note", Subject: "work"})
+		api.AddEntryRequest{Subject: "work"})
 	private := addTo(t, first, "personal",
-		api.AddEntryRequest{Type: "note", Subject: "private"})
+		api.AddEntryRequest{Subject: "private"})
 	ids := map[string]int64{}
 	for _, workspace := range first.Workspaces() {
 		ids[workspace.Name] = workspace.ID

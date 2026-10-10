@@ -12,7 +12,6 @@ import (
 // views. The caps keep entries from turning the stream into a data
 // store.
 const (
-	MaxTypeLen    = 64
 	MaxProjectLen = 256
 	MaxSubjectLen = 128
 	MaxBodyLen    = 2048
@@ -215,17 +214,8 @@ func (o Origin) Validate() error {
 }
 
 func (r AddEntryRequest) Validate() error {
-	if r.Type == "" {
-		return fmt.Errorf("type is required")
-	}
 	if r.Subject == "" {
 		return fmt.Errorf("subject is required")
-	}
-	if err := checkOneLine("type", r.Type); err != nil {
-		return err
-	}
-	if err := checkLen("type", r.Type, MaxTypeLen); err != nil {
-		return err
 	}
 	if r.Project == "" {
 		return fmt.Errorf("a project is required")
@@ -261,8 +251,8 @@ func (r AddEntryRequest) Validate() error {
 func (r EditEntryRequest) Validate() error {
 	if !r.ChangesContent() && len(r.AddLinks) == 0 &&
 		len(r.RemoveLinks) == 0 && len(r.RemoveLinkNames) == 0 {
-		return fmt.Errorf("nothing to edit: provide type, project, " +
-			"subject, body, metadata, or links")
+		return fmt.Errorf("nothing to edit: provide project, subject, " +
+			"body, metadata, or links")
 	}
 	if err := validateLinks(r.AddLinks); err != nil {
 		return err
@@ -272,17 +262,6 @@ func (r EditEntryRequest) Validate() error {
 	}
 	for _, name := range r.RemoveLinkNames {
 		if err := validateSlug("link name", name); err != nil {
-			return err
-		}
-	}
-	if r.Type != nil {
-		if *r.Type == "" {
-			return fmt.Errorf("type cannot be set to empty")
-		}
-		if err := checkOneLine("type", *r.Type); err != nil {
-			return err
-		}
-		if err := checkLen("type", *r.Type, MaxTypeLen); err != nil {
 			return err
 		}
 	}

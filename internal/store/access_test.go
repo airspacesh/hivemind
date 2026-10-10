@@ -34,7 +34,7 @@ func newLinkedWorkspaces(t *testing.T) linkedWorkspaces {
 	secret := func(subject string, links ...api.Link) api.Entry {
 		t.Helper()
 		entry := addTo(t, store, "personal", api.AddEntryRequest{
-			Type: "SECRET-type", Subject: "SECRET " + subject,
+			Subject: "SECRET " + subject,
 			Body:    "SECRET body",
 			Project: "SECRET-project",
 			Origin:  api.Origin{User: "SECRET-user", Dir: "/SECRET"},
@@ -46,7 +46,7 @@ func newLinkedWorkspaces(t *testing.T) linkedWorkspaces {
 	open := func(subject string, links ...api.Link) api.Entry {
 		t.Helper()
 		return addTo(t, store, "default", api.AddEntryRequest{
-			Type: "note", Subject: subject, Links: links,
+			Subject: subject, Links: links,
 		})
 	}
 
@@ -166,8 +166,8 @@ func TestLinkingToAnUnreadableEntryIsRefusedAsMissing(t *testing.T) {
 	add := func(target api.Ref) error {
 		_, err := w.store.Add(ctx, w.openAccess(t),
 			workspaceID(t, w.store, "default"), api.AddEntryRequest{
-				Type: "note", Subject: "probe",
-				Links: []api.Link{link("see", target)},
+				Subject: "probe",
+				Links:   []api.Link{link("see", target)},
 			})
 		return err
 	}

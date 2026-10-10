@@ -22,8 +22,8 @@ func addChild(
 ) api.Entry {
 	t.Helper()
 	return addTo(t, store, "default", api.AddEntryRequest{
-		Type: "note", Subject: subject,
-		Links: []api.Link{link(api.ParentLink, parent)},
+		Subject: subject,
+		Links:   []api.Link{link(api.ParentLink, parent)},
 	})
 }
 
@@ -59,8 +59,8 @@ func treeText(tree api.TreeResponse) string {
 func TestTopicsFollowActivityAnywhereInTheTree(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	older := mustAdd(t, store, "idea", "older topic", "", nil)
-	newer := mustAdd(t, store, "idea", "newer topic", "", nil)
+	older := mustAdd(t, store, "older topic", "", nil)
+	newer := mustAdd(t, store, "newer topic", "", nil)
 
 	result := topics(t, store, Filter{})
 	if refs := entryRefsOf(result.Entries); !reflect.DeepEqual(
@@ -117,7 +117,7 @@ func TestTopicsFollowActivityAnywhereInTheTree(t *testing.T) {
 // counts the rest.
 func TestTopicsShowTheNewestMessagesInEachTree(t *testing.T) {
 	store := openTestStore(t)
-	root := mustAdd(t, store, "idea", "pond", "", nil)
+	root := mustAdd(t, store, "pond", "", nil)
 	child := addChild(t, store, "child", root.Ref)
 	grandchild := addChild(t, store, "grandchild", child.Ref)
 	replaced := addChild(t, store, "replaced", root.Ref)
@@ -126,8 +126,8 @@ func TestTopicsShowTheNewestMessagesInEachTree(t *testing.T) {
 		link(api.SupersedesLink, replaced.Ref)); err != nil {
 		t.Fatal(err)
 	}
-	silent := mustAdd(t, store, "idea", "silent", "", nil)
-	other := mustAdd(t, store, "idea", "other", "", nil)
+	silent := mustAdd(t, store, "silent", "", nil)
+	other := mustAdd(t, store, "other", "", nil)
 	mustPost(t, store, root.Ref, "first")
 	mustPost(t, store, child.Ref, "second")
 	newest := []api.Message{
@@ -164,10 +164,10 @@ func TestTopicsShowTheNewestMessagesInEachTree(t *testing.T) {
 
 func TestTopicsKeepASupersededRootOnlyAsContext(t *testing.T) {
 	store := openTestStore(t)
-	withChild := mustAdd(t, store, "idea", "replaced topic", "", nil)
+	withChild := mustAdd(t, store, "replaced topic", "", nil)
 	child := addChild(t, store, "useful child", withChild.Ref)
-	alone := mustAdd(t, store, "idea", "replaced and alone", "", nil)
-	successor := mustAdd(t, store, "idea", "successor", "", nil)
+	alone := mustAdd(t, store, "replaced and alone", "", nil)
+	successor := mustAdd(t, store, "successor", "", nil)
 	for _, old := range []api.Ref{withChild.Ref, alone.Ref} {
 		if err := addLinks(t, store, successor.Ref,
 			link(api.SupersedesLink, old)); err != nil {
@@ -197,7 +197,7 @@ func TestTopicsKeepASupersededRootOnlyAsContext(t *testing.T) {
 
 func TestTreeHidesSupersededLeavesAndOrdersOldestFirst(t *testing.T) {
 	store := openTestStore(t)
-	root := mustAdd(t, store, "idea", "root", "", nil)
+	root := mustAdd(t, store, "root", "", nil)
 	addChild(t, store, "first", root.Ref)
 	middle := addChild(t, store, "middle", root.Ref)
 	addChild(t, store, "under middle", middle.Ref)
@@ -230,7 +230,7 @@ func TestTreeHidesSupersededLeavesAndOrdersOldestFirst(t *testing.T) {
 
 func TestTreeFillsLevelByLevelAndSaysWhereItCut(t *testing.T) {
 	store := openTestStore(t)
-	root := mustAdd(t, store, "idea", "root", "", nil)
+	root := mustAdd(t, store, "root", "", nil)
 	a := addChild(t, store, "a", root.Ref)
 	addChild(t, store, "b", root.Ref)
 	c := addChild(t, store, "c", root.Ref)
@@ -268,12 +268,12 @@ func TestSearchUnderASubtreeAndFiltersOnRoots(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	root := addTo(t, store, "default", api.AddEntryRequest{
-		Type: "idea", Subject: "duck root", Project: "pond"})
+		Subject: "duck root", Project: "pond"})
 	child := addTo(t, store, "default", api.AddEntryRequest{
-		Type: "note", Subject: "duck child", Project: "lake",
+		Subject: "duck child", Project: "lake",
 		Links: []api.Link{link(api.ParentLink, root.Ref)}})
 	other := addTo(t, store, "default", api.AddEntryRequest{
-		Type: "idea", Subject: "duck elsewhere", Project: "lake"})
+		Subject: "duck elsewhere", Project: "lake"})
 
 	under := store.mustKey(root.Ref)
 	result := runSearch(t, store, Filter{Under: &under,
@@ -306,10 +306,10 @@ func TestSearchUnderASubtreeAndFiltersOnRoots(t *testing.T) {
 // Counts leave out superseded entries, as listings and trees do.
 func TestCountsLeaveOutSupersededEntries(t *testing.T) {
 	store := openTestStore(t)
-	question := mustAdd(t, store, "question", "Why?", "", nil)
+	question := mustAdd(t, store, "Why?", "", nil)
 	old := addChild(t, store, "old answer", question.Ref)
 	addTo(t, store, "default", api.AddEntryRequest{
-		Type: "answer", Subject: "new answer",
+		Subject: "new answer",
 		Links: []api.Link{link(api.ParentLink, question.Ref),
 			link(api.SupersedesLink, old.Ref)},
 	})

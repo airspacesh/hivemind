@@ -14,9 +14,9 @@ import (
 
 func TestOneNameLinksSeveralTargetsButOneParent(t *testing.T) {
 	store := openTestStore(t)
-	a := mustAdd(t, store, "note", "a", "", nil)
-	b := mustAdd(t, store, "note", "b", "", nil)
-	c := mustAdd(t, store, "note", "c", "", nil)
+	a := mustAdd(t, store, "a", "", nil)
+	b := mustAdd(t, store, "b", "", nil)
+	c := mustAdd(t, store, "c", "", nil)
 
 	if err := addLinks(t, store, a.Ref, link("depends-on", b.Ref),
 		link("depends-on", c.Ref), link("parent", b.Ref)); err != nil {
@@ -47,10 +47,10 @@ func TestOneNameLinksSeveralTargetsButOneParent(t *testing.T) {
 
 func TestLinksJoinWorkspacesOnOneServer(t *testing.T) {
 	store := openTestStore(t)
-	work := mustAdd(t, store, "note", "work", "", nil)
+	work := mustAdd(t, store, "work", "", nil)
 	private := addTo(t, store, "personal", api.AddEntryRequest{
-		Type: "note", Subject: "private",
-		Links: []api.Link{link("see", work.Ref)},
+		Subject: "private",
+		Links:   []api.Link{link("see", work.Ref)},
 	})
 	if err := addLinks(t, store, work.Ref,
 		link(api.SupersedesLink, private.Ref)); err != nil {
@@ -70,15 +70,15 @@ func TestLinksJoinWorkspacesOnOneServer(t *testing.T) {
 // The refusal is the same whether the other entry exists or not.
 func TestParentsStayInTheirWorkspace(t *testing.T) {
 	store := openTestStore(t)
-	work := mustAdd(t, store, "note", "work", "", nil)
+	work := mustAdd(t, store, "work", "", nil)
 	private := addTo(t, store, "personal", api.AddEntryRequest{
-		Type: "note", Subject: "private",
+		Subject: "private",
 	})
 
 	_, err := store.Add(context.Background(), everyAccess(store),
 		workspaceID(t, store, "personal"), api.AddEntryRequest{
-			Type: "note", Subject: "child",
-			Links: []api.Link{link(api.ParentLink, work.Ref)},
+			Subject: "child",
+			Links:   []api.Link{link(api.ParentLink, work.Ref)},
 		})
 	if !errors.Is(err, ErrParentWorkspace) {
 		t.Fatalf("adding under a parent in another workspace = %v", err)
@@ -99,9 +99,9 @@ func TestParentAndSupersessionLoopsAreRefused(t *testing.T) {
 	for _, name := range []string{api.ParentLink, api.SupersedesLink} {
 		t.Run(name, func(t *testing.T) {
 			store := openTestStore(t)
-			a := mustAdd(t, store, "note", "a", "", nil)
-			b := mustAdd(t, store, "note", "b", "", nil)
-			c := mustAdd(t, store, "note", "c", "", nil)
+			a := mustAdd(t, store, "a", "", nil)
+			b := mustAdd(t, store, "b", "", nil)
+			c := mustAdd(t, store, "c", "", nil)
 			if err := addLinks(t, store, b.Ref, link(name, a.Ref)); err != nil {
 				t.Fatal(err)
 			}
@@ -124,8 +124,8 @@ func TestParentAndSupersessionLoopsAreRefused(t *testing.T) {
 
 func TestOtherLinksMayLoop(t *testing.T) {
 	store := openTestStore(t)
-	a := mustAdd(t, store, "note", "a", "", nil)
-	b := mustAdd(t, store, "note", "b", "", nil)
+	a := mustAdd(t, store, "a", "", nil)
+	b := mustAdd(t, store, "b", "", nil)
 	if err := addLinks(t, store, a.Ref, link("see", b.Ref)); err != nil {
 		t.Fatal(err)
 	}
@@ -138,8 +138,8 @@ func TestConcurrentOppositeParentsLeaveNoLoop(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ws.db")
 	first := openStoreAt(t, path, contendedOpenBusyTimeout)
 	second := openStoreAt(t, path, contendedOpenBusyTimeout)
-	a := mustAdd(t, first, "note", "a", "", nil)
-	b := mustAdd(t, first, "note", "b", "", nil)
+	a := mustAdd(t, first, "a", "", nil)
+	b := mustAdd(t, first, "b", "", nil)
 
 	for _, stores := range [][2]*Store{{first, first}, {first, second}} {
 		start := make(chan struct{})
@@ -176,9 +176,9 @@ func TestConcurrentOppositeParentsLeaveNoLoop(t *testing.T) {
 func TestIndependentSuccessorsAreAllShown(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	old := mustAdd(t, store, "note", "old", "", nil)
-	newer := mustAdd(t, store, "note", "newer", "", nil)
-	newest := mustAdd(t, store, "note", "newest", "", nil)
+	old := mustAdd(t, store, "old", "", nil)
+	newer := mustAdd(t, store, "newer", "", nil)
+	newest := mustAdd(t, store, "newest", "", nil)
 	for _, successor := range []api.Ref{newer.Ref, newest.Ref} {
 		if err := addLinks(t, store, successor,
 			link("supersedes", old.Ref)); err != nil {
@@ -209,9 +209,9 @@ func TestIndependentSuccessorsAreAllShown(t *testing.T) {
 
 func TestChildOfASupersededParentStaysVisible(t *testing.T) {
 	store := openTestStore(t)
-	parent := mustAdd(t, store, "note", "parent", "", nil)
-	child := mustAdd(t, store, "note", "child", "", nil)
-	replacement := mustAdd(t, store, "note", "replacement", "", nil)
+	parent := mustAdd(t, store, "parent", "", nil)
+	child := mustAdd(t, store, "child", "", nil)
+	replacement := mustAdd(t, store, "replacement", "", nil)
 	if err := addLinks(t, store, child.Ref,
 		link("parent", parent.Ref)); err != nil {
 		t.Fatal(err)
@@ -237,8 +237,8 @@ func TestChildOfASupersededParentStaysVisible(t *testing.T) {
 func TestLinkEditsAndTheirFailures(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	a := mustAdd(t, store, "note", "a", "", nil)
-	b := mustAdd(t, store, "note", "b", "", nil)
+	a := mustAdd(t, store, "a", "", nil)
+	b := mustAdd(t, store, "b", "", nil)
 	edit := func(req api.EditEntryRequest) error {
 		_, err := store.Edit(ctx, everyAccess(store), store.mustKey(a.Ref),
 			req)
@@ -280,7 +280,7 @@ func TestLinkEditsAndTheirFailures(t *testing.T) {
 	var many []api.Link
 	for range api.MaxLinks {
 		many = append(many,
-			link("ref", mustAdd(t, store, "note", "t", "", nil).Ref))
+			link("ref", mustAdd(t, store, "t", "", nil).Ref))
 	}
 	if err := addLinks(t, store, a.Ref, many...); !errors.Is(
 		err, ErrLinkLimit) {

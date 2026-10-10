@@ -156,7 +156,7 @@ func entryDetail(ref string) api.EntryDetail {
 	parsed, _ := api.ParseRef(ref)
 	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
 	return api.EntryDetail{ListedEntry: api.ListedEntry{Entry: api.Entry{
-		Ref: parsed, Created: when, Modified: when, Type: "note",
+		Ref: parsed, Created: when, Modified: when,
 		Subject: "Count the ducklings",
 	}, Activity: when}}
 }
@@ -373,7 +373,7 @@ func TestAddTakesItsParentsWorkspace(t *testing.T) {
 	config := writeConfig(t, fmt.Sprintf("workspaces:\n  default:\n    "+
 		"server: %s\n    prefix: e\n  personal:\n    server: %s\n    "+
 		"prefix: p\n", server.URL, server.URL), 0o600)
-	got := ws(t, config, "add", "note", "Answer", "--project", "pond",
+	got := ws(t, config, "add", "Answer", "--project", "pond",
 		"--parent", "p3", "--no-recent")
 	if !got.ok || !strings.Contains(got.stdout, "Added entry [p4].") {
 		t.Fatal(got)
@@ -396,14 +396,14 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		reply(w, http.StatusOK, api.ChatOverview{Chats: []api.EntryChat{
 			{Entry: api.EntryRef{Ref: api.Ref{Prefix: "e", ID: 1},
-				Type: "question", Subject: "Why?"},
+				Subject: "Why?"},
 				Messages: []api.Message{message(7), message(8)}},
 		}})
 	})
 	config := writeConfig(t, "workspaces:\n  default:\n    server: "+
 		server.URL+"\n", 0o600)
 	got := ws(t, config, "chat", "recent")
-	want := "[e1] (question) Why?\n  ... 6 earlier\n" +
+	want := "[e1] Why?\n  ... 6 earlier\n" +
 		"  [e1-m7] 05:20 duck: quack\n  [e1-m8] 05:20 duck: quack\n"
 	if !got.ok || got.stdout != want {
 		t.Fatalf("overview =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
@@ -422,7 +422,7 @@ func TestSearchShowsMatchingMessages(t *testing.T) {
 	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		reply(w, http.StatusOK, api.SearchResult{Entries: []api.MatchedEntry{{
 			ListedEntry: api.ListedEntry{Entry: api.Entry{Ref: ref,
-				Created: when, Modified: when, Type: "note",
+				Created: when, Modified: when,
 				Subject: "Pond"}, Activity: when},
 			MatchingMessages:     []api.Message{message(7), message(9)},
 			MoreMatchingMessages: 4,
@@ -431,7 +431,7 @@ func TestSearchShowsMatchingMessages(t *testing.T) {
 	config := writeConfig(t, "workspaces:\n  default:\n    server: "+
 		server.URL+"\n", 0o600)
 	got := ws(t, config, "search", "heron")
-	want := "[e1] (note) 05:20: Pond\n" +
+	want := "[e1] 05:20: Pond\n" +
 		"  [e1-m7] 05:20 duck: heron\n  [e1-m9] 05:20 duck: heron\n" +
 		"  ... 4 more matching\n"
 	if !got.ok || got.stdout != want {
@@ -453,7 +453,7 @@ func TestRecentShowsTheNewestMessagesInEachTree(t *testing.T) {
 	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		reply(w, http.StatusOK, api.SearchResult{Entries: []api.MatchedEntry{{
 			ListedEntry: api.ListedEntry{Entry: api.Entry{Ref: root,
-				Created: when, Modified: when, Type: "question",
+				Created: when, Modified: when,
 				Subject: "Why?"}, Activity: when, Descendants: 1},
 			TreeMessages: []api.Message{message(root, 3),
 				message(child, 2)},
@@ -463,7 +463,7 @@ func TestRecentShowsTheNewestMessagesInEachTree(t *testing.T) {
 	config := writeConfig(t, "workspaces:\n  default:\n    server: "+
 		server.URL+"\n", 0o600)
 	got := ws(t, config, "recent")
-	want := "[e1] (question) 05:20: Why? (+1 below)\n  ... 2 earlier\n" +
+	want := "[e1] 05:20: Why? (+1 below)\n  ... 2 earlier\n" +
 		"  [e1-m3] 05:20 duck: quack\n  [e3-m2] 05:20 duck: quack\n"
 	if !got.ok || got.stdout != want {
 		t.Fatalf("recent =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
@@ -604,7 +604,7 @@ func TestLinksCannotJoinServers(t *testing.T) {
 	config := writeConfig(t, fmt.Sprintf("workspaces:\n  default:\n    "+
 		"server: %s\n    prefix: e\n  remote:\n    server: %s\n    "+
 		"prefix: r\n", first.URL, second.URL), 0o600)
-	got := ws(t, config, "add", "note", "Linked", "--project", "pond",
+	got := ws(t, config, "add", "Linked", "--project", "pond",
 		"--link", "see=r4")
 	if got.ok || !strings.Contains(got.stderr, "cannot join entries on "+
 		"different servers") {
@@ -660,7 +660,7 @@ func TestUncertainWritesAreReportedNotRepeated(t *testing.T) {
 			config := writeConfig(t, "workspaces:\n  default:\n    server: "+
 				server.URL+"\n", 0o600)
 			got := runBinary(t, wsBinary, []string{"WORKSTREAM_CONFIG=" +
-				config, "WORKSTREAM_TIMEOUT=300ms"}, "add", "note", "Once",
+				config, "WORKSTREAM_TIMEOUT=300ms"}, "add", "Once",
 				"--project", "pond")
 			if got.ok || !strings.Contains(got.stderr, "may have taken "+
 				"effect") || !strings.Contains(got.stderr, "Check 'ws recent") {
@@ -675,7 +675,7 @@ func TestUncertainWritesAreReportedNotRepeated(t *testing.T) {
 	t.Run("refused connection", func(t *testing.T) {
 		config := writeConfig(t, "workspaces:\n  default:\n    server: "+
 			closedServer(t)+"\n", 0o600)
-		got := ws(t, config, "add", "note", "Never sent", "--project", "pond")
+		got := ws(t, config, "add", "Never sent", "--project", "pond")
 		if got.ok || strings.Contains(got.stderr, "may have taken effect") {
 			t.Errorf("an unsent write is certain: %+v", got)
 		}
@@ -686,7 +686,7 @@ func TestUncertainWritesAreReportedNotRepeated(t *testing.T) {
 		})
 		config := writeConfig(t, "workspaces:\n  default:\n    server: "+
 			server.URL+"\n", 0o600)
-		got := ws(t, config, "add", "note", "Refused", "--project", "pond")
+		got := ws(t, config, "add", "Refused", "--project", "pond")
 		if got.ok || strings.Contains(got.stderr, "may have taken effect") {
 			t.Errorf("a refusal is certain: %+v", got)
 		}
@@ -702,7 +702,7 @@ func listing(times ...time.Time) http.HandlerFunc {
 				ListedEntry: api.ListedEntry{
 					Entry: api.Entry{
 						Ref:     api.Ref{Prefix: "e", ID: int64(i + 1)},
-						Created: when, Modified: when, Type: "note",
+						Created: when, Modified: when,
 						Subject: "Duck"},
 					Activity: when,
 				},
@@ -721,13 +721,13 @@ func TestTimesShowDatesOnlyWhenDaysDiffer(t *testing.T) {
 		"one local day": {[]time.Time{
 			time.Date(2025, 7, 23, 1, 0, 0, 0, time.UTC),
 			time.Date(2025, 7, 23, 15, 59, 0, 0, time.UTC),
-		}, []string{"[e1] (note) 09:00: Duck", "[e2] (note) 23:59: Duck"}},
+		}, []string{"[e1] 09:00: Duck", "[e2] 23:59: Duck"}},
 		// One UTC day, but the second falls on the next day at UTC+8.
 		"two local days": {[]time.Time{
 			time.Date(2025, 7, 23, 1, 0, 0, 0, time.UTC),
 			time.Date(2025, 7, 23, 16, 0, 0, 0, time.UTC),
-		}, []string{"[e1] (note) 23/07/2025 09:00: Duck",
-			"[e2] (note) 24/07/2025 00:00: Duck"}},
+		}, []string{"[e1] 23/07/2025 09:00: Duck",
+			"[e2] 24/07/2025 00:00: Duck"}},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -774,7 +774,7 @@ func TestForumNamesItselfAndReadsOnlyItsConfig(t *testing.T) {
 
 	withConfig := forum("FORUM_CONFIG="+wsConfig,
 		"FORUM_TIMEOUT=200ms")
-	got = withConfig("add", "note", "Lost", "--project", "pond")
+	got = withConfig("add", "Lost", "--project", "pond")
 	if !strings.Contains(got.stderr, "Check 'forum recent") ||
 		!strings.Contains(got.stderr, "forum did not retry") {
 		t.Errorf("forum's retry advice: %+v", got)

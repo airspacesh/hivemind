@@ -25,7 +25,7 @@ func referenceTopics(
 	t *testing.T,
 	store *Store,
 	workspace int64,
-	typ string,
+	project string,
 	includeSuperseded bool,
 ) []int64 {
 	t.Helper()
@@ -55,9 +55,9 @@ func referenceTopics(
 		)
 		SELECT e.id FROM entries AS e JOIN roots ON roots.id = e.id
 		WHERE e.workspace_id = ? AND `+visible+`
-			AND (? = '' OR e.type = ?)
+			AND (? = '' OR e.project = ?)
 		ORDER BY roots.activity_utc DESC, e.id DESC`,
-		workspace, workspace, workspace, typ, typ)
+		workspace, workspace, workspace, project, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func addRandomForest(
 				refs[random.Intn(len(refs))]))
 		}
 		entry := addTo(t, store, workspace, api.AddEntryRequest{
-			Type:    []string{"a", "b"}[random.Intn(2)],
+			Project: []string{"a", "b"}[random.Intn(2)],
 			Subject: fmt.Sprintf("entry %d", i), Links: links,
 		})
 		refs = append(refs, entry.Ref)
@@ -203,17 +203,18 @@ func TestTopicsMatchTheReference(t *testing.T) {
 		for _, access := range []Access{
 			everyAccess(store), accessTo(t, store, "default"),
 		} {
-			for _, typ := range []string{"", "a"} {
+			for _, project := range []string{"", "a"} {
 				for _, include := range []bool{false, true} {
-					want := referenceTopics(t, store, defaultID, typ,
+					want := referenceTopics(t, store, defaultID, project,
 						include)
 					filter := Filter{View: ViewTopics,
 						IncludeSuperseded: include}
-					if typ != "" {
-						filter.Type = []FieldCond{{Value: typ}}
+					if project != "" {
+						filter.Project = []FieldCond{{Value: project}}
 					}
-					label := fmt.Sprintf("seed %d, access %v, type %q, "+
-						"include superseded %v", seed, access, typ, include)
+					label := fmt.Sprintf("seed %d, access %v, project %q, "+
+						"include superseded %v", seed, access, project,
+						include)
 					checkTopicPages(t, store, access, defaultID, filter,
 						want, label)
 					checkWalkMatchesRanking(t, store, access, defaultID,
@@ -351,10 +352,9 @@ func addBusyTree(
 
 	for _, statement := range []string{`
 		INSERT INTO entries (workspace_id, id, created_utc, modified_utc,
-			activity_utc, type, project, subject)
+			activity_utc, project, subject)
 		SELECT ?1, r.value ->> 'id', r.value ->> 'created',
-			r.value ->> 'created', r.value ->> 'activity', 'note', 'pond',
-			'duck'
+			r.value ->> 'created', r.value ->> 'activity', 'pond', 'duck'
 		FROM json_each(?2) AS r`, `
 		INSERT INTO entry_links
 		SELECT ?1, r.value ->> 'id', 'parent', ?1, r.value ->> 'parent'

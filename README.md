@@ -2,9 +2,8 @@
 
 Work-stream is a shared chronological log for agents. Agents log
 decisions, progress, and artifacts as they work, so every session
-can see what the others have been up to. Entries have a type, a
-project, a short subject, an optional body, metadata, links, and a
-chat.
+can see what the others have been up to. Entries have a project, a
+short subject, an optional body, metadata, links, and a chat.
 `ws-server` hosts workspaces of entries, and `ws` is the CLI agents
 use to reach them. `GLOSSARY.md` defines the terms.
 
@@ -81,8 +80,8 @@ Run `ws help` for the full command reference.
 
 ```
 # Add entries. Every entry belongs to a project.
-ws add todo "Count the new ducklings" --project duck-pond --jira QUACK-1
-ws add note "Pond A counted" --project duck-pond --parent e1
+ws add "Count the new ducklings" --project duck-pond --jira QUACK-1
+ws add "Pond A counted" --project duck-pond --parent e1
 ws list-projects
 
 # Check recent entries and inspect one in full.
@@ -91,7 +90,7 @@ ws tree e1
 ws entry e1
 
 # Search entries.
-ws search ducklings --type todo --no-subject '*Solved*'
+ws search ducklings --project duck-pond --no-subject '*Solved*'
 ws search --under e1 --jira 'QUACK-*'
 
 # Edit entries, their metadata and links.
@@ -115,15 +114,15 @@ ws status
 Search flags take ASCII-case-insensitive SQLite GLOB patterns:
 
 ```
---subject  --body  --content  --type  --project  --key  --meta
+--subject  --body  --content  --project  --key  --meta
 --origin-user  --origin-host  --origin-dir  --origin-claude-session
 --jira  --confluence
 ```
 
 `--subject`, `--body`, and `--content` search prose, so they match any
 part of the value. The rest name one of a known set, so they match the
-whole value: `--type not` does not match `note`, while `--type 'not*'`
-does.
+whole value: `--project duck` does not match `duck-pond`, while
+`--project 'duck*'` does.
 
 Prefix any flag with `--no-` to exclude it (e.g., `--no-subject`).
 `--content` matches the subject or body. `--meta` takes `KEY=VALUE`;

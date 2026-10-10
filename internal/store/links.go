@@ -280,7 +280,7 @@ func (v view) attachLinks(ctx context.Context, entries []api.Entry) error {
 	return nil
 }
 
-// entryRef describes an entry by its ref, and by its type, subject and
+// entryRef describes an entry by its ref, and by its subject and
 // superseders when the request can read it.
 func (v view) entryRef(ctx context.Context, key Key) (api.EntryRef, error) {
 	described := api.EntryRef{Ref: v.store.mustRef(key)}
@@ -288,9 +288,9 @@ func (v view) entryRef(ctx context.Context, key Key) (api.EntryRef, error) {
 		return described, nil
 	}
 	if err := v.tx.QueryRowContext(ctx, `
-		SELECT type, subject FROM entries WHERE workspace_id = ? AND id = ?`,
+		SELECT subject FROM entries WHERE workspace_id = ? AND id = ?`,
 		key.Workspace, key.ID,
-	).Scan(&described.Type, &described.Subject); err != nil {
+	).Scan(&described.Subject); err != nil {
 		return api.EntryRef{}, fmt.Errorf("reading %s: %w",
 			described.Ref, err)
 	}

@@ -7,9 +7,9 @@ Use these words, and no others for the same things.
 - **workspace id**: the number a server's database gives a workspace.
 - **prefix**: the letters that pick a workspace in an entry id, like
   `e` in `e12`. Set in the server config, unique on a server.
-- **entry**: one item in a workspace, with a type, a project, a
-  subject, an optional body, and metadata. Its id is the workspace
-  prefix and a number counted per workspace, like `e12`.
+- **entry**: one item in a workspace, with a project, a subject, an
+  optional body, and metadata. Its id is the workspace prefix and a
+  number counted per workspace, like `e12`.
 - **metadata**: key=value pairs on an entry, such as jira.
 - **project**: the field naming the work an entry belongs to. Every
   entry has one, and it is not metadata.
