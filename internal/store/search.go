@@ -261,6 +261,19 @@ func lowerASCII(value string) string {
 	return string(folded)
 }
 
+// joinedFrom is the FROM clause of a search: every entry, or with
+// under, the entries of that subtree.
+func joinedFrom(under *Key) (string, []any) {
+	if under == nil {
+		return `entries AS e`, nil
+	}
+	return `(WITH RECURSIVE ` + subtreeCTE("under") +
+			` SELECT workspace_id, id FROM under) AS under
+		JOIN entries AS e
+			ON e.workspace_id = under.workspace_id AND e.id = under.id`,
+		[]any{under.Workspace, under.ID}
+}
+
 // Search lists the entries of a workspace that match a filter.
 func (s *Store) Search(
 	ctx context.Context,
@@ -622,6 +635,29 @@ func (v view) messagesByPostOrder(
 		messages = append(messages, message)
 	}
 	return messages, rows.Err()
+}
+
+// matchedEntries reads the entries of a workspace a listing shows, in
+// the given order.
+func (v view) matchedEntries(
+	ctx context.Context, workspace int64, ids []int64,
+) ([]api.MatchedEntry, error) {
+	entries := make([]api.Entry, len(ids))
+	for i, id := range ids {
+		var err error
+		if entries[i], err = v.getEntry(ctx, Key{workspace, id}); err != nil {
+			return nil, err
+		}
+	}
+	listed, err := v.listEntries(ctx, entries)
+	if err != nil {
+		return nil, err
+	}
+	matched := make([]api.MatchedEntry, len(listed))
+	for i, entry := range listed {
+		matched[i] = api.MatchedEntry{ListedEntry: entry}
+	}
+	return matched, nil
 }
 
 // searchFlat lists a page of the entries a search matches, and whether
