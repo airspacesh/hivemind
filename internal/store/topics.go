@@ -505,7 +505,7 @@ const treeMessagesFrom = `subtree CROSS JOIN entry_messages AS m
 	INDEXED BY sqlite_autoindex_entry_messages_1
 	ON m.workspace_id = ? AND m.entry_id = subtree.id`
 
-// newestTreeMessages reads the newest treeMessageCount messages
+// newestTreeMessages reads the treeMessageCount messages posted last
 // anywhere in an entry's tree, oldest first, and counts the tree's
 // other messages.
 func (v view) newestTreeMessages(
@@ -524,7 +524,7 @@ func (v view) newestTreeMessages(
 	rows, err := v.tx.QueryContext(ctx, `
 		WITH RECURSIVE `+subtreeCTE("subtree")+`
 		SELECT `+messageColumns+` FROM `+treeMessagesFrom+`
-		ORDER BY m.modified_utc DESC, m.post_order DESC LIMIT ?`,
+		ORDER BY m.post_order DESC LIMIT ?`,
 		key.Workspace, key.ID, key.Workspace, treeMessageCount)
 	if err != nil {
 		return nil, 0, fmt.Errorf("reading the messages under %s: %w",

@@ -106,7 +106,7 @@ Links:
 Listings:
   '{program} recent' lists top-level entries, those with no parent,
   ordered by the latest change anywhere beneath them, with a count of
-  what is below and the 2 most recently changed messages anywhere in the
+  what is below and the 2 most recently sent messages anywhere in the
   tree. '{program} recent --flat' lists every entry by its own last
   change. '{program} search' lists every level, with the path to each
   match. --under <ref> keeps a search to an entry and what is beneath
@@ -132,8 +132,8 @@ Search filters (recent and search):
   '{program} search' and '{program} recent --flat' also match <text> and
   --content against each message in an entry's chat, while the other
   filters still apply to the entry. An entry ranks by its newest match.
-  A page shows the 30 most recently changed matching messages beneath
-  their entries, and counts each entry's other matching messages.
+  A page shows the 30 most recently sent matching messages beneath their
+  entries, and counts each entry's other matching messages.
   --limit <n>, -n <n>    entries to show (default 20)
   --offset <n>           skip the first n matches
   --order-by-modified    newest first by modification time (default)

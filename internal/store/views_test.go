@@ -155,6 +155,21 @@ func TestTopicsShowTheNewestMessagesInEachTree(t *testing.T) {
 		t.Fatalf("a tree with no chat shows %v", got)
 	}
 
+	// An edit keeps the message in its place, so an old message edited
+	// does not become one of the newest.
+	if _, _, err := store.EditMessage(context.Background(),
+		store.mustKey(root.Ref), 1, "first, edited"); err != nil {
+		t.Fatal(err)
+	}
+	treeMessages := map[api.Ref][]api.Message{}
+	for _, entry := range topics(t, store, Filter{}).Entries {
+		treeMessages[entry.Ref] = entry.TreeMessages
+	}
+	if got, want := messageRefs(treeMessages[root.Ref]),
+		messageRefs(newest); !reflect.DeepEqual(got, want) {
+		t.Fatalf("tree messages after an edit = %v, want %v", got, want)
+	}
+
 	for _, entry := range runSearch(t, store, Filter{}).Entries {
 		if len(entry.TreeMessages) != 0 {
 			t.Fatalf("the flat listing shows %s's tree messages", entry.Ref)

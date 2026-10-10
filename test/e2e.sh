@@ -379,8 +379,9 @@ check "a wait ends at its timeout" "No messages after 4 within 1s." \
     "$(ws chat wait "$chat" --since 4 --timeout 1s)"
 check "an entry shows its chat" "Chat: 4 messages, newest $chat-m4" \
     "$(ws entry "$chat")"
-check "recent shows a tree's newest changed messages" "  ... 2 earlier
-  [$chat-m1]" "$(ws recent --project chat)"
+check "recent shows a tree's newest messages, not its edited ones" \
+    "  ... 2 earlier
+  [$chat-m3]" "$(ws recent --project chat)"
 check "search shows the matching messages" "  [$chat-m4]" \
     "$(ws search Woken)"
 

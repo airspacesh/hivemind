@@ -539,9 +539,9 @@ func (v view) rankMatches(
 }
 
 // showMatchingMessages gives the entries of a page of a search the
-// messages in their chats that the search's text matches, newest first
-// until the page's budget is spent, and counts each entry's matches
-// left out.
+// messages in their chats that the search's text matches, the latest
+// posted first until the page's budget is spent, and counts each
+// entry's matches left out.
 func (v view) showMatchingMessages(
 	ctx context.Context,
 	workspace int64,
@@ -564,7 +564,7 @@ func (v view) showMatchingMessages(
 		SELECT m.entry_id, m.post_order
 		FROM json_each(?) AS page CROSS JOIN entry_messages AS m`+
 		where.sql()+`
-		ORDER BY m.modified_utc DESC, m.post_order DESC`, where.args...)
+		ORDER BY m.post_order DESC`, where.args...)
 	if err != nil {
 		return fmt.Errorf("reading matching messages: %w", err)
 	}
@@ -612,7 +612,7 @@ func (v view) messagesByPostOrder(
 		SELECT `+messageColumns+`
 		FROM json_each(?) AS shown CROSS JOIN entry_messages AS m
 			ON m.post_order = shown.value
-		ORDER BY m.modified_utc, m.post_order`, idsJSON(postOrders))
+		ORDER BY m.post_order`, idsJSON(postOrders))
 	if err != nil {
 		return nil, fmt.Errorf("reading messages: %w", err)
 	}

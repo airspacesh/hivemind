@@ -202,8 +202,8 @@ func (r EditEntryRequest) ChangesContent() bool {
 		len(r.Metadata) > 0
 }
 
-// MatchedEntry is an entry a listing shows. Messages come oldest
-// first by their modified time.
+// MatchedEntry is an entry a listing shows. Messages come in the order
+// they were posted, and an edit does not move a message.
 //
 // In a search for text, MatchingMessages holds the messages in the
 // entry's chat that matched and that the page's shared budget of

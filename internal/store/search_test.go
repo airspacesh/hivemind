@@ -470,7 +470,9 @@ func TestSearchSharesOneMessageBudgetAcrossThePage(t *testing.T) {
 		t.Fatalf("matching messages left out = %v, want %v", more, want)
 	}
 
-	// An edit makes a message the newest, so it is shown, and last.
+	// An edit lifts the entry, which ranks by its change time, but the
+	// edited message keeps its place as the first posted, so it stays
+	// out of the budget.
 	if _, _, err := store.EditMessage(ctx, store.mustKey(busy.Ref), 1,
 		ownEdit("heron again")); err != nil {
 		t.Fatal(err)
@@ -478,9 +480,13 @@ func TestSearchSharesOneMessageBudgetAcrossThePage(t *testing.T) {
 	result = runSearch(t, store, Filter{Content: heron})
 	assertEntryRefs(t, result.Entries, busy.Ref, quiet.Ref, oldest.Ref)
 	got = result.Entries[0].MatchingMessages
-	if len(got) != wantBusy || got[0].Body != "heron 4" ||
-		got[len(got)-1].Body != "heron again" {
-		t.Fatalf("busy entry shows %q, want heron 4 to %d, then the edit",
-			messageBodies(got), matchingMessageBudget)
+	if len(got) != wantBusy || got[0].Body != "heron 3" ||
+		got[len(got)-1].Body != fmt.Sprintf("heron %d",
+			matchingMessageBudget) {
+		t.Fatalf("busy entry shows %q, want heron 3 to %d", messageBodies(got),
+			matchingMessageBudget)
+	}
+	if more := result.Entries[0].MoreMatchingMessages; more != 2 {
+		t.Fatalf("busy entry leaves out %d matches, want 2", more)
 	}
 }
