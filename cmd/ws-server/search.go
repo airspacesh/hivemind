@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/airspacesh/workstream/internal/api"
 	"github.com/airspacesh/workstream/internal/store"
 )
 
@@ -108,6 +109,16 @@ func fieldConditions(query url.Values, field string) []store.FieldCond {
 	return conditions
 }
 
+// refuseProjectKey refuses a metadata filter on the key project, which
+// would match nothing, since the project is a field of its own.
+func refuseProjectKey(pattern string) error {
+	if strings.EqualFold(pattern, api.ProjectKey) {
+		return fmt.Errorf("%s is not a metadata key, so filter on the "+
+			"project field instead", api.ProjectKey)
+	}
+	return nil
+}
+
 func metaConditions(query url.Values) ([]store.MetaCond, error) {
 	conditions := make([]store.MetaCond, 0,
 		len(query["meta"])+len(query["no-meta"]))
@@ -123,6 +134,9 @@ func metaConditions(query url.Values) ([]store.MetaCond, error) {
 			if !found {
 				return nil, fmt.Errorf(
 					"meta filter %q must be key=value", value)
+			}
+			if err := refuseProjectKey(key); err != nil {
+				return nil, err
 			}
 			conditions = append(conditions, store.MetaCond{
 				Negate: parameter.negate,
@@ -140,6 +154,13 @@ func searchFilter(query url.Values) (store.Filter, error) {
 	metadata, err := metaConditions(query)
 	if err != nil {
 		return store.Filter{}, err
+	}
+	for _, name := range []string{"key", "no-key"} {
+		for _, pattern := range query[name] {
+			if err := refuseProjectKey(pattern); err != nil {
+				return store.Filter{}, err
+			}
+		}
 	}
 	limit, err := queryInteger(query, "limit", 20, 1, store.MaxSearchLimit)
 	if err != nil {

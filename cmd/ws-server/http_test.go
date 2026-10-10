@@ -439,3 +439,22 @@ func TestRequestLogKeepsNoClientText(t *testing.T) {
 		}
 	}
 }
+
+// The project is a field of its own, so a metadata filter on the key
+// project would match nothing. It is refused rather than left empty.
+func TestMetadataFiltersOnProjectAreRefused(t *testing.T) {
+	s := startServer(t, testConfig(t))
+	for _, query := range []string{
+		"meta=project=pond", "no-meta=Project=pond", "key=project",
+		"no-key=PROJECT",
+	} {
+		status, body := s.do(t, "GET",
+			"/api/workspaces/default/entries?"+query, "", "")
+		if status != http.StatusBadRequest ||
+			!strings.Contains(body, "filter on the project field") {
+			t.Errorf("%s: %d %s", query, status, body)
+		}
+	}
+	s.must(t, "GET", "/api/workspaces/default/entries?meta=jira=pond-1",
+		"", "", http.StatusOK)
+}
