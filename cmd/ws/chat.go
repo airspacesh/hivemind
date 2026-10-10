@@ -225,6 +225,22 @@ func parseCursor(p *parsedArgs) (int64, error) {
 	return since, nil
 }
 
+// parseTimeout reads the --timeout of a wait, or fallback when it is
+// absent.
+func parseTimeout(
+	p *parsedArgs, fallback time.Duration,
+) (time.Duration, error) {
+	if !p.has("--timeout") {
+		return fallback, nil
+	}
+	timeout, err := time.ParseDuration(p.strs["--timeout"])
+	if err != nil || timeout <= 0 {
+		return 0, fmt.Errorf("--timeout must be a positive duration, "+
+			"like 1m, not %q", p.strs["--timeout"])
+	}
+	return timeout, nil
+}
+
 func cmdChatRead(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{strs: []string{"--since", "--limit"}})
 	if err != nil {
@@ -278,13 +294,9 @@ func cmdChatWait(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	timeout := defaultWaitTimeout
-	if p.has("--timeout") {
-		timeout, err = time.ParseDuration(p.strs["--timeout"])
-		if err != nil || timeout <= 0 {
-			return fmt.Errorf("--timeout must be a positive duration, "+
-				"like 1m, not %q", p.strs["--timeout"])
-		}
+	timeout, err := parseTimeout(p, defaultWaitTimeout)
+	if err != nil {
+		return err
 	}
 
 	t, err := c.resolve(ref)

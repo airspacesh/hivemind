@@ -80,7 +80,7 @@ func (c *client) parseChangesArgs(
 		return changesArgs{}, usageError(command + " [--since <cursor>] " +
 			"[--timeout <d>] [--workspace <name>]")
 	}
-	parsed := changesArgs{since: "now", timeout: timeout}
+	parsed := changesArgs{since: "now"}
 	if p.has("--since") {
 		parsed.since = p.strs["--since"]
 	}
@@ -89,12 +89,8 @@ func (c *client) parseChangesArgs(
 		return changesArgs{}, fmt.Errorf("--since must be a cursor, 0 for "+
 			"the start, or now, not %q", parsed.since)
 	}
-	if p.has("--timeout") {
-		parsed.timeout, err = time.ParseDuration(p.strs["--timeout"])
-		if err != nil || parsed.timeout <= 0 {
-			return changesArgs{}, fmt.Errorf("--timeout must be a "+
-				"positive duration, like 1m, not %q", p.strs["--timeout"])
-		}
+	if parsed.timeout, err = parseTimeout(p, timeout); err != nil {
+		return changesArgs{}, err
 	}
 	workspace, err := c.config.chooseWorkspace(p.strs["--workspace"])
 	if err != nil {
