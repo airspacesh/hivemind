@@ -438,7 +438,16 @@ check "a wait from now returns when anything changes" "[$chat-m5]" \
 wait "$sender_pid"
 ws firehose --timeout 5s >"$test_dir/firehose.out" &
 firehose_pid=$!
-until [[ -s "$test_dir/firehose.out" ]]; do sleep 0.1; done
+for _ in $(seq 1 50); do
+    if [[ -s "$test_dir/firehose.out" ]]; then
+        break
+    fi
+    sleep 0.1
+done
+if [[ ! -s "$test_dir/firehose.out" ]]; then
+    echo "the firehose printed nothing within 5s" >&2
+    exit 1
+fi
 ws chat send "$chat" "Hosed" >/dev/null
 ws add "Hosed entry" --project chat --no-recent >/dev/null
 wait "$firehose_pid"
