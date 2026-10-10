@@ -315,11 +315,8 @@ func (s *Store) Search(
 	}
 	var result api.SearchResult
 	if filter.View == ViewTopics {
-		where.args = append(fromArgs, where.args...)
-		where.clauses = append(where.clauses, `e.workspace_id = ?`)
-		where.args = append(where.args, workspace)
-		result, err = v.searchTopics(ctx, workspace, filter, from, where,
-			topicWalkRows(filter))
+		result, err = v.searchTopics(ctx, workspace, filter, from, fromArgs,
+			where, topicWalkRows(filter))
 	} else {
 		result, err = v.searchFlat(ctx, workspace, filter, from, fromArgs,
 			where)

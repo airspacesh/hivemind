@@ -183,10 +183,8 @@ func topicsPage(
 	if err != nil {
 		t.Fatal(err)
 	}
-	where.clauses = append(where.clauses, `e.workspace_id = ?`)
-	where.args = append(where.args, workspace)
 	result, err := v.searchTopics(ctx, workspace, filter, `entries AS e`,
-		where, maxRows)
+		nil, where, maxRows)
 	if err != nil {
 		t.Fatal(err)
 	}

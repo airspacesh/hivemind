@@ -556,9 +556,14 @@ func (v view) searchTopics(
 	workspace int64,
 	filter Filter,
 	from string,
+	fromArgs []any,
 	where whereBuilder,
 	maxRows int,
 ) (api.SearchResult, error) {
+	where.args = append(slices.Clone(fromArgs), where.args...)
+	where.clauses = append(slices.Clone(where.clauses), `e.workspace_id = ?`)
+	where.args = append(where.args, workspace)
+
 	count := filter.Offset + filter.Limit + 1
 	shownOf := func(ctx context.Context, ids []int64) ([]int64, error) {
 		return v.shownOf(ctx, workspace, ids, from, where,
