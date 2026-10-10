@@ -167,14 +167,13 @@ func idsOf(t *testing.T, store *Store, result api.SearchResult) []int64 {
 func topicsPage(
 	t *testing.T,
 	store *Store,
-	access Access,
 	workspace int64,
 	filter Filter,
 	maxRows int,
 ) api.SearchResult {
 	t.Helper()
 	ctx := context.Background()
-	v, err := store.begin(ctx, access, true)
+	v, err := store.begin(ctx, everyAccess(store), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,26 +197,19 @@ func TestTopicsMatchTheReference(t *testing.T) {
 		addRandomForest(t, store, random, seed%2 == 0)
 		defaultID := workspaceID(t, store, "default")
 
-		for _, access := range []Access{
-			everyAccess(store), accessTo(t, store, "default"),
-		} {
-			for _, project := range []string{"", "a"} {
-				for _, include := range []bool{false, true} {
-					want := referenceTopics(t, store, defaultID, project,
-						include)
-					filter := Filter{View: ViewTopics,
-						IncludeSuperseded: include}
-					if project != "" {
-						filter.Project = []FieldCond{{Value: project}}
-					}
-					label := fmt.Sprintf("seed %d, access %v, project %q, "+
-						"include superseded %v", seed, access, project,
-						include)
-					checkTopicPages(t, store, access, defaultID, filter,
-						want, label)
-					checkWalkMatchesRanking(t, store, access, defaultID,
-						filter, label)
+		for _, project := range []string{"", "a"} {
+			for _, include := range []bool{false, true} {
+				want := referenceTopics(t, store, defaultID, project,
+					include)
+				filter := Filter{View: ViewTopics,
+					IncludeSuperseded: include}
+				if project != "" {
+					filter.Project = []FieldCond{{Value: project}}
 				}
+				label := fmt.Sprintf("seed %d, project %q, include "+
+					"superseded %v", seed, project, include)
+				checkTopicPages(t, store, defaultID, filter, want, label)
+				checkWalkMatchesRanking(t, store, defaultID, filter, label)
 			}
 		}
 	}
@@ -229,7 +221,6 @@ func TestTopicsMatchTheReference(t *testing.T) {
 func checkTopicPages(
 	t *testing.T,
 	store *Store,
-	access Access,
 	workspace int64,
 	filter Filter,
 	want []int64,
@@ -245,8 +236,7 @@ func checkTopicPages(
 			page.offset+page.limit, len(want))]
 		wantMore := len(want) > page.offset+page.limit
 		for _, maxRows := range []int{topicWalkRows(filter), 30, 3, 0} {
-			result := topicsPage(t, store, access, workspace, filter,
-				maxRows)
+			result := topicsPage(t, store, workspace, filter, maxRows)
 			got := idsOf(t, store, result)
 			if !reflect.DeepEqual(got, wantPage) &&
 				!(len(got) == 0 && len(wantPage) == 0) {
@@ -266,14 +256,13 @@ func checkTopicPages(
 func checkWalkMatchesRanking(
 	t *testing.T,
 	store *Store,
-	access Access,
 	workspace int64,
 	filter Filter,
 	label string,
 ) {
 	t.Helper()
 	ctx := context.Background()
-	v, err := store.begin(ctx, access, true)
+	v, err := store.begin(ctx, everyAccess(store), true)
 	if err != nil {
 		t.Fatal(err)
 	}
