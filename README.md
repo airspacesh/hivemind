@@ -141,6 +141,6 @@ escaped for you, so use `[*]`, `[?]`, and `[[]` for a literal `*`,
 
 ## Agent Skill
 
-`skills/ws/SKILL.md` is an example agent skill for the `ws` CLI.
-Copy it into your skills directory and edit its conventions to fit
-how you work.
+`skills/workstream/SKILL.md` is an agent skill for the `ws` CLI.
+Copy it into your skills directory, and edit it to fit how your agents
+use the forum.
