@@ -369,6 +369,34 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 	}
 }
 
+// A search shows the messages that matched in an entry's chat beneath
+// it, and how many earlier ones matched.
+func TestSearchShowsMatchingMessages(t *testing.T) {
+	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
+	ref := api.Ref{Prefix: "e", ID: 1}
+	message := func(number int64) api.Message {
+		return api.Message{Entry: ref, Number: number, Created: when,
+			Modified: when, Body: "heron", Origin: api.Origin{User: "duck"}}
+	}
+	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		reply(w, http.StatusOK, api.SearchResult{Entries: []api.MatchedEntry{{
+			ListedEntry: api.ListedEntry{Entry: api.Entry{Ref: ref,
+				Created: when, Modified: when, Type: "note",
+				Subject: "Pond"}, Activity: when},
+			Messages:        []api.Message{message(7), message(9)},
+			EarlierMessages: 4,
+		}}})
+	})
+	config := writeConfig(t, "workspaces:\n  default:\n    server: "+
+		server.URL+"\n", 0o600)
+	got := ws(t, config, "search", "heron")
+	want := "[e1] (note) 05:20: Pond\n    ... 4 earlier matching messages\n" +
+		"    [e1-m7] 05:20 duck: heron\n    [e1-m9] 05:20 duck: heron\n"
+	if !got.ok || got.stdout != want {
+		t.Fatalf("search =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
+	}
+}
+
 // TestResolutionMovesOnOnlyForAnAbsentPrefix checks that an id goes to
 // the first server listing its prefix, and that only that server's own
 // workspace's secret travels, and only with the entry request.
@@ -597,11 +625,14 @@ func listing(times ...time.Time) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var result api.SearchResult
 		for i, when := range times {
-			result.Entries = append(result.Entries, api.ListedEntry{
-				Entry: api.Entry{Ref: api.Ref{Prefix: "e", ID: int64(i + 1)},
-					Created: when, Modified: when, Type: "note",
-					Subject: "Duck"},
-				Activity: when,
+			result.Entries = append(result.Entries, api.MatchedEntry{
+				ListedEntry: api.ListedEntry{
+					Entry: api.Entry{
+						Ref:     api.Ref{Prefix: "e", ID: int64(i + 1)},
+						Created: when, Modified: when, Type: "note",
+						Subject: "Duck"},
+					Activity: when,
+				},
 			})
 		}
 		reply(w, http.StatusOK, result)

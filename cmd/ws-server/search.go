@@ -42,6 +42,7 @@ var singleQueryParameters = map[string]bool{
 	"offset":             true,
 	"order-by":           true,
 	"include-superseded": true,
+	"entries-only":       true,
 	"view":               true,
 	"under":              true,
 }
@@ -174,6 +175,10 @@ func searchFilter(query url.Values) (store.Filter, error) {
 	if err != nil {
 		return store.Filter{}, err
 	}
+	entriesOnly, err := queryFlag(query, "entries-only")
+	if err != nil {
+		return store.Filter{}, err
+	}
 	filter := store.Filter{
 		Subject:             fieldConditions(query, "subject"),
 		Body:                fieldConditions(query, "body"),
@@ -187,6 +192,7 @@ func searchFilter(query url.Values) (store.Filter, error) {
 		OriginDir:           fieldConditions(query, "origin-dir"),
 		OriginClaudeSession: fieldConditions(query, "origin-claude-session"),
 		IncludeSuperseded:   includeSuperseded,
+		EntriesOnly:         entriesOnly,
 		Limit:               int(limit),
 		Offset:              int(offset),
 	}

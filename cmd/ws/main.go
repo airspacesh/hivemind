@@ -123,12 +123,17 @@ Search filters (recent and search):
   does not match note. An empty pattern matches only an empty value.
   Prefix a filter with no- to exclude, as in --no-type. Filters AND
   together.
+  '{program} search' and '{program} recent --flat' also match <text> and
+  --content against each message in an entry's chat, while the other
+  filters still apply to the entry. An entry ranks by its newest match,
+  and shows its 3 newest matching messages beneath it.
   --limit <n>, -n <n>    entries to show (default 20)
   --offset <n>           skip the first n matches
   --order-by-modified    newest first by modification time (default)
   --order-by-creation    newest first by creation time (with --flat)
   --id-only              print one entry id per line
   --include-superseded   include superseded entries
+  --entries-only         leave chats out of a search for text
 
 Chat:
   Every entry has a chat. A message's id is the entry id, -m, and a

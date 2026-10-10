@@ -130,6 +130,11 @@ Prefix any flag with `--no-` to exclude it (e.g., `--no-subject`).
 both patterns must match the same metadata pair. Repeated filters
 AND together.
 
+A search for text, `<text>` or `--content`, also matches each message
+in an entry's chat on its own, while the other filters still apply to
+the entry. The entry ranks by its newest match and lists its newest
+matching messages. `--entries-only` leaves chats out.
+
 `*` matches any text, `?` one character, and brackets form character
 classes. Quote patterns so the shell does not expand them. Nothing is
 escaped for you, so use `[*]`, `[?]`, and `[[]` for a literal `*`,

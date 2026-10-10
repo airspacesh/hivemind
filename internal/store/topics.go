@@ -431,24 +431,39 @@ func (v view) searchTopics(
 		}
 	}
 
-	result := api.SearchResult{
-		Entries: []api.ListedEntry{},
-		More:    len(ranked) > filter.Offset+filter.Limit,
-	}
-	if filter.Offset >= len(ranked) {
-		return result, nil
-	}
-	page := ranked[filter.Offset:min(filter.Offset+filter.Limit, len(ranked))]
-	entries := make([]api.Entry, len(page))
-	for i, id := range page {
-		if entries[i], err = v.getEntry(ctx, Key{workspace, id}); err != nil {
-			return api.SearchResult{}, err
-		}
-	}
-	if result.Entries, err = v.listEntries(ctx, entries); err != nil {
+	page := ranked[min(filter.Offset, len(ranked)):min(
+		filter.Offset+filter.Limit, len(ranked))]
+	listed, err := v.matchedEntries(ctx, workspace, page)
+	if err != nil {
 		return api.SearchResult{}, err
 	}
-	return result, nil
+	return api.SearchResult{
+		Entries: listed,
+		More:    len(ranked) > filter.Offset+filter.Limit,
+	}, nil
+}
+
+// matchedEntries reads the entries of a workspace a listing shows, in
+// the given order.
+func (v view) matchedEntries(
+	ctx context.Context, workspace int64, ids []int64,
+) ([]api.MatchedEntry, error) {
+	entries := make([]api.Entry, len(ids))
+	for i, id := range ids {
+		var err error
+		if entries[i], err = v.getEntry(ctx, Key{workspace, id}); err != nil {
+			return nil, err
+		}
+	}
+	listed, err := v.listEntries(ctx, entries)
+	if err != nil {
+		return nil, err
+	}
+	matched := make([]api.MatchedEntry, len(listed))
+	for i, entry := range listed {
+		matched[i] = api.MatchedEntry{ListedEntry: entry}
+	}
+	return matched, nil
 }
 
 // topicWalks is how many paths up the topics view follows for a page

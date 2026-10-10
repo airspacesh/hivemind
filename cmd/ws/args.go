@@ -111,7 +111,7 @@ func searchFlagSpec() flagSpec {
 	spec := flagSpec{
 		strs: []string{"--limit", "--offset", "--under", "--workspace"},
 		bools: []string{"--order-by-creation", "--order-by-modified",
-			"--id-only", "--include-superseded", "--flat"},
+			"--id-only", "--include-superseded", "--flat", "--entries-only"},
 		alias: map[string]string{"-n": "--limit"},
 	}
 	for _, field := range searchFields {

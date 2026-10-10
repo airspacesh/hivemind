@@ -85,7 +85,7 @@ func (c *client) printRecentAfterChange(t target, changed api.Ref) error {
 	var others []api.ListedEntry
 	for _, e := range result.Entries {
 		if e.Ref != changed && len(others) < recentAfterChangeCount {
-			others = append(others, e)
+			others = append(others, e.ListedEntry)
 		}
 	}
 	if len(others) == 0 {
@@ -545,6 +545,9 @@ func cmdSearch(c *client, command string, args []string) error {
 	if p.bools["--include-superseded"] {
 		query.Set("include-superseded", "true")
 	}
+	if p.bools["--entries-only"] {
+		query.Set("entries-only", "true")
+	}
 	order := byModified
 	if p.bools["--order-by-creation"] {
 		query.Set("order-by", "created")
@@ -554,6 +557,10 @@ func cmdSearch(c *client, command string, args []string) error {
 		if order == byCreation {
 			return fmt.Errorf("--order-by-creation needs --flat, since " +
 				"top-level entries are ordered by activity")
+		}
+		if p.bools["--entries-only"] {
+			return fmt.Errorf("--entries-only needs --flat, since " +
+				"top-level entries are listed without their chats")
 		}
 		query.Set("view", "topics")
 		order = byActivity

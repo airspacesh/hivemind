@@ -138,7 +138,22 @@ func printSearchResult(
 		fmt.Println("No matching entries.")
 		return
 	}
-	printEntryLines(result.Entries, order)
+	var times []time.Time
+	for _, e := range result.Entries {
+		times = append(times, listTime(e.ListedEntry, order))
+		times = append(times, messageTimes(e.Messages)...)
+	}
+	layout := timeLayout(times)
+	for _, e := range result.Entries {
+		printEntryLine(e.ListedEntry, order, layout)
+		if e.EarlierMessages > 0 {
+			fmt.Printf("    ... %d earlier matching messages\n",
+				e.EarlierMessages)
+		}
+		for _, m := range e.Messages {
+			printMessage(m, "    ", layout)
+		}
+	}
 	if result.More {
 		fmt.Printf("--- more entries (use --offset %d to view older) ---\n",
 			offset+limit)

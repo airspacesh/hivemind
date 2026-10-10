@@ -138,7 +138,7 @@ func mustGet(t *testing.T, store *Store, ref api.Ref) api.EntryDetail {
 	return detail
 }
 
-func entryRefsOf(entries []api.ListedEntry) []string {
+func entryRefsOf(entries []api.MatchedEntry) []string {
 	refs := make([]string, len(entries))
 	for i, entry := range entries {
 		refs[i] = entry.Ref.String()

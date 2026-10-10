@@ -59,7 +59,9 @@ func runSearch(t *testing.T, store *Store, filter Filter) api.SearchResult {
 	return result
 }
 
-func assertEntryRefs(t *testing.T, entries []api.ListedEntry, want ...api.Ref) {
+func assertEntryRefs(
+	t *testing.T, entries []api.MatchedEntry, want ...api.Ref,
+) {
 	t.Helper()
 	if got := entryRefsOf(entries); !reflect.DeepEqual(
 		got, refStrings(want...)) {
@@ -329,4 +331,104 @@ func TestSearchMetadataStaysInItsWorkspace(t *testing.T) {
 		Meta: []MetaCond{{Negate: true, Key: "jira", Value: "*"}},
 	})
 	assertEntryRefs(t, result.Entries, inDefault.Ref)
+}
+
+func messageBodies(messages []api.Message) []string {
+	var bodies []string
+	for _, message := range messages {
+		bodies = append(bodies, message.Body)
+	}
+	return bodies
+}
+
+func TestSearchMatchesChatMessages(t *testing.T) {
+	store := openTestStore(t)
+	pond := mustAdd(t, store, "note", "Pond notes", "", nil)
+	sighting := mustAdd(t, store, "idea", "Heron sighting", "", nil)
+	quiet := mustAdd(t, store, "note", "Count ducks", "", nil)
+	for _, body := range []string{"a heron landed", "nothing here",
+		"HERON again", "heron thrice", "heron four"} {
+		mustPost(t, store, pond.Ref, body)
+	}
+	mustPost(t, store, quiet.Ref, "no birds")
+	heron := []FieldCond{{Value: "heron"}}
+
+	result := runSearch(t, store, Filter{Content: heron})
+	assertEntryRefs(t, result.Entries, pond.Ref, sighting.Ref)
+	if got, want := messageBodies(result.Entries[0].Messages), []string{
+		"HERON again", "heron thrice", "heron four",
+	}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("matching messages = %q, want %q", got, want)
+	}
+	if got := result.Entries[0].EarlierMessages; got != 1 {
+		t.Fatalf("earlier matching messages = %d, want 1", got)
+	}
+	if got := result.Entries[1].Messages; len(got) != 0 {
+		t.Fatalf("an entry with no matching chat shows messages %v", got)
+	}
+
+	byCreation := runSearch(t, store, Filter{
+		Content: heron, OrderByCreation: true,
+	})
+	assertEntryRefs(t, byCreation.Entries, sighting.Ref, pond.Ref)
+
+	for offset, want := range []api.Ref{pond.Ref, sighting.Ref} {
+		page := runSearch(t, store, Filter{
+			Content: heron, Limit: 1, Offset: offset,
+		})
+		assertEntryRefs(t, page.Entries, want)
+		if page.More != (offset == 0) {
+			t.Fatalf("more at offset %d = %v", offset, page.More)
+		}
+	}
+
+	entriesOnly := runSearch(t, store, Filter{
+		Content: heron, EntriesOnly: true,
+	})
+	assertEntryRefs(t, entriesOnly.Entries, sighting.Ref)
+
+	// The other filters apply to the entry a message is in.
+	ideas := runSearch(t, store, Filter{
+		Content: heron, Type: []FieldCond{{Value: "idea"}},
+	})
+	assertEntryRefs(t, ideas.Entries, sighting.Ref)
+
+	// Excluding text alone does not search chat, or every entry with
+	// one message lacking the text would match.
+	without := runSearch(t, store, Filter{
+		Content: []FieldCond{{Negate: true, Value: "heron"}},
+	})
+	assertEntryRefs(t, without.Entries, quiet.Ref, pond.Ref)
+	for _, entry := range without.Entries {
+		if len(entry.Messages) != 0 {
+			t.Fatalf("%s shows messages %v", entry.Ref, entry.Messages)
+		}
+	}
+}
+
+// A message matches when it matches every text filter, required and
+// excluded, on its own.
+func TestSearchMatchesEachMessageOnItsOwn(t *testing.T) {
+	store := openTestStore(t)
+	split := mustAdd(t, store, "note", "Split", "", nil)
+	mustPost(t, store, split.Ref, "heron")
+	mustPost(t, store, split.Ref, "egret")
+	both := mustAdd(t, store, "note", "Both", "", nil)
+	mustPost(t, store, both.Ref, "heron and egret")
+	mustPost(t, store, both.Ref, "heron alone")
+
+	result := runSearch(t, store, Filter{Content: []FieldCond{
+		{Value: "heron"}, {Value: "egret"},
+	}})
+	assertEntryRefs(t, result.Entries, both.Ref)
+
+	result = runSearch(t, store, Filter{Content: []FieldCond{
+		{Value: "heron"}, {Negate: true, Value: "egret"},
+	}})
+	assertEntryRefs(t, result.Entries, both.Ref, split.Ref)
+	if got := messageBodies(result.Entries[0].Messages); !reflect.DeepEqual(
+		got, []string{"heron alone"}) {
+		t.Fatalf("matching messages = %q, want only the one without egret",
+			got)
+	}
 }
