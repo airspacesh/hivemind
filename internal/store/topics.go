@@ -206,9 +206,10 @@ type change struct {
 }
 
 // changesBetween reads the changes in a workspace at or after from
-// and, unless to is empty, before to, the newest first.
+// and, unless to is empty, before to, the newest first, at most limit
+// of them.
 func (v view) changesBetween(
-	ctx context.Context, workspace int64, from, to string,
+	ctx context.Context, workspace int64, from, to string, limit int,
 ) ([]change, error) {
 	bound := `workspace_id = ? AND modified_utc >= ?`
 	args := []any{workspace, from}
@@ -222,7 +223,7 @@ func (v view) changesBetween(
 		UNION ALL
 		SELECT modified_utc, workspace_id, entry_id FROM entry_messages
 		WHERE `+bound+`
-		ORDER BY 1 DESC`, append(args, args...)...)
+		ORDER BY 1 DESC LIMIT ?`, append(append(args, args...), limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("reading recent changes: %w", err)
 	}
@@ -472,7 +473,7 @@ func (v view) walkTopics(
 			from = floor
 		}
 		changes, err := v.changesBetween(ctx, workspace,
-			from.Format(timeLayout), to)
+			from.Format(timeLayout), to, w.rowsLeft+1)
 		if err != nil {
 			return nil, false, err
 		}
