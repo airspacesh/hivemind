@@ -103,12 +103,13 @@ Links:
 Listings:
   '{program} recent' lists top-level entries, those with no parent,
   ordered by the latest change anywhere beneath them, with a count of
-  what is below. '{program} recent --flat' lists every entry by its own
-  last change. '{program} search' lists every level, with the path to
-  each match. --under <ref> keeps a search to an entry and what is
-  beneath it. '{program} tree <ref>' shows the path to an entry, then
-  its subtree, at most --limit entries, marking where it was cut. Times
-  show as 13:20 when an output's times all fall on one day, or else as
+  what is below and the 2 most recently changed messages anywhere in the
+  tree. '{program} recent --flat' lists every entry by its own last
+  change. '{program} search' lists every level, with the path to each
+  match. --under <ref> keeps a search to an entry and what is beneath
+  it. '{program} tree <ref>' shows the path to an entry, then its
+  subtree, at most --limit entries, marking where it was cut. Times show
+  as 13:20 when an output's times all fall on one day, or else as
   23/07/2025 13:20.
 
 Search filters (recent and search):

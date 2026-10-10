@@ -398,6 +398,37 @@ func TestSearchShowsMatchingMessages(t *testing.T) {
 	}
 }
 
+// The topics view shows the newest messages in each tree beneath its
+// top-level entry, each named by its own entry, after how many came
+// earlier.
+func TestRecentShowsTheNewestMessagesInEachTree(t *testing.T) {
+	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
+	root := api.Ref{Prefix: "e", ID: 1}
+	child := api.Ref{Prefix: "e", ID: 3}
+	message := func(entry api.Ref, number int64) api.Message {
+		return api.Message{Entry: entry, Number: number, Created: when,
+			Modified: when, Body: "quack", Origin: api.Origin{User: "duck"}}
+	}
+	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		reply(w, http.StatusOK, api.SearchResult{Entries: []api.MatchedEntry{{
+			ListedEntry: api.ListedEntry{Entry: api.Entry{Ref: root,
+				Created: when, Modified: when, Type: "question",
+				Subject: "Why?"}, Activity: when, Descendants: 1},
+			TreeMessages: []api.Message{message(root, 3),
+				message(child, 2)},
+			EarlierTreeMessages: 2,
+		}}})
+	})
+	config := writeConfig(t, "workspaces:\n  default:\n    server: "+
+		server.URL+"\n", 0o600)
+	got := ws(t, config, "recent")
+	want := "[e1] (question) 05:20: Why? (+1 below)\n  ... 2 earlier\n" +
+		"  [e1-m3] 05:20 duck: quack\n  [e3-m2] 05:20 duck: quack\n"
+	if !got.ok || got.stdout != want {
+		t.Fatalf("recent =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
+	}
+}
+
 // TestResolutionMovesOnOnlyForAnAbsentPrefix checks that an id goes to
 // the first server listing its prefix, and that only that server's own
 // workspace's secret travels, and only with the entry request.

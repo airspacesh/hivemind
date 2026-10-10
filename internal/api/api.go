@@ -207,10 +207,16 @@ func (r EditEntryRequest) ChangesContent() bool {
 // entry's chat that matched and that the page's shared budget of
 // messages had room for. MoreMatchingMessages counts the entry's other
 // matching messages.
+//
+// In the topics view, TreeMessages holds the newest messages anywhere
+// in the entry's tree, and EarlierTreeMessages counts the tree's other
+// messages.
 type MatchedEntry struct {
 	ListedEntry
 	MatchingMessages     []Message `json:"matching_messages,omitempty"`
 	MoreMatchingMessages int       `json:"more_matching_messages,omitempty"`
+	TreeMessages         []Message `json:"tree_messages,omitempty"`
+	EarlierTreeMessages  int       `json:"earlier_tree_messages,omitempty"`
 }
 
 // SearchResult is a page of a listing. More says whether entries

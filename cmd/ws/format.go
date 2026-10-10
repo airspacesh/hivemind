@@ -141,11 +141,18 @@ func printSearchResult(
 	var times []time.Time
 	for _, e := range result.Entries {
 		times = append(times, listTime(e.ListedEntry, order))
+		times = append(times, messageTimes(e.TreeMessages)...)
 		times = append(times, messageTimes(e.MatchingMessages)...)
 	}
 	layout := timeLayout(times)
 	for _, e := range result.Entries {
 		printEntryLine(e.ListedEntry, order, layout)
+		if e.EarlierTreeMessages > 0 {
+			fmt.Printf("  ... %d earlier\n", e.EarlierTreeMessages)
+		}
+		for _, m := range e.TreeMessages {
+			printMessage(m, "  ", layout)
+		}
 		for _, m := range e.MatchingMessages {
 			printMessage(m, "  ", layout)
 		}

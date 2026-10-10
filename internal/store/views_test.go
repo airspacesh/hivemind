@@ -112,6 +112,56 @@ func TestTopicsFollowActivityAnywhereInTheTree(t *testing.T) {
 	}
 }
 
+// Under each top-level entry, the topics view shows the newest
+// messages anywhere in its tree, superseded entries included, and
+// counts the rest.
+func TestTopicsShowTheNewestMessagesInEachTree(t *testing.T) {
+	store := openTestStore(t)
+	root := mustAdd(t, store, "idea", "pond", "", nil)
+	child := addChild(t, store, "child", root.Ref)
+	grandchild := addChild(t, store, "grandchild", child.Ref)
+	replaced := addChild(t, store, "replaced", root.Ref)
+	successor := addChild(t, store, "successor", root.Ref)
+	if err := addLinks(t, store, successor.Ref,
+		link(api.SupersedesLink, replaced.Ref)); err != nil {
+		t.Fatal(err)
+	}
+	silent := mustAdd(t, store, "idea", "silent", "", nil)
+	other := mustAdd(t, store, "idea", "other", "", nil)
+	mustPost(t, store, root.Ref, "first")
+	mustPost(t, store, child.Ref, "second")
+	newest := []api.Message{
+		mustPost(t, store, grandchild.Ref, "third"),
+		mustPost(t, store, replaced.Ref, "fourth"),
+	}
+	elsewhere := mustPost(t, store, other.Ref, "elsewhere")
+
+	result := topics(t, store, Filter{})
+	assertEntryRefs(t, result.Entries, other.Ref, root.Ref, silent.Ref)
+	if got, want := messageRefs(result.Entries[1].TreeMessages),
+		messageRefs(newest); !reflect.DeepEqual(got, want) {
+		t.Fatalf("tree messages = %v, want %v", got, want)
+	}
+	if got := result.Entries[1].EarlierTreeMessages; got != 2 {
+		t.Fatalf("earlier tree messages = %d, want 2", got)
+	}
+	if got, want := messageRefs(result.Entries[0].TreeMessages),
+		messageRefs([]api.Message{elsewhere}); !reflect.DeepEqual(
+		got, want) || result.Entries[0].EarlierTreeMessages != 0 {
+		t.Fatalf("other's tree messages = %v and %d earlier, want %v",
+			got, result.Entries[0].EarlierTreeMessages, want)
+	}
+	if got := result.Entries[2].TreeMessages; len(got) != 0 {
+		t.Fatalf("a tree with no chat shows %v", got)
+	}
+
+	for _, entry := range runSearch(t, store, Filter{}).Entries {
+		if len(entry.TreeMessages) != 0 {
+			t.Fatalf("the flat listing shows %s's tree messages", entry.Ref)
+		}
+	}
+}
+
 func TestTopicsKeepASupersededRootOnlyAsContext(t *testing.T) {
 	store := openTestStore(t)
 	withChild := mustAdd(t, store, "idea", "replaced topic", "", nil)

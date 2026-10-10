@@ -32,6 +32,9 @@ const (
 	firstActivityWindow = time.Hour
 	// activityBatch is the number of changes a window aims to return.
 	activityBatch = 256
+	// treeMessageCount is how many of the newest messages in its tree
+	// the view shows under each top-level entry.
+	treeMessageCount = 2
 )
 
 // topLevelClause is true for an entry e with no parent.
@@ -399,6 +402,59 @@ func (v view) walkTopics(
 	}
 }
 
+// treeMessagesFrom joins an entry's subtree, from subtreeCTE, to the
+// messages in it. It takes the entry's workspace, which holds the
+// whole subtree. Left to choose, SQLite may build an automatic index
+// over every message on the server to join a large subtree, which
+// takes seconds, so INDEXED BY holds it to the index of each entry's
+// chat.
+const treeMessagesFrom = `subtree CROSS JOIN entry_messages AS m
+	INDEXED BY sqlite_autoindex_entry_messages_1
+	ON m.workspace_id = ? AND m.entry_id = subtree.id`
+
+// newestTreeMessages reads the newest treeMessageCount messages
+// anywhere in an entry's tree, oldest first, and counts the tree's
+// other messages.
+func (v view) newestTreeMessages(
+	ctx context.Context, key Key,
+) ([]api.Message, int, error) {
+	var total int
+	if err := v.tx.QueryRowContext(ctx, `
+		WITH RECURSIVE `+subtreeCTE("subtree")+`
+		SELECT count(*) FROM `+treeMessagesFrom,
+		key.Workspace, key.ID, key.Workspace,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("counting the messages under %s: %w",
+			v.store.mustRef(key), err)
+	}
+
+	rows, err := v.tx.QueryContext(ctx, `
+		WITH RECURSIVE `+subtreeCTE("subtree")+`
+		SELECT `+messageColumns+` FROM `+treeMessagesFrom+`
+		ORDER BY m.modified_utc DESC, m.post_order DESC LIMIT ?`,
+		key.Workspace, key.ID, key.Workspace, treeMessageCount)
+	if err != nil {
+		return nil, 0, fmt.Errorf("reading the messages under %s: %w",
+			v.store.mustRef(key), err)
+	}
+	defer rows.Close()
+	var messages []api.Message
+	for rows.Next() {
+		message, err := v.store.scanMessage(rows)
+		if err != nil {
+			return nil, 0, fmt.Errorf("reading the messages under %s: %w",
+				v.store.mustRef(key), err)
+		}
+		messages = append(messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("reading the messages under %s: %w",
+			v.store.mustRef(key), err)
+	}
+	slices.Reverse(messages)
+	return messages, total - len(messages), nil
+}
+
 // searchTopics lists a page of the topics view, and whether more
 // follow. It walks activity for at most maxWalks paths up, then ranks
 // every match directly.
@@ -436,6 +492,14 @@ func (v view) searchTopics(
 	listed, err := v.matchedEntries(ctx, workspace, page)
 	if err != nil {
 		return api.SearchResult{}, err
+	}
+	for i := range listed {
+		key := Key{workspace, listed[i].Ref.ID}
+		listed[i].TreeMessages, listed[i].EarlierTreeMessages, err =
+			v.newestTreeMessages(ctx, key)
+		if err != nil {
+			return api.SearchResult{}, err
+		}
 	}
 	return api.SearchResult{
 		Entries: listed,
