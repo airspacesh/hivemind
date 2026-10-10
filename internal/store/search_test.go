@@ -190,6 +190,7 @@ func TestSearchOrdersEditedEntryFirstByDefault(t *testing.T) {
 		context.Background(), everyAccess(entries.store),
 		entries.store.mustKey(entries.first.Ref), api.EditEntryRequest{
 			Metadata: map[string]string{"jira": "QUACK-9"},
+			User:     testUser,
 		},
 	); err != nil {
 		t.Fatalf("editing metadata: %v", err)
@@ -471,7 +472,7 @@ func TestSearchSharesOneMessageBudgetAcrossThePage(t *testing.T) {
 
 	// An edit makes a message the newest, so it is shown, and last.
 	if _, _, err := store.EditMessage(ctx, store.mustKey(busy.Ref), 1,
-		"heron again"); err != nil {
+		ownEdit("heron again")); err != nil {
 		t.Fatal(err)
 	}
 	result = runSearch(t, store, Filter{Content: heron})

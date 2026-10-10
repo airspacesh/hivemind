@@ -238,22 +238,55 @@ func (v view) editContent(
 	}
 	query += ` WHERE workspace_id = ? AND id = ?`
 	args = append(args, key.Workspace, key.ID)
-	result, err := v.tx.ExecContext(ctx, query, args...)
-	if err != nil {
+	if _, err := v.tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("editing entry: %w", err)
-	}
-	matched, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("checking edited entry: %w", err)
-	}
-	if matched == 0 {
-		return fmt.Errorf("%w: %s", ErrEntryNotFound, v.store.mustRef(key))
 	}
 	return nil
 }
 
+// NotOwnerError refuses an edit by anyone but the user who posted the
+// entry or message it edits. Nobody can edit one that records no user.
+type NotOwnerError struct {
+	posted string
+	owner  string
+}
+
+func (e *NotOwnerError) Error() string {
+	if e.owner == "" {
+		return e.posted + " records no user, so nobody can edit it"
+	}
+	return fmt.Sprintf("%s was posted by %s, so only %s can edit it",
+		e.posted, e.owner, e.owner)
+}
+
+// checkEditor refuses an edit by editor of something owner posted,
+// unless they are the same user.
+func checkEditor(posted fmt.Stringer, owner, editor string) error {
+	if owner == "" || owner != editor {
+		return &NotOwnerError{posted: posted.String(), owner: owner}
+	}
+	return nil
+}
+
+// entryOwner reads the user who posted an entry.
+func (v view) entryOwner(ctx context.Context, key Key) (string, error) {
+	var owner string
+	err := v.tx.QueryRowContext(ctx, `
+		SELECT origin_user FROM entries WHERE workspace_id = ? AND id = ?`,
+		key.Workspace, key.ID,
+	).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("%w: %s", ErrEntryNotFound, v.store.mustRef(key))
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading entry owner: %w", err)
+	}
+	return owner, nil
+}
+
 // Edit overwrites an entry's fields and changes its metadata and
-// links. No earlier text is kept.
+// links. No earlier text is kept. Only the user who posted the entry
+// can edit it.
 func (s *Store) Edit(
 	ctx context.Context,
 	access Access,
@@ -270,12 +303,18 @@ func (s *Store) Edit(
 	}
 	defer v.tx.Rollback()
 
+	owner, err := v.entryOwner(ctx, key)
+	if err != nil {
+		return api.Entry{}, err
+	}
+	if err := checkEditor(v.store.mustRef(key), owner,
+		req.User); err != nil {
+		return api.Entry{}, err
+	}
 	if req.ChangesContent() {
 		if err := v.editContent(ctx, key, req); err != nil {
 			return api.Entry{}, err
 		}
-	} else if err := v.checkEntryExists(ctx, key); err != nil {
-		return api.Entry{}, err
 	}
 	if len(req.Metadata) > 0 {
 		if err := v.writeMetadata(ctx, key, req.Metadata); err != nil {

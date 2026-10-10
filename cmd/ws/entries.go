@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -12,14 +13,20 @@ import (
 
 const claudeSessionEnvironment = "CLAUDE_CODE_SESSION_ID"
 
-// captureOrigin records who is writing, and where as far as the
-// workspace's metadata capture allows. The username falls back to
-// $USER, and the session is empty outside Claude Code.
-func captureOrigin(capture metadataCapture) (api.Origin, error) {
-	origin := api.Origin{User: os.Getenv("USER")}
+// currentUser names the user writing, in the origin of a post and in
+// an edit. It falls back to $USER.
+func currentUser() string {
 	if current, err := user.Current(); err == nil {
-		origin.User = current.Username
+		return current.Username
 	}
+	return os.Getenv("USER")
+}
+
+// captureOrigin records who is writing, and where as far as the
+// workspace's metadata capture allows. The session is empty outside
+// Claude Code.
+func captureOrigin(capture metadataCapture) (api.Origin, error) {
+	origin := api.Origin{User: currentUser()}
 	if capture.hostname {
 		host, err := os.Hostname()
 		if err != nil {
@@ -50,6 +57,18 @@ func uncertainWrite(err error, outcome, check string) error {
 	return fmt.Errorf("%w\n%s may have taken effect anyway, and %s did "+
 		"not retry. Check '%s' before trying again", err, outcome,
 		programName, check)
+}
+
+// explainNotOwner adds the next step to an edit refused because
+// another user posted what it edits.
+func explainNotOwner(err error, entry api.Ref) error {
+	var refused *serverError
+	if !errors.As(err, &refused) || refused.code != api.CodeNotOwner {
+		return err
+	}
+	return fmt.Errorf("%w. To suggest a change, send a message in its "+
+		"chat with '%s chat send %s \"<message>\"'", err, programName,
+		entry)
 }
 
 func entryPath(ref api.Ref, rest string) string {
@@ -393,13 +412,14 @@ func cmdEdit(c *client, args []string) error {
 	if request.AddLinks, err = c.collectLinks(t, p); err != nil {
 		return err
 	}
+	request.User = currentUser()
 	if err := request.Validate(); err != nil {
 		return err
 	}
 	var entry api.Entry
 	if err := c.do(t, "PATCH", entryPath(ref, ""), request, &entry); err != nil {
-		return uncertainWrite(err, "The edit", programName+" entry "+
-			ref.String())
+		return uncertainWrite(explainNotOwner(err, ref), "The edit",
+			programName+" entry "+ref.String())
 	}
 	fmt.Printf("Edited entry [%s].\n", entry.Ref)
 	if p.bools["--no-recent"] {

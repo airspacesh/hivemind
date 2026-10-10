@@ -165,8 +165,21 @@ func (r PostMessageRequest) Validate() error {
 	return r.Origin.Validate()
 }
 
+func validateEditor(user string) error {
+	if user == "" {
+		return fmt.Errorf("an edit needs the user making it")
+	}
+	if err := checkOneLine("user", user); err != nil {
+		return err
+	}
+	return checkLen("user", user, MaxOriginUserLen)
+}
+
 func (r EditMessageRequest) Validate() error {
-	return validateMessageBody(r.Body)
+	if err := validateMessageBody(r.Body); err != nil {
+		return err
+	}
+	return validateEditor(r.User)
 }
 
 func validateLink(link Link) error {
@@ -292,5 +305,8 @@ func (r EditEntryRequest) Validate() error {
 			return err
 		}
 	}
-	return validateMetadataEdits(r.Metadata)
+	if err := validateMetadataEdits(r.Metadata); err != nil {
+		return err
+	}
+	return validateEditor(r.User)
 }

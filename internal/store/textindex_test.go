@@ -134,12 +134,12 @@ func TestTextIndexFollowsEdits(t *testing.T) {
 	subject, body := "Count the ducks", "On the pond"
 	if _, err := store.Edit(ctx, everyAccess(store),
 		store.mustKey(entry.Ref), api.EditEntryRequest{
-			Subject: &subject, Body: &body,
+			Subject: &subject, Body: &body, User: testUser,
 		}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := store.EditMessage(ctx, store.mustKey(entry.Ref),
-		message.Number, "Saw a swan"); err != nil {
+		message.Number, ownEdit("Saw a swan")); err != nil {
 		t.Fatal(err)
 	}
 	addFiller(t, store)
@@ -171,12 +171,12 @@ func TestTextIndexForgetsOverwrittenText(t *testing.T) {
 	subject := "Heron"
 	if _, err := store.Edit(ctx, everyAccess(store),
 		store.mustKey(entry.Ref), api.EditEntryRequest{
-			Subject: &subject,
+			Subject: &subject, User: testUser,
 		}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := store.EditMessage(ctx, store.mustKey(entry.Ref),
-		message.Number, "Egret"); err != nil {
+		message.Number, ownEdit("Egret")); err != nil {
 		t.Fatal(err)
 	}
 

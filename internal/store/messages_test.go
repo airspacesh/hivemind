@@ -20,11 +20,16 @@ func mustPost(
 ) api.Message {
 	t.Helper()
 	message, err := store.Post(context.Background(), store.mustKey(entry),
-		api.PostMessageRequest{Body: body, Origin: api.Origin{User: "duck"}})
+		api.PostMessageRequest{Body: body, Origin: api.Origin{User: testUser}})
 	if err != nil {
 		t.Fatalf("posting to %s: %v", entry, err)
 	}
 	return message
+}
+
+// ownEdit is an edit to a message by the user mustPost posts as.
+func ownEdit(body string) api.EditMessageRequest {
+	return api.EditMessageRequest{Body: body, User: testUser}
 }
 
 func readChat(
@@ -163,7 +168,7 @@ func TestEditsKeepTheirPlaceAndAreNotReadAgain(t *testing.T) {
 	cursor := readChat(t, store, entry.Ref, 0, 20).Cursor
 
 	edited, changed, err := store.EditMessage(ctx, store.mustKey(entry.Ref),
-		question.Number, "question, edited")
+		question.Number, ownEdit("question, edited"))
 	if err != nil || !changed {
 		t.Fatalf("edit = %v, %v", changed, err)
 	}
@@ -181,11 +186,11 @@ func TestEditsKeepTheirPlaceAndAreNotReadAgain(t *testing.T) {
 	}
 
 	if _, changed, err := store.EditMessage(ctx, store.mustKey(entry.Ref),
-		question.Number, "question, edited"); err != nil || changed {
+		question.Number, ownEdit("question, edited")); err != nil || changed {
 		t.Fatalf("repeating an edit = %v, %v; want no change", changed, err)
 	}
 	if _, _, err := store.EditMessage(ctx, store.mustKey(entry.Ref), 9,
-		"text"); !errors.Is(err, ErrMessageNotFound) {
+		ownEdit("text")); !errors.Is(err, ErrMessageNotFound) {
 		t.Fatalf("editing a missing message = %v", err)
 	}
 }
@@ -212,7 +217,7 @@ func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
 	editMessage := func(entry api.Ref, body string) {
 		t.Helper()
 		if _, _, err := store.EditMessage(ctx, store.mustKey(entry), 1,
-			body); err != nil {
+			ownEdit(body)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -230,7 +235,7 @@ func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
 
 	project := "lake"
 	if _, err := store.Edit(ctx, everyAccess(store), store.mustKey(nest.Ref),
-		api.EditEntryRequest{Project: &project}); err != nil {
+		api.EditEntryRequest{Project: &project, User: testUser}); err != nil {
 		t.Fatal(err)
 	}
 	checkActivity("editing an entry")
@@ -256,7 +261,7 @@ func TestOverviewGroupsTheNewestMessagesByEntry(t *testing.T) {
 	mustPost(t, store, private.Ref, "private")
 	mustPost(t, store, b.Ref, "b2")
 	if _, _, err := store.EditMessage(ctx, store.mustKey(a.Ref),
-		first.Number, "a1 edited"); err != nil {
+		first.Number, ownEdit("a1 edited")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -289,11 +294,11 @@ func TestOverwrittenTextLeavesNoCopyInTheDatabase(t *testing.T) {
 	subject := "short"
 	if _, err := store.Edit(ctx, everyAccess(store),
 		store.mustKey(entry.Ref),
-		api.EditEntryRequest{Subject: &subject}); err != nil {
+		api.EditEntryRequest{Subject: &subject, User: testUser}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := store.EditMessage(ctx, store.mustKey(entry.Ref),
-		message.Number, "short"); err != nil {
+		message.Number, ownEdit("short")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {

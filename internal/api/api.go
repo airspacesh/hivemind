@@ -135,8 +135,11 @@ type PostMessageRequest struct {
 	Origin Origin `json:"origin"`
 }
 
+// EditMessageRequest carries the user making the edit, who must be
+// the user that posted the message.
 type EditMessageRequest struct {
 	Body string `json:"body"`
+	User string `json:"user"`
 }
 
 // ChatPage holds messages from one chat, oldest first. Cursor is the
@@ -187,6 +190,9 @@ type EditEntryRequest struct {
 	// removes every link of a name, and is fine when there are none.
 	RemoveLinks     []Link   `json:"remove_links,omitempty"`
 	RemoveLinkNames []string `json:"remove_link_names,omitempty"`
+	// User is the user making the edit, who must be the user that
+	// posted the entry.
+	User string `json:"user"`
 }
 
 // ChangesContent reports whether the edit changes the entry itself,
@@ -238,6 +244,7 @@ const (
 	CodeLinkNotFound       ErrorCode = "link_not_found"
 	CodeLinkTargetNotFound ErrorCode = "link_target_not_found"
 	CodeConflict           ErrorCode = "conflict"
+	CodeNotOwner           ErrorCode = "not_owner"
 	CodeTooLarge           ErrorCode = "too_large"
 	CodeRouteNotFound      ErrorCode = "route_not_found"
 	CodeUnavailable        ErrorCode = "unavailable"

@@ -98,7 +98,7 @@ func TestTopicsFollowActivityAnywhereInTheTree(t *testing.T) {
 	subject := "newer topic, edited"
 	if _, err := store.Edit(ctx, everyAccess(store),
 		store.mustKey(newer.Ref),
-		api.EditEntryRequest{Subject: &subject}); err != nil {
+		api.EditEntryRequest{Subject: &subject, User: testUser}); err != nil {
 		t.Fatal(err)
 	}
 	if refs := entryRefsOf(topics(t, store, Filter{}).Entries); refs[0] !=

@@ -186,6 +186,7 @@ func TestLinkingToAnUnreadableEntryIsRefusedAsMissing(t *testing.T) {
 	if _, err := w.store.Edit(ctx, w.openAccess(t),
 		w.store.mustKey(w.openRoot.Ref), api.EditEntryRequest{
 			AddLinks: []api.Link{link("see", w.secretSee.Ref)},
+			User:     testUser,
 		}); !errors.Is(err, ErrLinkTarget) {
 		t.Fatalf("editing in a link to an unreadable entry = %v", err)
 	}

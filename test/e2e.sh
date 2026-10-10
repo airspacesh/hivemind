@@ -384,6 +384,37 @@ check "recent shows a tree's newest changed messages" "  ... 2 earlier
 check "search shows the matching messages" "  [$chat-m4]" \
     "$(ws search Woken)"
 
+# Only the user who posted an entry or message can edit it, and anyone
+# can add under it and chat on it. The client always sends its own
+# user, so the other user's posts go in by curl.
+post_as_heron() {
+    curl -fsS -X POST -H "Workstream-API-Version: $api_version" \
+        --data "$2" "$main_url/api/$1" >/dev/null
+}
+post_as_heron workspaces/default/entries \
+    '{"subject":"Heron topic","project":"owners","origin":{"user":"heron"}}'
+heron="$(ws search 'Heron topic' --id-only)"
+check "an edit of another user's entry names its owner and the next step" \
+    "$heron was posted by heron, so only heron can edit it. To suggest a change, send a message in its chat with 'ws chat send $heron \"<message>\"'" \
+    "$(ws edit "$heron" --subject "Taken" 2>&1 || true)"
+check "a link alone is refused too" "only heron can edit it" \
+    "$(ws edit "$heron" --link "see=$chat" 2>&1 || true)"
+reply="$(ws add "Reply under heron" --project owners --parent "$heron" \
+    --no-recent | added)"
+check "anyone can add under another user's entry" "[$reply]" \
+    "$(ws tree "$heron")"
+check_equal "anyone can chat on another user's entry" "Sent [$heron-m1]." \
+    "$(ws chat send "$heron" "Please fix the subject")"
+post_as_heron "entries/$heron/messages" \
+    '{"body":"Fixed soon","origin":{"user":"heron"}}'
+check "an edit of another user's message is refused" \
+    "$heron-m2 was posted by heron, so only heron can edit it" \
+    "$(ws chat edit "$heron-m2" "Taken" 2>&1 || true)"
+check_equal "your own message can still be withdrawn" \
+    "Edited [$heron-m1]." "$(ws chat edit "$heron-m1" "Retracted")"
+check_equal "your own entry can still be withdrawn" "Edited entry [$reply]." \
+    "$(ws edit "$reply" --subject "Retracted" --no-recent)"
+
 # The server log keeps no client text, and records each issued id.
 ws add "Subject OLDSUBJECTMARK" --body "Body OLDBODYMARK" \
     --project pond --no-recent >/dev/null

@@ -60,7 +60,7 @@ func (h *handler) editMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	message, _, err := h.store.EditMessage(
-		r.Context(), entry, number, request.Body)
+		r.Context(), entry, number, request)
 	if err != nil {
 		writeStoreError(w, err)
 		return

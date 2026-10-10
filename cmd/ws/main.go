@@ -87,6 +87,9 @@ Editing:
   entries in the workspace, so you see what others are doing.
   --no-recent leaves the listing out.
 
+  Only the user who posted an entry or message can edit it. To suggest
+  a change to someone else's, send a message in its chat.
+
 Links:
   A link is a named relationship from one entry to another on the same
   server, possibly in another workspace, such as --link depends-on=e40.

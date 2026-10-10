@@ -240,6 +240,7 @@ func TestLinkEditsAndTheirFailures(t *testing.T) {
 	a := mustAdd(t, store, "a", "", nil)
 	b := mustAdd(t, store, "b", "", nil)
 	edit := func(req api.EditEntryRequest) error {
+		req.User = testUser
 		_, err := store.Edit(ctx, everyAccess(store), store.mustKey(a.Ref),
 			req)
 		return err

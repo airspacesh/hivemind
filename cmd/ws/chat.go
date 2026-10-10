@@ -137,7 +137,7 @@ func cmdChatEdit(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	request := api.EditMessageRequest{Body: args[1]}
+	request := api.EditMessageRequest{Body: args[1], User: currentUser()}
 	if err := request.Validate(); err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func cmdChatEdit(c *client, args []string) error {
 	var message api.Message
 	path := entryPath(ref.Entry, fmt.Sprintf("/messages/%d", ref.Number))
 	if err := c.do(t, "PATCH", path, request, &message); err != nil {
-		return uncertainWrite(err, "The edit",
+		return uncertainWrite(explainNotOwner(err, ref.Entry), "The edit",
 			programName+" chat recent "+ref.Entry.String())
 	}
 	fmt.Printf("Edited [%s].\n", message.Ref())

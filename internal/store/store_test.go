@@ -87,10 +87,18 @@ func everyAccess(store *Store) Access {
 	return NewAccess(ids...)
 }
 
+// testUser posts the entries and messages of tests that name no other
+// user, and makes their edits.
+const testUser = "duck"
+
+// addTo adds an entry, posted by testUser unless req names a user.
 func addTo(
 	t *testing.T, store *Store, workspace string, req api.AddEntryRequest,
 ) api.Entry {
 	t.Helper()
+	if req.Origin.User == "" {
+		req.Origin.User = testUser
+	}
 	entry, err := store.Add(context.Background(), everyAccess(store),
 		workspaceID(t, store, workspace), req)
 	if err != nil {
@@ -122,7 +130,8 @@ func addLinks(
 ) error {
 	t.Helper()
 	_, err := store.Edit(context.Background(), everyAccess(store),
-		store.mustKey(ref), api.EditEntryRequest{AddLinks: links})
+		store.mustKey(ref),
+		api.EditEntryRequest{AddLinks: links, User: testUser})
 	return err
 }
 
@@ -247,6 +256,7 @@ func TestGeneratedColumnsFollowWrites(t *testing.T) {
 		store.mustKey(entry.Ref), api.EditEntryRequest{
 			Subject: &subject, Body: &body,
 			Metadata: map[string]string{"jira": "CHANGED Æ"},
+			User:     testUser,
 		}); err != nil {
 		t.Fatalf("editing entry: %v", err)
 	}
@@ -323,7 +333,7 @@ func TestMetadataEditsRefreshModifiedAndApply(t *testing.T) {
 			}
 			got, err := store.Edit(ctx, everyAccess(store),
 				store.mustKey(entry.Ref),
-				api.EditEntryRequest{Metadata: test.set})
+				api.EditEntryRequest{Metadata: test.set, User: testUser})
 			if err != nil {
 				t.Fatalf("changing metadata: %v", err)
 			}
@@ -396,6 +406,7 @@ func TestMetadataLimitStopsEntryGrowth(t *testing.T) {
 	key := store.mustKey(entry.Ref)
 	_, err := store.Edit(ctx, everyAccess(store), key, api.EditEntryRequest{
 		Metadata: map[string]string{"overflow": "value"},
+		User:     testUser,
 	})
 	if !errors.Is(err, ErrMetadataLimit) {
 		t.Fatalf("Edit error = %v, want ErrMetadataLimit", err)
@@ -404,6 +415,7 @@ func TestMetadataLimitStopsEntryGrowth(t *testing.T) {
 	edited, err := store.Edit(ctx, everyAccess(store), key,
 		api.EditEntryRequest{
 			Metadata: map[string]string{"key-0": "replaced"},
+			User:     testUser,
 		})
 	if err != nil {
 		t.Fatalf("overwriting a metadata value at the limit: %v", err)

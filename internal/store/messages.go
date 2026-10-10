@@ -127,9 +127,10 @@ func (s *Store) Post(
 // EditMessage overwrites a message's text, and reports whether it
 // changed. The message keeps its number and its place in the chat, and
 // no earlier text is kept. Text that equals the current text changes
-// nothing, so repeating an edit is harmless.
+// nothing, so repeating an edit is harmless. Only the user who posted
+// the message can edit it.
 func (s *Store) EditMessage(
-	ctx context.Context, entry Key, number int64, body string,
+	ctx context.Context, entry Key, number int64, req api.EditMessageRequest,
 ) (api.Message, bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -140,7 +141,11 @@ func (s *Store) EditMessage(
 	if err != nil {
 		return api.Message{}, false, err
 	}
-	if message.Body == body {
+	if err := checkEditor(message.Ref(), message.Origin.User,
+		req.User); err != nil {
+		return api.Message{}, false, err
+	}
+	if message.Body == req.Body {
 		return message, false, nil
 	}
 
@@ -148,7 +153,7 @@ func (s *Store) EditMessage(
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE entry_messages SET body = ?, modified_utc = ?
 		WHERE workspace_id = ? AND entry_id = ? AND id = ?`,
-		body, now, entry.Workspace, entry.ID, number,
+		req.Body, now, entry.Workspace, entry.ID, number,
 	); err != nil {
 		return api.Message{}, false, fmt.Errorf("editing message: %w", err)
 	}

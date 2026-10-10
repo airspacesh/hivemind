@@ -206,7 +206,8 @@ func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 		{"GET", "/api/entries/e1/messages?since=0", "", 200, ""},
 		{"GET", "/api/entries/x1/messages", "", 404, api.CodeUnknownPrefix},
 		{"GET", "/api/entries/e9/tree", "", 404, api.CodeEntryNotFound},
-		{"PATCH", "/api/entries/e1/messages/3", `{"body":"x"}`, 404,
+		{"PATCH", "/api/entries/e1/messages/3",
+			`{"body":"x","user":"duck"}`, 404,
 			api.CodeMessageNotFound},
 		{"GET", "/api/workspaces/nowhere/entries", "", 404,
 			api.CodeUnknownWorkspace},
@@ -332,16 +333,53 @@ func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
 	}
 }
 
+func TestOnlyThePosterCanEditOverHTTP(t *testing.T) {
+	s := startServer(t, testConfig(t))
+	s.must(t, "POST", "/api/workspaces/default/entries", entryBody("mine"),
+		"", http.StatusCreated)
+	s.must(t, "POST", "/api/entries/e1/messages",
+		`{"body":"hi","origin":{"user":"duck"}}`, "", http.StatusCreated)
+
+	for _, test := range []struct {
+		path   string
+		body   string
+		status int
+		code   api.ErrorCode
+	}{
+		{"/api/entries/e1", `{"subject":"taken","user":"heron"}`, 403,
+			api.CodeNotOwner},
+		{"/api/entries/e1/messages/1", `{"body":"taken","user":"heron"}`,
+			403, api.CodeNotOwner},
+		{"/api/entries/e1", `{"subject":"taken"}`, 400, api.CodeBadRequest},
+		{"/api/entries/e1/messages/1", `{"body":"taken"}`, 400,
+			api.CodeBadRequest},
+		{"/api/entries/e1", `{"subject":"kept","user":"duck"}`, 200, ""},
+		{"/api/entries/e1/messages/1", `{"body":"kept","user":"duck"}`,
+			200, ""},
+	} {
+		status, text := s.do(t, "PATCH", test.path, test.body, "")
+		if status != test.status {
+			t.Fatalf("PATCH %s %s: %d %s, want %d", test.path, test.body,
+				status, text, test.status)
+		}
+		if test.code != "" && errorCode(t, text) != test.code {
+			t.Fatalf("PATCH %s %s: %s, want code %s", test.path,
+				test.body, text, test.code)
+		}
+	}
+}
+
 func TestChatReadsOverHTTP(t *testing.T) {
 	s := startServer(t, testConfig(t))
 	s.must(t, "POST", "/api/workspaces/default/entries", entryBody("chat"),
 		"", http.StatusCreated)
 	for _, body := range []string{"one", "two", "three"} {
 		s.must(t, "POST", "/api/entries/e1/messages",
-			`{"body":"`+body+`","origin":{}}`, "", http.StatusCreated)
+			`{"body":"`+body+`","origin":{"user":"duck"}}`, "",
+			http.StatusCreated)
 	}
-	s.must(t, "PATCH", "/api/entries/e1/messages/1", `{"body":"one!"}`, "",
-		http.StatusOK)
+	s.must(t, "PATCH", "/api/entries/e1/messages/1",
+		`{"body":"one!","user":"duck"}`, "", http.StatusOK)
 
 	read := func(query string) string {
 		t.Helper()
@@ -386,15 +424,15 @@ func TestRequestLogKeepsNoClientText(t *testing.T) {
 	}{
 		{"POST", "/api/workspaces/default/entries", `{"subject":` +
 			`"SUBJECTMARK","body":"BODYMARK",` +
-			`"project":"PROJECTMARK","origin":{"dir":"/"}}`,
+			`"project":"PROJECTMARK","origin":{"user":"duck","dir":"/"}}`,
 			personalSecret, http.StatusCreated},
-		{"PATCH", "/api/entries/e1",
-			`{"subject":"NEWSUBJECTMARK","body":"NEWBODYMARK"}`, "",
-			http.StatusOK},
+		{"PATCH", "/api/entries/e1", `{"subject":"NEWSUBJECTMARK",` +
+			`"body":"NEWBODYMARK","user":"duck"}`, "", http.StatusOK},
 		{"POST", "/api/entries/e1/messages",
-			`{"body":"MESSAGEMARK","origin":{}}`, "", http.StatusCreated},
-		{"PATCH", "/api/entries/e1/messages/1", `{"body":"EDITMARK"}`, "",
-			http.StatusOK},
+			`{"body":"MESSAGEMARK","origin":{"user":"duck"}}`, "",
+			http.StatusCreated},
+		{"PATCH", "/api/entries/e1/messages/1",
+			`{"body":"EDITMARK","user":"duck"}`, "", http.StatusOK},
 		{"POST", "/api/workspaces/default/entries", `{"FIELDMARK":1}`, "",
 			http.StatusBadRequest},
 		{"GET", "/api/workspaces/default/entries?subject=SEARCHMARK&limit=5",
