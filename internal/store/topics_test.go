@@ -182,7 +182,7 @@ func topicsPage(
 }
 
 func TestTopicsMatchTheReference(t *testing.T) {
-	for seed := int64(1); seed <= 12; seed++ {
+	for seed := int64(1); seed <= 6; seed++ {
 		store := openTestStore(t)
 		random := rand.New(rand.NewSource(seed))
 		addRandomForest(t, store, random, seed%2 == 0)

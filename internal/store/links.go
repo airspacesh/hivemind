@@ -375,9 +375,10 @@ func (s *Store) Detail(
 		return api.EntryDetail{}, err
 	}
 	if err := v.tx.QueryRowContext(ctx, `
-		SELECT count(*) FROM entry_links
-		WHERE target_workspace_id = ? AND target_id = ?
-			AND name = 'parent'`,
+		SELECT count(*) FROM entry_links AS l JOIN entries AS e
+			ON e.workspace_id = l.source_workspace_id AND e.id = l.source_id
+		WHERE l.target_workspace_id = ? AND l.target_id = ?
+			AND l.name = 'parent' AND NOT `+supersededClause,
 		key.Workspace, key.ID,
 	).Scan(&detail.Children); err != nil {
 		return api.EntryDetail{}, fmt.Errorf("counting children: %w", err)

@@ -40,16 +40,21 @@ type treeFacts struct {
 	descendants int
 }
 
+// readTreeFacts reads the latest activity anywhere in an entry's
+// subtree, and how many current entries are under it. Superseded
+// entries count towards activity but not towards descendants.
 func (v view) readTreeFacts(ctx context.Context, key Key) (treeFacts, error) {
 	var facts treeFacts
 	var activity string
 	err := v.tx.QueryRowContext(ctx, `
 		WITH RECURSIVE `+subtreeCTE("subtree")+`
-		SELECT max(`+activityExpr+`), count(*) - 1
+		SELECT max(`+activityExpr+`),
+			coalesce(sum(NOT (e.workspace_id = ? AND e.id = ?)
+				AND NOT `+supersededClause+`), 0)
 		FROM subtree JOIN entries AS e
 			ON e.workspace_id = subtree.workspace_id
 			AND e.id = subtree.id`,
-		key.Workspace, key.ID,
+		key.Workspace, key.ID, key.Workspace, key.ID,
 	).Scan(&activity, &facts.descendants)
 	if err != nil {
 		return treeFacts{}, fmt.Errorf("reading the subtree of %s: %w",

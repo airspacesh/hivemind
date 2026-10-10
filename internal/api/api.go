@@ -72,7 +72,7 @@ type EntryRef struct {
 }
 
 // ListedEntry is an entry with the facts derived from its place in its
-// tree. The facts count only entries the request can read.
+// tree.
 type ListedEntry struct {
 	Entry
 	// Ancestors runs from the root down to the entry's parent.
@@ -80,12 +80,14 @@ type ListedEntry struct {
 	// Activity is the latest change anywhere in the entry's subtree,
 	// itself and chat included. Modified stays the entry's own edit
 	// time.
-	Activity    time.Time `json:"activity"`
-	Descendants int       `json:"descendants"`
+	Activity time.Time `json:"activity"`
+	// Descendants counts the current entries under the entry, leaving
+	// out superseded ones.
+	Descendants int `json:"descendants"`
 }
 
-// EntryDetail adds the links that point at an entry, its child count,
-// and a summary of its chat.
+// EntryDetail adds the links that point at an entry, how many current
+// entries are its children, and a summary of its chat.
 type EntryDetail struct {
 	ListedEntry
 	Backlinks []Link `json:"backlinks,omitempty"`

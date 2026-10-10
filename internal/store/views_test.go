@@ -251,3 +251,26 @@ func TestSearchUnderASubtreeAndFiltersOnRoots(t *testing.T) {
 		t.Fatalf("topics by creation = %v, want ErrInvalidFilter", err)
 	}
 }
+
+// Counts leave out superseded entries, as listings and trees do.
+func TestCountsLeaveOutSupersededEntries(t *testing.T) {
+	store := openTestStore(t)
+	question := mustAdd(t, store, "question", "Why?", "", nil)
+	old := addChild(t, store, "old answer", question.Ref, nil)
+	addTo(t, store, "default", api.AddEntryRequest{
+		Type: "answer", Subject: "new answer",
+		Links: []api.Link{link(api.ParentLink, question.Ref),
+			link(api.SupersedesLink, old.Ref)},
+	})
+
+	detail := mustGet(t, store, question.Ref)
+	if detail.Children != 1 || detail.Descendants != 1 {
+		t.Fatalf("children %d, descendants %d, want 1 and 1",
+			detail.Children, detail.Descendants)
+	}
+	listed := topics(t, store, Filter{Limit: 20})
+	if len(listed.Entries) != 1 || listed.Entries[0].Descendants != 1 {
+		t.Fatalf("topics = %+v, want the question with 1 below",
+			listed.Entries)
+	}
+}
