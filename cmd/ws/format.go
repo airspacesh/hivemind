@@ -98,17 +98,28 @@ func formatPath(path []api.EntryRef) string {
 	return strings.Join(parts, " > ")
 }
 
+// placeLabel shows where a listed entry sits, as the ids of its
+// ancestors from the top down joined by dots, like " in e1.e34", or
+// nothing for a top-level entry.
+func placeLabel(ancestors []api.EntryRef) string {
+	if len(ancestors) == 0 {
+		return ""
+	}
+	ids := make([]string, len(ancestors))
+	for i, entry := range ancestors {
+		ids[i] = entry.Ref.String()
+	}
+	return " in " + strings.Join(ids, ".")
+}
+
 func printEntryLine(e api.ListedEntry, order listOrder, layout string) {
 	below := ""
 	if order == byActivity && e.Descendants > 0 {
 		below = fmt.Sprintf(" (+%d below)", e.Descendants)
 	}
-	fmt.Printf("[%s] %s: %s%s%s\n", e.Ref,
-		listTime(e, order).Local().Format(layout), oneLine(e.Subject),
-		supersededLabel(e.SupersededBy), below)
-	if len(e.Ancestors) > 0 {
-		fmt.Println("    in " + formatPath(e.Ancestors))
-	}
+	fmt.Printf("[%s] %s%s: %s%s%s\n", e.Ref,
+		listTime(e, order).Local().Format(layout), placeLabel(e.Ancestors),
+		oneLine(e.Subject), supersededLabel(e.SupersededBy), below)
 }
 
 func printEntryLines(entries []api.ListedEntry, order listOrder) {

@@ -260,9 +260,12 @@ for index in 2 3; do
 done
 check "a top-level entry counts what is below it" \
     "Count the ducklings (+8 below)" "$(ws recent --project views)"
-check "search shows each hit's path" \
-    "in $root Count the ducklings > $pond_a Pond A counted" \
+check "search shows each hit's path on its line" \
+    " in $root.$pond_a: Recount needed" \
     "$(ws search 'Recount needed' --project views)"
+check_equal "a top-level hit shows no path" "[$root]" \
+    "$(ws search 'Count the ducklings' --project views | grep -v ' in ' |
+        cut -d' ' -f1)"
 check_equal "search under a subtree stays inside it" "4" \
     "$(ws search --under "$recount" --id-only | wc -l | tr -d ' ')"
 check "the tree indents grandchildren" "    [$recount] " \
