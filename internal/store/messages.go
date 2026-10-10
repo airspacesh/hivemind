@@ -61,6 +61,21 @@ func (s *Store) getMessage(
 	return message, nil
 }
 
+// recordChatActivity moves an entry's activity time to a change in its
+// chat, in the transaction that makes the change.
+func recordChatActivity(
+	ctx context.Context, tx *sql.Tx, entry Key, at string,
+) error {
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE entries SET activity_utc = ?
+		WHERE workspace_id = ? AND id = ?`,
+		at, entry.Workspace, entry.ID,
+	); err != nil {
+		return fmt.Errorf("recording chat activity: %w", err)
+	}
+	return nil
+}
+
 // Post adds a message to an entry's chat, numbered one past the
 // entry's highest message. Writes are serialised through the store's
 // one connection, so no other post can take the same number.
@@ -96,6 +111,9 @@ func (s *Store) Post(
 	); err != nil {
 		return api.Message{}, fmt.Errorf("posting message: %w", err)
 	}
+	if err := recordChatActivity(ctx, v.tx, entry, now); err != nil {
+		return api.Message{}, err
+	}
 	message, err := s.getMessage(ctx, v.tx, entry, number)
 	if err != nil {
 		return api.Message{}, err
@@ -126,12 +144,16 @@ func (s *Store) EditMessage(
 		return message, false, nil
 	}
 
+	now := nowUTC()
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE entry_messages SET body = ?, modified_utc = ?
 		WHERE workspace_id = ? AND entry_id = ? AND id = ?`,
-		body, nowUTC(), entry.Workspace, entry.ID, number,
+		body, now, entry.Workspace, entry.ID, number,
 	); err != nil {
 		return api.Message{}, false, fmt.Errorf("editing message: %w", err)
+	}
+	if err := recordChatActivity(ctx, tx, entry, now); err != nil {
+		return api.Message{}, false, err
 	}
 	message, err = s.getMessage(ctx, tx, entry, number)
 	if err != nil {

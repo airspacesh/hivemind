@@ -47,16 +47,22 @@ CREATE TABLE workspaces (
 // within its workspace. Each entry records its origin: the OS user,
 // host, working directory, and Claude Code session that created it.
 // Every searchable text field has a lowered twin so GLOB can match
-// without regard to ASCII case.
+// without regard to ASCII case. activity_utc is the latest change to
+// the entry or its chat. Every write to either sets it, so listings
+// read it rather than the chat.
 const createEntries = `
 CREATE TABLE entries (
 	workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
 	id INTEGER NOT NULL,
 	created_utc TEXT NOT NULL,
 	modified_utc TEXT NOT NULL,
+	activity_utc TEXT NOT NULL,
 	type TEXT NOT NULL,
 	type_lower TEXT COLLATE BINARY
 		GENERATED ALWAYS AS (lower(type)) STORED,
+	project TEXT NOT NULL,
+	project_lower TEXT COLLATE BINARY
+		GENERATED ALWAYS AS (lower(project)) STORED,
 	subject TEXT NOT NULL,
 	subject_lower TEXT COLLATE BINARY
 		GENERATED ALWAYS AS (lower(subject)) STORED,
@@ -90,12 +96,6 @@ CREATE TABLE entry_metadata (
 	FOREIGN KEY (workspace_id, entry_id) REFERENCES entries(workspace_id, id)
 ) WITHOUT ROWID`
 
-// createMetadataValueIndex finds the entries with one metadata value,
-// such as the entries of one project.
-const createMetadataValueIndex = `
-CREATE INDEX entry_metadata_values
-ON entry_metadata(workspace_id, key, value)`
-
 const createCreatedIndex = `
 CREATE INDEX entries_created_order
 ON entries(workspace_id, created_utc DESC, id DESC)`
@@ -109,6 +109,15 @@ CREATE INDEX entries_type_search ON entries(type_lower)`
 
 const createSubjectIndex = `
 CREATE INDEX entries_subject_search ON entries(subject_lower)`
+
+// createProjectIndex lists a workspace's projects, each with its count
+// of entries and its latest activity, without reading the entries. No
+// index serves the project filters. A listing reads entries newest
+// first and stops at a full page, which an index on project_lower would
+// turn into reading and sorting every entry of the project.
+const createProjectIndex = `
+CREATE INDEX entries_project_activity
+ON entries(workspace_id, project, activity_utc)`
 
 // createLinks defines named links between entries, which may join
 // workspaces. Each link is stored once, on its source, and
@@ -169,14 +178,6 @@ const createMessageModifiedIndex = `
 CREATE INDEX entry_messages_modified
 ON entry_messages(workspace_id, modified_utc)`
 
-// createMessageEntryModifiedIndex finds an entry's latest chat
-// activity. Without it, SQLite finds that maximum by walking
-// entry_messages_modified, which takes time in proportion to the
-// workspace's whole chat.
-const createMessageEntryModifiedIndex = `
-CREATE INDEX entry_messages_entry_modified
-ON entry_messages(workspace_id, entry_id, modified_utc)`
-
 type schemaObject struct {
 	typ   string
 	name  string
@@ -196,29 +197,26 @@ var schemaSteps = []schemaStep{
 	{
 		statements: []string{
 			createWorkspaces, createEntries, createMetadata,
-			createMetadataValueIndex,
 			createCreatedIndex, createModifiedIndex, createTypeIndex,
-			createSubjectIndex, createLinks, createLinkTargetIndex,
-			createOneParentIndex, createMessages, createMessageOrderIndex,
-			createMessageModifiedIndex, createMessageEntryModifiedIndex,
+			createSubjectIndex, createProjectIndex, createLinks,
+			createLinkTargetIndex, createOneParentIndex, createMessages,
+			createMessageOrderIndex, createMessageModifiedIndex,
 		},
 		objects: []schemaObject{
 			{"index", "entries_created_order", "entries",
 				normalizeSchemaSQL(createCreatedIndex)},
 			{"index", "entries_modified_order", "entries",
 				normalizeSchemaSQL(createModifiedIndex)},
+			{"index", "entries_project_activity", "entries",
+				normalizeSchemaSQL(createProjectIndex)},
 			{"index", "entries_subject_search", "entries",
 				normalizeSchemaSQL(createSubjectIndex)},
 			{"index", "entries_type_search", "entries",
 				normalizeSchemaSQL(createTypeIndex)},
-			{"index", "entry_metadata_values", "entry_metadata",
-				normalizeSchemaSQL(createMetadataValueIndex)},
 			{"index", "entry_links_one_parent", "entry_links",
 				normalizeSchemaSQL(createOneParentIndex)},
 			{"index", "entry_links_target", "entry_links",
 				normalizeSchemaSQL(createLinkTargetIndex)},
-			{"index", "entry_messages_entry_modified", "entry_messages",
-				normalizeSchemaSQL(createMessageEntryModifiedIndex)},
 			{"index", "entry_messages_modified", "entry_messages",
 				normalizeSchemaSQL(createMessageModifiedIndex)},
 			{"index", "entry_messages_workspace_order", "entry_messages",

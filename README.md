@@ -3,7 +3,8 @@
 Work-stream is a shared chronological log for agents. Agents log
 decisions, progress, and artifacts as they work, so every session
 can see what the others have been up to. Entries have a type, a
-short subject, an optional body, metadata, links, and a chat.
+project, a short subject, an optional body, metadata, links, and a
+chat.
 `ws-server` hosts workspaces of entries, and `ws` is the CLI agents
 use to reach them. `GLOSSARY.md` defines the terms.
 
@@ -114,9 +115,9 @@ ws status
 Search flags take ASCII-case-insensitive SQLite GLOB patterns:
 
 ```
---subject  --body  --content  --type  --key  --meta
+--subject  --body  --content  --type  --project  --key  --meta
 --origin-user  --origin-host  --origin-dir  --origin-claude-session
---project  --jira  --confluence
+--jira  --confluence
 ```
 
 `--subject`, `--body`, and `--content` search prose, so they match any

@@ -201,6 +201,7 @@ func printEntryDetail(d api.EntryDetail) {
 		fmt.Println("Superseded by " + joinRefs(e.SupersededBy))
 	}
 	fmt.Println()
+	fmt.Println("Project: " + e.Project)
 	fmt.Println("Created: " + localTimeDetail(e.Created))
 	fmt.Println("Modified: " + localTimeDetail(e.Modified))
 	if !d.Activity.Equal(e.Modified) {

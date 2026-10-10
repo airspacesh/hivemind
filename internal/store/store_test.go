@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -420,46 +421,46 @@ func TestMetadataLimitStopsEntryGrowth(t *testing.T) {
 
 func TestProjectsCountOneWorkspace(t *testing.T) {
 	store := openTestStore(t)
-	pond := map[string]string{"project": "pond"}
-	first := mustAdd(t, store, "note", "a", "", pond)
-	mustAdd(t, store, "note", "b", "", pond)
-	addTo(t, store, "personal", api.AddEntryRequest{
-		Type: "note", Subject: "c", Metadata: pond})
+	inProject := func(workspace, project string) api.Entry {
+		t.Helper()
+		return addTo(t, store, workspace, api.AddEntryRequest{
+			Type: "note", Subject: "duck", Project: project})
+	}
+	listProjects := func(name string) string {
+		t.Helper()
+		projects, err := store.Projects(context.Background(),
+			workspaceID(t, store, "default"), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var listed []string
+		for _, project := range projects {
+			listed = append(listed,
+				fmt.Sprintf("%s %d", project.Name, project.Entries))
+		}
+		return strings.Join(listed, ", ")
+	}
+	first := inProject("default", "pond")
+	inProject("default", "pond")
+	inProject("personal", "pond")
+	inProject("default", "Pond")
+	inProject("default", "nest")
 
-	mustAdd(t, store, "note", "d", "", map[string]string{"project": "nest"})
-
-	projects, err := store.Projects(context.Background(),
-		workspaceID(t, store, "default"), "")
-	if err != nil {
-		t.Fatal(err)
+	if got := listProjects(""); got != "nest 1, Pond 1, pond 2" {
+		t.Fatalf("projects = %q", got)
 	}
-	if len(projects) != 2 || projects[0].Name != "nest" ||
-		projects[1].Entries != 2 {
-		t.Fatalf("projects = %+v, want nest, then pond with 2 entries",
-			projects)
+	if got := listProjects("pond"); got != "pond 2" {
+		t.Fatalf("projects named pond = %q", got)
 	}
-	projects, err = store.Projects(context.Background(),
-		workspaceID(t, store, "default"), "pond")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(projects) != 1 || projects[0].Name != "pond" ||
-		projects[0].Entries != 2 {
-		t.Fatalf("projects named pond = %+v, want pond with 2 entries",
-			projects)
+	if got := listProjects("lake"); got != "" {
+		t.Fatalf("projects named lake = %q", got)
 	}
 
 	// Chat counts as activity, so a message to an old entry brings its
 	// project to the top.
 	mustPost(t, store, first.Ref, "still here")
-	projects, err = store.Projects(context.Background(),
-		workspaceID(t, store, "default"), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(projects) != 2 || projects[0].Name != "pond" {
-		t.Fatalf("projects after a message = %+v, want pond first",
-			projects)
+	if got := listProjects(""); got != "pond 2, nest 1, Pond 1" {
+		t.Fatalf("projects after a message = %q", got)
 	}
 }
 

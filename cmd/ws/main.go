@@ -31,9 +31,10 @@ Usage:
   {program} add <type> <subject> --project <p> [--body <b>]
          [--meta <key>=<value>]... [--parent <ref>] [--supersedes <ref>]...
          [--link <name>=<ref>]... [--no-recent] [--workspace <name>]
-  {program} edit <ref> [<subject>] [--type <t>] [--body <b>]
-         [--meta <key>=<value>]... [--parent <ref>|""] [--supersedes <ref>]...
-         [--link <name>=<ref>]... [--unlink <name>[=<ref>]]... [--no-recent]
+  {program} edit <ref> [<subject>] [--type <t>] [--project <p>]
+         [--body <b>] [--meta <key>=<value>]... [--parent <ref>|""]
+         [--supersedes <ref>]... [--link <name>=<ref>]...
+         [--unlink <name>[=<ref>]]... [--no-recent]
   {program} entry <ref>
   {program} tree <ref> [--limit 30] [--include-superseded]
   {program} recent [--flat] [search filters] [--workspace <name>]
@@ -52,9 +53,9 @@ Usage:
 
 Workspaces and entries:
   A workspace is a named collection of entries, hosted on a server. An
-  entry has a type (e.g. note, todo, decision, idea), a short subject,
-  an optional longer body, and metadata: key=value pairs such as
-  project or jira. Every entry needs a project. An entry's id is its
+  entry has a type (e.g. note, todo, decision, idea), a project, a short
+  subject, an optional longer body, and metadata: key=value pairs such
+  as jira. Every entry needs a project. An entry's id is its
   workspace's prefix and a number, like e12, and is called <ref> above.
   Keep the subject to a headline and put detail in the body. Listings
   show only the subject, and '{program} entry' shows the rest.
@@ -71,19 +72,20 @@ Workspaces and entries:
 
   Metadata keys are lowercase slugs: letters, digits, and single
   dashes, starting with a letter (e.g. jira, build-id). For several of
-  a kind, number them: jira-1, jira-2. Field limits (characters): type
-  64, subject 128, body 2048, key 64, value 256, and 16 metadata pairs.
-  Every entry is kept. To withdraw one, edit it, for example to
-  "Retracted: sensitive information".
+  a kind, number them: jira-1, jira-2. The key project is reserved,
+  since the project is a field of its own. Field limits (characters):
+  type 64, project 256, subject 128, body 2048, key 64, value 256, and
+  16 metadata pairs. Every entry is kept. To withdraw one, edit it, for
+  example to "Retracted: sensitive information".
 
 Editing:
-  '{program} edit' changes the type, subject, body, metadata and links.
-  --body "" clears the body. Giving a metadata key no value removes it,
-  as in --meta jira= or --jira "". The project can change but not be
-  removed. An entry's id, times and origin cannot change. add and edit
-  end by listing the 5 most recently changed other entries in the
-  workspace, so you see what others are doing. --no-recent leaves the
-  listing out.
+  '{program} edit' changes the type, project, subject, body, metadata
+  and links. --body "" clears the body. Giving a metadata key no value
+  removes it, as in --meta jira= or --jira "". The project can change
+  but not be removed. An entry's id, times and origin cannot change.
+  add and edit end by listing the 5 most recently changed other
+  entries in the workspace, so you see what others are doing.
+  --no-recent leaves the listing out.
 
 Links:
   A link is a named relationship from one entry to another on the same
@@ -110,9 +112,9 @@ Listings:
   23/07/2025 13:20.
 
 Search filters (recent and search):
-  --subject --body --content --type --key --meta <key>=<value>
+  --subject --body --content --type --project --key --meta <key>=<value>
   --origin-user --origin-host --origin-dir --origin-claude-session
-  --project --jira --confluence (shorthands for --meta <key>=<value>)
+  --jira --confluence (shorthands for --meta <key>=<value>)
   Each takes an ASCII-case-insensitive GLOB pattern: '*', '?' and
   bracket classes. Quote patterns so the shell leaves them alone, and
   use a bracket class like [*] for a literal wildcard. --subject, --body

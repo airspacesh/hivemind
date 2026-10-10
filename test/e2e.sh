@@ -189,11 +189,17 @@ check_equal "bracket class matches a literal wildcard" "e3" \
     "$(ws search '[?]' --id-only)"
 check_equal "negation reaches the server" "e1" \
     "$(ws search --no-type note --id-only)"
+check_equal "the project filter ignores ASCII case" "e1" \
+    "$(ws search --project duck-pond --id-only)"
 
 # Edits.
 ws edit e3 --type decision --no-recent >/dev/null
 check_equal "a retyped entry is found under its new type" "e3" \
     "$(ws search --type decision --id-only)"
+ws edit e3 --project nest --no-recent >/dev/null
+check_equal "a moved entry is found under its new project" "e3" \
+    "$(ws search --project nest --id-only)"
+check "entry shows the project" "Project: Duck-Pond" "$(ws entry e1)"
 ws edit e2 --jira "" --no-recent >/dev/null
 check_equal "an empty value removes the metadata" "" \
     "$(ws search --key jira --id-only)"
@@ -211,6 +217,9 @@ e3" "$(echo "$after_add" | sed -n 's/^\[\(e[0-9]*\)\].*/\1/p')"
 # Projects.
 check "add needs a project" "add needs --project" \
     "$(ws add note "No project" 2>&1 || true)"
+check "the project is not metadata" "project is not a metadata key" \
+    "$(ws add note "Meta project" --project pond --meta project=pond \
+        2>&1 || true)"
 check "the first entry in a project is noticed" \
     'first entry in project "lake-shore"' \
     "$(ws add note "Shore duck" --project lake-shore --no-recent)"
@@ -312,7 +321,7 @@ check "add takes its parent's workspace" "Added entry [p3]." \
     "$(ws add note "Protected child" --project mine --parent p2 --no-recent)"
 curl -fsS -X POST -H "Workstream-API-Version: $api_version" \
     -H "Authorization: Bearer $test_secret" \
-    --data "{\"type\":\"note\",\"subject\":\"Open linking protected\",\"metadata\":{\"project\":\"views\"},\"origin\":{},\"links\":[{\"name\":\"see\",\"ref\":\"p1\"}]}" \
+    --data "{\"type\":\"note\",\"subject\":\"Open linking protected\",\"project\":\"views\",\"origin\":{},\"links\":[{\"name\":\"see\",\"ref\":\"p1\"}]}" \
     "$main_url/api/workspaces/default/entries" >/dev/null
 under_protected="$(ws search 'Open linking protected' --id-only)"
 check "a protected link shows as its bare id" "see p1" \

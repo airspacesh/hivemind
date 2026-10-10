@@ -33,7 +33,7 @@ func (s *Store) begin(
 }
 
 const entryColumns = `e.workspace_id, e.id, e.created_utc,
-	e.modified_utc, e.type, e.subject, e.body, e.origin_user,
+	e.modified_utc, e.type, e.project, e.subject, e.body, e.origin_user,
 	e.origin_host, e.origin_dir, e.origin_claude_session`
 
 type rowScanner interface {
@@ -47,7 +47,7 @@ func (v view) scanEntry(row rowScanner, extra ...any) (api.Entry, error) {
 	var created, modified string
 	err := row.Scan(append([]any{
 		&key.Workspace, &key.ID, &created, &modified,
-		&entry.Type, &entry.Subject, &entry.Body,
+		&entry.Type, &entry.Project, &entry.Subject, &entry.Body,
 		&entry.Origin.User, &entry.Origin.Host,
 		&entry.Origin.Dir, &entry.Origin.ClaudeSession,
 	}, extra...)...)
@@ -189,13 +189,13 @@ func (s *Store) Add(
 	now := nowUTC()
 	if _, err := v.tx.ExecContext(ctx, `
 		INSERT INTO entries (
-			workspace_id, id, created_utc, modified_utc, type, subject,
-			body, origin_user, origin_host, origin_dir,
+			workspace_id, id, created_utc, modified_utc, activity_utc, type,
+			project, subject, body, origin_user, origin_host, origin_dir,
 			origin_claude_session
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		key.Workspace, key.ID, now, now, req.Type, req.Subject, req.Body,
-		req.Origin.User, req.Origin.Host, req.Origin.Dir,
-		req.Origin.ClaudeSession,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		key.Workspace, key.ID, now, now, now, req.Type, req.Project,
+		req.Subject, req.Body, req.Origin.User, req.Origin.Host,
+		req.Origin.Dir, req.Origin.ClaudeSession,
 	); err != nil {
 		return api.Entry{}, fmt.Errorf("adding entry: %w", err)
 	}
@@ -215,17 +215,22 @@ func (s *Store) Add(
 	return entry, nil
 }
 
-// editContent updates an entry's own fields and its modified time. A
-// change to links alone leaves the modified time as it is, so
-// organising old entries does not reorder listings.
+// editContent updates an entry's own fields and its modified and
+// activity times. A change to links alone leaves both times as they
+// are, so organising old entries does not reorder listings.
 func (v view) editContent(
 	ctx context.Context, key Key, req api.EditEntryRequest,
 ) error {
-	query := `UPDATE entries SET modified_utc = ?`
-	args := []any{nowUTC()}
+	now := nowUTC()
+	query := `UPDATE entries SET modified_utc = ?, activity_utc = ?`
+	args := []any{now, now}
 	if req.Type != nil {
 		query += `, type = ?`
 		args = append(args, *req.Type)
+	}
+	if req.Project != nil {
+		query += `, project = ?`
+		args = append(args, *req.Project)
 	}
 	if req.Subject != nil {
 		query += `, subject = ?`
@@ -296,44 +301,21 @@ func (s *Store) Edit(
 	return entry, nil
 }
 
-// allProjectsSQL lists every project of workspace ?1. It reads the
-// entries in id order, and each entry's latest chat activity from one
-// grouped pass, since lookups in project order land all over the file.
-const allProjectsSQL = `
-	WITH chat(entry_id, latest) AS (
-		SELECT entry_id, max(modified_utc) FROM entry_messages
-		WHERE workspace_id = ?1 GROUP BY entry_id
-	)
-	SELECT m.value, count(*),
-		max(max(e.modified_utc, coalesce(chat.latest, ''))) AS latest
-	FROM entries AS e CROSS JOIN entry_metadata AS m
-		ON m.workspace_id = e.workspace_id AND m.entry_id = e.id
-		AND m.key = ?2
-	LEFT JOIN chat ON chat.entry_id = e.id
-	WHERE e.workspace_id = ?1
-	GROUP BY m.value
-	ORDER BY latest DESC, m.value`
-
-// oneProjectSQL lists project ?3 of workspace ?1, reading only its
-// entries.
-const oneProjectSQL = `
-	SELECT m.value, count(*), max(` + activityExpr + `) AS latest
-	FROM entry_metadata AS m JOIN entries AS e
-		ON e.workspace_id = m.workspace_id AND e.id = m.entry_id
-	WHERE m.workspace_id = ?1 AND m.key = ?2 AND m.value = ?3
-	GROUP BY m.value`
-
 // Projects lists the projects of a workspace's entries, the most
 // recently active first. A name other than "" lists only that project.
+// It reads entries_project_activity alone, and only that project's part
+// of it when given a name.
 func (s *Store) Projects(
 	ctx context.Context, workspace int64, name string,
 ) ([]api.Project, error) {
-	query := allProjectsSQL
-	args := []any{workspace, api.ProjectKey}
+	query := `SELECT project, count(*), max(activity_utc) AS latest
+		FROM entries WHERE workspace_id = ?`
+	args := []any{workspace}
 	if name != "" {
-		query = oneProjectSQL
+		query += ` AND project = ?`
 		args = append(args, name)
 	}
+	query += ` GROUP BY project ORDER BY latest DESC, project`
 	rows, err := s.reads.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing projects: %w", err)

@@ -19,11 +19,10 @@ func topics(t *testing.T, store *Store, filter Filter) api.SearchResult {
 
 func addChild(
 	t *testing.T, store *Store, subject string, parent api.Ref,
-	metadata map[string]string,
 ) api.Entry {
 	t.Helper()
 	return addTo(t, store, "default", api.AddEntryRequest{
-		Type: "note", Subject: subject, Metadata: metadata,
+		Type: "note", Subject: subject,
 		Links: []api.Link{link(api.ParentLink, parent)},
 	})
 }
@@ -69,8 +68,8 @@ func TestTopicsFollowActivityAnywhereInTheTree(t *testing.T) {
 		t.Fatalf("topics before any child = %v", refs)
 	}
 
-	child := addChild(t, store, "child", older.Ref, nil)
-	grandchild := addChild(t, store, "grandchild", child.Ref, nil)
+	child := addChild(t, store, "child", older.Ref)
+	grandchild := addChild(t, store, "grandchild", child.Ref)
 	result = topics(t, store, Filter{})
 	if refs := entryRefsOf(result.Entries); !reflect.DeepEqual(
 		refs, refStrings(older.Ref, newer.Ref)) {
@@ -116,7 +115,7 @@ func TestTopicsFollowActivityAnywhereInTheTree(t *testing.T) {
 func TestTopicsKeepASupersededRootOnlyAsContext(t *testing.T) {
 	store := openTestStore(t)
 	withChild := mustAdd(t, store, "idea", "replaced topic", "", nil)
-	child := addChild(t, store, "useful child", withChild.Ref, nil)
+	child := addChild(t, store, "useful child", withChild.Ref)
 	alone := mustAdd(t, store, "idea", "replaced and alone", "", nil)
 	successor := mustAdd(t, store, "idea", "successor", "", nil)
 	for _, old := range []api.Ref{withChild.Ref, alone.Ref} {
@@ -149,11 +148,11 @@ func TestTopicsKeepASupersededRootOnlyAsContext(t *testing.T) {
 func TestTreeHidesSupersededLeavesAndOrdersOldestFirst(t *testing.T) {
 	store := openTestStore(t)
 	root := mustAdd(t, store, "idea", "root", "", nil)
-	addChild(t, store, "first", root.Ref, nil)
-	middle := addChild(t, store, "middle", root.Ref, nil)
-	addChild(t, store, "under middle", middle.Ref, nil)
-	stale := addChild(t, store, "stale", root.Ref, nil)
-	fresh := addChild(t, store, "fresh", root.Ref, nil)
+	addChild(t, store, "first", root.Ref)
+	middle := addChild(t, store, "middle", root.Ref)
+	addChild(t, store, "under middle", middle.Ref)
+	stale := addChild(t, store, "stale", root.Ref)
+	fresh := addChild(t, store, "fresh", root.Ref)
 	for _, old := range []api.Ref{stale.Ref, middle.Ref} {
 		if err := addLinks(t, store, fresh.Ref,
 			link(api.SupersedesLink, old)); err != nil {
@@ -182,13 +181,13 @@ func TestTreeHidesSupersededLeavesAndOrdersOldestFirst(t *testing.T) {
 func TestTreeFillsLevelByLevelAndSaysWhereItCut(t *testing.T) {
 	store := openTestStore(t)
 	root := mustAdd(t, store, "idea", "root", "", nil)
-	a := addChild(t, store, "a", root.Ref, nil)
-	addChild(t, store, "b", root.Ref, nil)
-	c := addChild(t, store, "c", root.Ref, nil)
-	a1 := addChild(t, store, "a1", a.Ref, nil)
-	addChild(t, store, "a2", a.Ref, nil)
-	addChild(t, store, "a1x", a1.Ref, nil)
-	addChild(t, store, "c1", c.Ref, nil)
+	a := addChild(t, store, "a", root.Ref)
+	addChild(t, store, "b", root.Ref)
+	c := addChild(t, store, "c", root.Ref)
+	a1 := addChild(t, store, "a1", a.Ref)
+	addChild(t, store, "a2", a.Ref)
+	addChild(t, store, "a1x", a1.Ref)
+	addChild(t, store, "c1", c.Ref)
 
 	for _, test := range []struct {
 		limit int
@@ -218,11 +217,13 @@ func TestTreeFillsLevelByLevelAndSaysWhereItCut(t *testing.T) {
 func TestSearchUnderASubtreeAndFiltersOnRoots(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	pond := map[string]string{"project": "pond"}
-	lake := map[string]string{"project": "lake"}
-	root := mustAdd(t, store, "idea", "duck root", "", pond)
-	child := addChild(t, store, "duck child", root.Ref, lake)
-	other := mustAdd(t, store, "idea", "duck elsewhere", "", lake)
+	root := addTo(t, store, "default", api.AddEntryRequest{
+		Type: "idea", Subject: "duck root", Project: "pond"})
+	child := addTo(t, store, "default", api.AddEntryRequest{
+		Type: "note", Subject: "duck child", Project: "lake",
+		Links: []api.Link{link(api.ParentLink, root.Ref)}})
+	other := addTo(t, store, "default", api.AddEntryRequest{
+		Type: "idea", Subject: "duck elsewhere", Project: "lake"})
 
 	under := store.mustKey(root.Ref)
 	result := runSearch(t, store, Filter{Under: &under,
@@ -233,7 +234,7 @@ func TestSearchUnderASubtreeAndFiltersOnRoots(t *testing.T) {
 	}
 
 	lakeTopics := topics(t, store, Filter{
-		Meta: []MetaCond{{Key: "project", Value: "lake"}}})
+		Project: []FieldCond{{Value: "lake"}}})
 	if refs := entryRefsOf(lakeTopics.Entries); !reflect.DeepEqual(
 		refs, refStrings(other.Ref)) {
 		t.Fatalf("lake topics = %v, want only the lake root", refs)
@@ -256,7 +257,7 @@ func TestSearchUnderASubtreeAndFiltersOnRoots(t *testing.T) {
 func TestCountsLeaveOutSupersededEntries(t *testing.T) {
 	store := openTestStore(t)
 	question := mustAdd(t, store, "question", "Why?", "", nil)
-	old := addChild(t, store, "old answer", question.Ref, nil)
+	old := addChild(t, store, "old answer", question.Ref)
 	addTo(t, store, "default", api.AddEntryRequest{
 		Type: "answer", Subject: "new answer",
 		Links: []api.Link{link(api.ParentLink, question.Ref),

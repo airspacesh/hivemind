@@ -183,7 +183,7 @@ func (v view) rankTopics(
 		SELECT tree.root_id FROM tree JOIN entries AS e
 			ON e.workspace_id = tree.workspace_id AND e.id = tree.entry_id
 		GROUP BY tree.root_id
-		ORDER BY max(`+activityExpr+`) DESC, tree.root_id DESC`,
+		ORDER BY max(e.activity_utc) DESC, tree.root_id DESC`,
 		workspace, idsJSON(ids))
 	if err != nil {
 		return nil, fmt.Errorf("ranking top-level entries: %w", err)

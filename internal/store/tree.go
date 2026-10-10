@@ -29,12 +29,6 @@ func subtreeCTE(name string) string {
 )`
 }
 
-// activityExpr is when entry e last changed: an edit to it, or a post
-// or edit in its chat.
-const activityExpr = `max(e.modified_utc, coalesce((
-	SELECT max(m.modified_utc) FROM entry_messages AS m
-	WHERE m.workspace_id = e.workspace_id AND m.entry_id = e.id), ''))`
-
 type treeFacts struct {
 	activity    time.Time
 	descendants int
@@ -48,7 +42,7 @@ func (v view) readTreeFacts(ctx context.Context, key Key) (treeFacts, error) {
 	var activity string
 	err := v.tx.QueryRowContext(ctx, `
 		WITH RECURSIVE `+subtreeCTE("subtree")+`
-		SELECT max(`+activityExpr+`),
+		SELECT max(e.activity_utc),
 			coalesce(sum(NOT (e.workspace_id = ? AND e.id = ?)
 				AND NOT `+supersededClause+`), 0)
 		FROM subtree JOIN entries AS e

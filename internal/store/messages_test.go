@@ -190,6 +190,57 @@ func TestEditsKeepTheirPlaceAndAreNotReadAgain(t *testing.T) {
 	}
 }
 
+// Each write sets the activity time itself, so after every kind of
+// write it must still be the latest change to the entry or its chat.
+func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	checkActivity := func(after string) {
+		t.Helper()
+		var stale int
+		if err := store.db.QueryRowContext(ctx, `
+			SELECT count(*) FROM entries AS e
+			WHERE e.activity_utc <> `+activityExpr,
+		).Scan(&stale); err != nil {
+			t.Fatal(err)
+		}
+		if stale != 0 {
+			t.Fatalf("after %s, %d entries have stale activity", after,
+				stale)
+		}
+	}
+	editMessage := func(entry api.Ref, body string) {
+		t.Helper()
+		if _, _, err := store.EditMessage(ctx, store.mustKey(entry), 1,
+			body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pond := mustAdd(t, store, "note", "pond", "", nil)
+	nest := mustAdd(t, store, "note", "nest", "", nil)
+	checkActivity("adding")
+
+	mustPost(t, store, pond.Ref, "first")
+	mustPost(t, store, nest.Ref, "second")
+	checkActivity("posting")
+	editMessage(pond.Ref, "first, edited")
+	checkActivity("editing a message")
+	editMessage(pond.Ref, "first, edited")
+	checkActivity("repeating a message edit")
+
+	project := "lake"
+	if _, err := store.Edit(ctx, everyAccess(store), store.mustKey(nest.Ref),
+		api.EditEntryRequest{Project: &project}); err != nil {
+		t.Fatal(err)
+	}
+	checkActivity("editing an entry")
+	if err := addLinks(t, store, pond.Ref,
+		link("see", nest.Ref)); err != nil {
+		t.Fatal(err)
+	}
+	checkActivity("linking")
+}
+
 func TestOverviewGroupsTheNewestMessagesByEntry(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)

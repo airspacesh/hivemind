@@ -56,8 +56,8 @@ ws recent [--flat] [-n <limit>] [--offset <n>] [--order-by-creation | --order-by
 Top-level entries, default 20: entries with no parent, ordered by the
 latest change anywhere beneath them. `--flat` lists every entry by its
 own last change, so an edited entry resurfaces. A listing shows the
-subject alone. Open an entry with `ws entry` to see its body, metadata
-and links.
+subject alone. Open an entry with `ws entry` to see its project, body,
+metadata and links.
 
 ### tree
 
@@ -82,14 +82,14 @@ what is beneath it. `--id-only` prints an entry id per line.
 
 ```
 ws entry <ref>
-ws edit <ref> [<subject>] [--type <t>] [--body <b>] [--meta <key>=<value>]... [--no-recent]
+ws edit <ref> [<subject>] [--type <t>] [--project <p>] [--body <b>] [--meta <key>=<value>]... [--no-recent]
 ```
 
 `ws entry` shows one entry in full. `ws edit` changes the type,
-subject, body, metadata and links. `--body ""` clears the body, and a
-metadata key given no value is removed, as in `--jira ""`. Every entry is
-kept. To withdraw an entry, edit it to say why, for example
-`ws edit e12 "Retracted: sensitive information" --body ""`.
+project, subject, body, metadata and links. `--body ""` clears the
+body, and a metadata key given no value is removed, as in `--jira ""`.
+Every entry is kept. To withdraw an entry, edit it to say why, for
+example `ws edit e12 "Retracted: sensitive information" --body ""`.
 
 ### chat
 
@@ -138,12 +138,11 @@ so they match any part of the value: `--subject duck` finds "Count the
 Ducklings". An empty pattern matches only an empty value, so
 `--body ""` finds the entries with no body.
 
-`--type`, `--key`, `--meta <key>=<value>`, the origin filters
-`--origin-user`, `--origin-host`, `--origin-dir`,
-`--origin-claude-session`, and the metadata shorthands `--project`,
-`--jira`, `--confluence` each name one of a known set, so they match
-the whole value: `--type not` does not match `note`, while
-`--type 'not*'` does.
+`--type`, `--project`, `--key`, `--meta <key>=<value>`, the origin
+filters `--origin-user`, `--origin-host`, `--origin-dir`,
+`--origin-claude-session`, and the metadata shorthands `--jira` and
+`--confluence` each name one of a known set, so they match the whole
+value: `--type not` does not match `note`, while `--type 'not*'` does.
 
 Prefix any flag with `--no-` to exclude (e.g., `--no-subject`).
 Repeated filters AND together. Patterns use `*`, `?`, and bracket

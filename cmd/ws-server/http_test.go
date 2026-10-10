@@ -102,7 +102,7 @@ func (s testServer) must(
 
 func entryBody(subject string, links ...string) string {
 	body := `{"type":"note","subject":"` + subject + `",` +
-		`"metadata":{"project":"p"},"origin":{"user":"duck"}`
+		`"project":"p","origin":{"user":"duck"}`
 	if len(links) > 0 {
 		body += `,"links":[` + strings.Join(links, ",") + `]`
 	}
@@ -265,7 +265,7 @@ func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
 	}
 	addSecret := func(links ...string) {
 		body := `{"type":"SECRET","subject":"SECRET","body":"SECRET",` +
-			`"metadata":{"project":"SECRET"},"origin":{"user":"SECRET"}`
+			`"project":"SECRET","origin":{"user":"SECRET"}`
 		if len(links) > 0 {
 			body += `,"links":[` + strings.Join(links, ",") + `]`
 		}
@@ -386,7 +386,7 @@ func TestRequestLogKeepsNoClientText(t *testing.T) {
 	}{
 		{"POST", "/api/workspaces/default/entries", `{"type":"note",` +
 			`"subject":"SUBJECTMARK","body":"BODYMARK",` +
-			`"metadata":{"project":"PROJECTMARK"},"origin":{"dir":"/"}}`,
+			`"project":"PROJECTMARK","origin":{"dir":"/"}}`,
 			personalSecret, http.StatusCreated},
 		{"PATCH", "/api/entries/e1",
 			`{"subject":"NEWSUBJECTMARK","body":"NEWBODYMARK"}`, "",

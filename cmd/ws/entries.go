@@ -246,7 +246,7 @@ func (c *client) addTarget(p *parsedArgs) (target, error) {
 
 func cmdAdd(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs:  []string{"--body", "--parent", "--workspace"},
+		strs:  []string{"--project", "--body", "--parent", "--workspace"},
 		bools: []string{"--no-recent"},
 		repeat: append([]string{"--meta", "--supersedes", "--link"},
 			shorthandFlags()...),
@@ -264,7 +264,7 @@ func cmdAdd(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := metadata[api.ProjectKey]; !ok {
+	if p.strs["--project"] == "" {
 		return fmt.Errorf("add needs --project <name>. Run '%s "+
 			"list-projects' to see the projects in the workspace",
 			programName)
@@ -286,6 +286,7 @@ func cmdAdd(c *client, args []string) error {
 	}
 	request := api.AddEntryRequest{
 		Type:     p.pos[0],
+		Project:  p.strs["--project"],
 		Subject:  p.pos[1],
 		Body:     p.strs["--body"],
 		Metadata: metadata,
@@ -303,7 +304,7 @@ func cmdAdd(c *client, args []string) error {
 			programName+" recent --flat --workspace "+t.workspace)
 	}
 	fmt.Printf("Added entry [%s].\n", entry.Ref)
-	if err := c.noticeNewProject(t, metadata[api.ProjectKey]); err != nil {
+	if err := c.noticeNewProject(t, request.Project); err != nil {
 		return fmt.Errorf("the entry was added, but listing projects "+
 			"failed: %w", err)
 	}
@@ -319,7 +320,8 @@ func cmdAdd(c *client, args []string) error {
 
 func cmdEdit(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs:  []string{"--type", "--subject", "--body", "--parent"},
+		strs: []string{"--type", "--project", "--subject", "--body",
+			"--parent"},
 		bools: []string{"--no-recent"},
 		repeat: append(
 			[]string{"--meta", "--supersedes", "--link", "--unlink"},
@@ -330,9 +332,10 @@ func cmdEdit(c *client, args []string) error {
 	}
 	if len(p.pos) < 1 || len(p.pos) > 2 {
 		return usageError("edit <ref> [<subject>] [--type <t>] " +
-			"[--body <b>] [--meta <key>=<value>]... [--parent <ref>|\"\"] " +
-			"[--supersedes <ref>]... [--link <name>=<ref>]... " +
-			"[--unlink <name>[=<ref>]]... [--no-recent]")
+			"[--project <p>] [--body <b>] [--meta <key>=<value>]... " +
+			"[--parent <ref>|\"\"] [--supersedes <ref>]... " +
+			"[--link <name>=<ref>]... [--unlink <name>[=<ref>]]... " +
+			"[--no-recent]")
 	}
 	ref, err := api.ParseRef(p.pos[0])
 	if err != nil {
@@ -343,6 +346,10 @@ func cmdEdit(c *client, args []string) error {
 	if p.has("--type") {
 		entryType := p.strs["--type"]
 		request.Type = &entryType
+	}
+	if p.has("--project") {
+		project := p.strs["--project"]
+		request.Project = &project
 	}
 	if len(p.pos) == 2 && p.has("--subject") {
 		return fmt.Errorf("give the subject once, as <subject> or " +

@@ -13,6 +13,7 @@ import (
 // store.
 const (
 	MaxTypeLen    = 64
+	MaxProjectLen = 256
 	MaxSubjectLen = 128
 	MaxBodyLen    = 2048
 	MaxKeyLen     = 64
@@ -79,6 +80,10 @@ func validateSlug(field, name string) error {
 }
 
 func validateKey(key string) error {
+	if key == ProjectKey {
+		return fmt.Errorf("%s is not a metadata key. Every entry has a "+
+			"project field of its own, so set that instead", ProjectKey)
+	}
 	return validateSlug("metadata key", key)
 }
 
@@ -135,6 +140,13 @@ func validateMetadataEdits(md map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func validateProject(project string) error {
+	if err := checkOneLine("project", project); err != nil {
+		return err
+	}
+	return checkLen("project", project, MaxProjectLen)
 }
 
 func validateMessageBody(body string) error {
@@ -215,6 +227,12 @@ func (r AddEntryRequest) Validate() error {
 	if err := checkLen("type", r.Type, MaxTypeLen); err != nil {
 		return err
 	}
+	if r.Project == "" {
+		return fmt.Errorf("a project is required")
+	}
+	if err := validateProject(r.Project); err != nil {
+		return err
+	}
 	if err := checkOneLine("subject", r.Subject); err != nil {
 		return err
 	}
@@ -230,9 +248,6 @@ func (r AddEntryRequest) Validate() error {
 	if err := validateMetadata(r.Metadata); err != nil {
 		return err
 	}
-	if _, ok := r.Metadata[ProjectKey]; !ok {
-		return fmt.Errorf("a project is required")
-	}
 	if len(r.Links) > MaxLinks {
 		return fmt.Errorf("too many links: %d (max %d)",
 			len(r.Links), MaxLinks)
@@ -246,8 +261,8 @@ func (r AddEntryRequest) Validate() error {
 func (r EditEntryRequest) Validate() error {
 	if !r.ChangesContent() && len(r.AddLinks) == 0 &&
 		len(r.RemoveLinks) == 0 && len(r.RemoveLinkNames) == 0 {
-		return fmt.Errorf("nothing to edit: provide type, subject, " +
-			"body, metadata, or links")
+		return fmt.Errorf("nothing to edit: provide type, project, " +
+			"subject, body, metadata, or links")
 	}
 	if err := validateLinks(r.AddLinks); err != nil {
 		return err
@@ -271,6 +286,14 @@ func (r EditEntryRequest) Validate() error {
 			return err
 		}
 	}
+	if r.Project != nil {
+		if *r.Project == "" {
+			return fmt.Errorf("the project can be changed but not removed")
+		}
+		if err := validateProject(*r.Project); err != nil {
+			return err
+		}
+	}
 	if r.Subject != nil {
 		if *r.Subject == "" {
 			return fmt.Errorf("subject cannot be set to empty")
@@ -289,9 +312,6 @@ func (r EditEntryRequest) Validate() error {
 		if err := checkLen("body", *r.Body, MaxBodyLen); err != nil {
 			return err
 		}
-	}
-	if project, ok := r.Metadata[ProjectKey]; ok && project == "" {
-		return fmt.Errorf("the project can be changed but not removed")
 	}
 	return validateMetadataEdits(r.Metadata)
 }

@@ -35,10 +35,10 @@ func newLinkedWorkspaces(t *testing.T) linkedWorkspaces {
 		t.Helper()
 		entry := addTo(t, store, "personal", api.AddEntryRequest{
 			Type: "SECRET-type", Subject: "SECRET " + subject,
-			Body:     "SECRET body",
-			Metadata: map[string]string{"project": "SECRET-project"},
-			Origin:   api.Origin{User: "SECRET-user", Dir: "/SECRET"},
-			Links:    links,
+			Body:    "SECRET body",
+			Project: "SECRET-project",
+			Origin:  api.Origin{User: "SECRET-user", Dir: "/SECRET"},
+			Links:   links,
 		})
 		mustPost(t, store, entry.Ref, "SECRET message")
 		return entry

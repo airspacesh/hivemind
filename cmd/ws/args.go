@@ -99,13 +99,13 @@ func parseArgs(args []string, spec flagSpec) (*parsedArgs, error) {
 }
 
 var searchFields = []string{
-	"subject", "body", "content", "type", "key", "meta",
+	"subject", "body", "content", "type", "project", "key", "meta",
 	"origin-user", "origin-host", "origin-dir", "origin-claude-session",
 }
 
 // shorthandKeys are metadata keys with a convenience flag on add,
-// edit, and search: --project duck-pond is --meta project=duck-pond.
-var shorthandKeys = []string{"project", "jira", "confluence"}
+// edit, and search: --jira QUACK-1 is --meta jira=QUACK-1.
+var shorthandKeys = []string{"jira", "confluence"}
 
 func searchFlagSpec() flagSpec {
 	spec := flagSpec{
@@ -124,7 +124,7 @@ func searchFlagSpec() flagSpec {
 }
 
 // shorthandFor reports whether a flag is a metadata-key shorthand
-// (--project, --no-jira, ...) and returns its key and whether it
+// (--jira, --no-jira, ...) and returns its key and whether it
 // negates.
 func shorthandFor(flag string) (key string, negate bool, ok bool) {
 	name := strings.TrimPrefix(flag, "--")

@@ -6,8 +6,8 @@ import "time"
 
 const MaxResponseBytes = 64 << 20
 
-// ProjectKey is the metadata key every entry carries, naming the
-// project it belongs to within its workspace.
+// ProjectKey is reserved as a metadata key, since every entry has a
+// project field, and a pair of that name would read as a second one.
 const ProjectKey = "project"
 
 // Link names with a meaning to the server. Every other name only
@@ -53,6 +53,7 @@ type Entry struct {
 	Created  time.Time         `json:"created"`
 	Modified time.Time         `json:"modified"`
 	Type     string            `json:"type"`
+	Project  string            `json:"project"`
 	Subject  string            `json:"subject"`
 	Body     string            `json:"body,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
@@ -165,6 +166,7 @@ type ChatOverview struct {
 
 type AddEntryRequest struct {
 	Type     string            `json:"type"`
+	Project  string            `json:"project"`
 	Subject  string            `json:"subject"`
 	Body     string            `json:"body,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
@@ -180,6 +182,7 @@ type AddEntryRequest struct {
 // replaces the old one, since an entry has at most one.
 type EditEntryRequest struct {
 	Type     *string           `json:"type,omitempty"`
+	Project  *string           `json:"project,omitempty"`
 	Subject  *string           `json:"subject,omitempty"`
 	Body     *string           `json:"body,omitempty"`
 	Metadata map[string]string `json:"metadata,omitempty"`
@@ -193,8 +196,8 @@ type EditEntryRequest struct {
 // ChangesContent reports whether the edit changes the entry itself,
 // rather than only its links.
 func (r EditEntryRequest) ChangesContent() bool {
-	return r.Type != nil || r.Subject != nil || r.Body != nil ||
-		len(r.Metadata) > 0
+	return r.Type != nil || r.Project != nil || r.Subject != nil ||
+		r.Body != nil || len(r.Metadata) > 0
 }
 
 // SearchResult is a page of a listing. More says whether entries

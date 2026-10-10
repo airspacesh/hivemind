@@ -11,6 +11,12 @@ import (
 	"github.com/airspacesh/workstream/internal/api"
 )
 
+// activityExpr is when entry e last changed by definition: an edit to
+// it, or a post or edit in its chat. activity_utc must always equal it.
+const activityExpr = `max(e.modified_utc, coalesce((
+	SELECT max(m.modified_utc) FROM entry_messages AS m
+	WHERE m.workspace_id = e.workspace_id AND m.entry_id = e.id), ''))`
+
 // referenceTopics is the topics view as one query that works out the
 // activity of every tree in the workspace. It is too slow for a large
 // workspace, and serves here as the definition the view must match.
@@ -68,8 +74,9 @@ func referenceTopics(
 
 // addRandomForest adds entries to both workspaces with random parents
 // in the same workspace, supersessions across them, messages and
-// edits, then spreads their times over a year. When onDays is set, every time falls on midnight, so many
-// trees share their latest activity.
+// edits, then spreads their times over a year, and sets each entry's
+// activity to match. When onDays is set, every time falls on midnight,
+// so many trees share their latest activity.
 func addRandomForest(
 	t *testing.T, store *Store, random *rand.Rand, onDays bool,
 ) {
@@ -138,6 +145,10 @@ func addRandomForest(
 			key.Workspace, key.ID); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if _, err := store.db.ExecContext(ctx, `
+		UPDATE entries AS e SET activity_utc = `+activityExpr); err != nil {
+		t.Fatal(err)
 	}
 }
 

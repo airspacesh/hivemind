@@ -22,16 +22,25 @@ type searchEntries struct {
 func newSearchEntries(t *testing.T) searchEntries {
 	t.Helper()
 	store := openTestStore(t)
+	add := func(
+		typ, project, subject, body string, metadata map[string]string,
+	) api.Entry {
+		t.Helper()
+		return addTo(t, store, "default", api.AddEntryRequest{
+			Type: typ, Project: project, Subject: subject, Body: body,
+			Metadata: metadata,
+		})
+	}
 	return searchEntries{
 		store: store,
-		first: mustAdd(t, store, "TODO", "Count the Ducklings", "",
-			map[string]string{"project": "duck-pond", "jira": "QUACK-1"}),
-		second: mustAdd(t, store, "todo", "Fix Nest", "Ducklings are safe",
-			map[string]string{"project": "duck-nest"}),
-		third: mustAdd(t, store, "note", "Ducklings restless", "",
-			map[string]string{"project": "duck-pond", "jira": "QUACK-2"}),
-		fourth: mustAdd(t, store, "idea", "Cache feed", "", nil),
-		fifth:  mustAdd(t, store, "note", "Æther", "", nil),
+		first: add("TODO", "duck-pond", "Count the Ducklings", "",
+			map[string]string{"jira": "QUACK-1"}),
+		second: add("todo", "Duck-Nest", "Fix Nest", "Ducklings are safe",
+			nil),
+		third: add("note", "duck-pond", "Ducklings restless", "",
+			map[string]string{"jira": "QUACK-2"}),
+		fourth: add("idea", "feed", "Cache feed", "", nil),
+		fifth:  add("note", "æther", "Æther", "", nil),
 	}
 }
 
@@ -115,21 +124,45 @@ func TestSearchSetAndPairNegationUsesNotExists(t *testing.T) {
 		entries.fifth.Ref, entries.fourth.Ref, entries.second.Ref)
 
 	result = runSearch(t, entries.store, Filter{
-		Meta: []MetaCond{{Key: "project", Value: "DUCK-*"}},
+		Meta: []MetaCond{{Key: "jira", Value: "QUACK-*"}},
+	})
+	assertEntryRefs(t, result.Entries, entries.third.Ref, entries.first.Ref)
+
+	result = runSearch(t, entries.store, Filter{
+		Meta: []MetaCond{{Key: "jira", Value: "QUACK"}},
+	})
+	assertEntryRefs(t, result.Entries)
+
+	result = runSearch(t, entries.store, Filter{
+		Meta: []MetaCond{{Negate: true, Key: "jira", Value: "QUACK-1"}},
+	})
+	assertEntryRefs(t, result.Entries, entries.fifth.Ref,
+		entries.fourth.Ref, entries.third.Ref, entries.second.Ref)
+}
+
+func TestSearchMatchesProjectWholeValue(t *testing.T) {
+	entries := newSearchEntries(t)
+	result := runSearch(t, entries.store, Filter{
+		Project: []FieldCond{{Value: "DUCK-*"}},
 	})
 	assertEntryRefs(t, result.Entries,
 		entries.third.Ref, entries.second.Ref, entries.first.Ref)
 
 	result = runSearch(t, entries.store, Filter{
-		Meta: []MetaCond{{Key: "project", Value: "DUCK-1"}},
+		Project: []FieldCond{{Value: "duck"}},
 	})
 	assertEntryRefs(t, result.Entries)
 
 	result = runSearch(t, entries.store, Filter{
-		Meta: []MetaCond{{Negate: true, Key: "project", Value: "DUCK-POND"}},
+		Project: []FieldCond{{Negate: true, Value: "DUCK-POND"}},
 	})
 	assertEntryRefs(t, result.Entries,
 		entries.fifth.Ref, entries.fourth.Ref, entries.second.Ref)
+
+	result = runSearch(t, entries.store, Filter{
+		Project: []FieldCond{{Value: "ÆTHER"}},
+	})
+	assertEntryRefs(t, result.Entries)
 }
 
 func TestSearchContentPagingAndMetadata(t *testing.T) {
@@ -278,15 +311,14 @@ func TestSearchByOrigin(t *testing.T) {
 // match only the metadata of the entry in the searched workspace.
 func TestSearchMetadataStaysInItsWorkspace(t *testing.T) {
 	store := openTestStore(t)
-	inDefault := mustAdd(t, store, "note", "in default", "",
-		map[string]string{"project": "pond"})
+	inDefault := mustAdd(t, store, "note", "in default", "", nil)
 	addTo(t, store, "personal", api.AddEntryRequest{
-		Type: "note", Subject: "in personal",
-		Metadata: map[string]string{"project": "secret", "jira": "QUACK-9"},
+		Type: "note", Subject: "in personal", Project: "secret",
+		Metadata: map[string]string{"jira": "QUACK-9"},
 	})
 
 	for _, filter := range []Filter{
-		{Meta: []MetaCond{{Key: "project", Value: "secret"}}},
+		{Project: []FieldCond{{Value: "secret"}}},
 		{Meta: []MetaCond{{Key: "jira", Value: "*"}}},
 		{Key: []FieldCond{{Value: "jira"}}},
 	} {
