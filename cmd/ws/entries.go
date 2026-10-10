@@ -249,16 +249,17 @@ func (c *client) noticeNewProject(t target, project string) error {
 	return nil
 }
 
-// addTarget is where add puts a new entry: in the workspace
-// --workspace names, or else in its parent's, since a parent is always
-// in its child's workspace, or else in the default workspace.
-func (c *client) addTarget(p *parsedArgs) (target, error) {
-	if p.strs["--workspace"] == "" && p.has("--parent") {
-		parent, err := api.ParseRef(p.strs["--parent"])
+// targetBeside is where a command works on the tree of the entry
+// refFlag names: in the workspace --workspace names, or else in that
+// entry's, since a tree never leaves its workspace, or else in the
+// default workspace.
+func (c *client) targetBeside(p *parsedArgs, refFlag string) (target, error) {
+	if p.strs["--workspace"] == "" && p.has(refFlag) {
+		ref, err := api.ParseRef(p.strs[refFlag])
 		if err != nil {
 			return target{}, err
 		}
-		return c.resolve(parent)
+		return c.resolve(ref)
 	}
 	workspace, err := c.config.chooseWorkspace(p.strs["--workspace"])
 	if err != nil {
@@ -295,7 +296,7 @@ func cmdAdd(c *client, args []string) error {
 	if p.has("--parent") && p.strs["--parent"] == "" {
 		return fmt.Errorf("--parent needs an entry id")
 	}
-	t, err := c.addTarget(p)
+	t, err := c.targetBeside(p, "--parent")
 	if err != nil {
 		return err
 	}
@@ -584,11 +585,10 @@ func cmdSearch(c *client, command string, args []string) error {
 		order = byActivity
 	}
 
-	workspace, err := c.config.chooseWorkspace(p.strs["--workspace"])
+	t, err := c.targetBeside(p, "--under")
 	if err != nil {
 		return err
 	}
-	t := targetOf(workspace)
 	if p.has("--under") {
 		under, err := api.ParseRef(p.strs["--under"])
 		if err != nil {

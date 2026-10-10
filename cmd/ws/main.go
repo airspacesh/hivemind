@@ -62,11 +62,12 @@ Workspaces and entries:
   in the body. Listings show only the subject, and '{program} entry'
   shows the rest.
 
-  A command that takes a <ref> works in that entry's workspace, and
-  add with --parent works in the parent's. Any other command works in
-  the workspace --workspace names, or else in the one the variable
-  {DEFAULT_WORKSPACE} names, or else in the one called default.
-  '{program} list-workspaces' shows them all.
+  A command that takes a <ref> works in that entry's workspace. With
+  --parent, add works in the parent's, and with --under, recent and
+  search work in that entry's, unless --workspace names another. Any
+  other command works in the workspace --workspace names, or else in
+  the one the variable {DEFAULT_WORKSPACE} names, or else in the one
+  called default. '{program} list-workspaces' shows them all.
 
   Each entry and message records the username, and as far as the
   workspace's metadata_capture allows, the host, directory and Claude

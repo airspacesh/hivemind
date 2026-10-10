@@ -384,6 +384,27 @@ func TestAddTakesItsParentsWorkspace(t *testing.T) {
 	}
 }
 
+// A subtree is always in its root's workspace, so a search under an
+// entry looks in that entry's workspace unless --workspace names one.
+func TestSearchUnderTakesItsEntrysWorkspace(t *testing.T) {
+	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/workspaces/personal/entries" {
+			refuse(w, http.StatusNotFound, api.CodeRouteNotFound, "no route")
+			return
+		}
+		reply(w, http.StatusOK, api.SearchResult{})
+	})
+	config := writeConfig(t, fmt.Sprintf("workspaces:\n  default:\n    "+
+		"server: %s\n    prefix: e\n  personal:\n    server: %s\n    "+
+		"prefix: p\n", server.URL, server.URL), 0o600)
+	for _, command := range []string{"search", "recent"} {
+		got := ws(t, config, command, "--under", "p3")
+		if !got.ok {
+			t.Fatalf("%s --under p3: %+v", command, got)
+		}
+	}
+}
+
 // The chat overview marks how many older messages an entry has before
 // the ones it shows.
 func TestOverviewMarksEarlierMessages(t *testing.T) {
