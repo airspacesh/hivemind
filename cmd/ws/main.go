@@ -125,8 +125,9 @@ Search filters (recent and search):
   together.
   '{program} search' and '{program} recent --flat' also match <text> and
   --content against each message in an entry's chat, while the other
-  filters still apply to the entry. An entry ranks by its newest match,
-  and shows its 3 newest matching messages beneath it.
+  filters still apply to the entry. An entry ranks by its newest match.
+  A page shows the 30 most recently changed matching messages beneath
+  their entries, and counts each entry's other matching messages.
   --limit <n>, -n <n>    entries to show (default 20)
   --offset <n>           skip the first n matches
   --order-by-modified    newest first by modification time (default)

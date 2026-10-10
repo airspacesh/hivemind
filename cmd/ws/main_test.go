@@ -370,7 +370,7 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 }
 
 // A search shows the messages that matched in an entry's chat beneath
-// it, and how many earlier ones matched.
+// it, and how many more matched than the page had room for.
 func TestSearchShowsMatchingMessages(t *testing.T) {
 	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
 	ref := api.Ref{Prefix: "e", ID: 1}
@@ -383,15 +383,16 @@ func TestSearchShowsMatchingMessages(t *testing.T) {
 			ListedEntry: api.ListedEntry{Entry: api.Entry{Ref: ref,
 				Created: when, Modified: when, Type: "note",
 				Subject: "Pond"}, Activity: when},
-			Messages:        []api.Message{message(7), message(9)},
-			EarlierMessages: 4,
+			MatchingMessages:     []api.Message{message(7), message(9)},
+			MoreMatchingMessages: 4,
 		}}})
 	})
 	config := writeConfig(t, "workspaces:\n  default:\n    server: "+
 		server.URL+"\n", 0o600)
 	got := ws(t, config, "search", "heron")
-	want := "[e1] (note) 05:20: Pond\n    ... 4 earlier matching messages\n" +
-		"    [e1-m7] 05:20 duck: heron\n    [e1-m9] 05:20 duck: heron\n"
+	want := "[e1] (note) 05:20: Pond\n" +
+		"  [e1-m7] 05:20 duck: heron\n  [e1-m9] 05:20 duck: heron\n" +
+		"  ... 4 more matching\n"
 	if !got.ok || got.stdout != want {
 		t.Fatalf("search =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
 	}

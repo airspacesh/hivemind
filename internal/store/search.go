@@ -347,9 +347,9 @@ const (
 	// the text indexes, per change it walked first, before it walks
 	// every change instead.
 	candidatesPerChange = 8
-	// messagesPerMatch is how many matching messages a search shows
-	// under each entry.
-	messagesPerMatch = 3
+	// matchingMessageBudget is how many matching messages a page of a
+	// search shows, shared by its entries and filled newest first.
+	matchingMessageBudget = 30
 )
 
 // searchesChat reports whether a flat search matches messages as well
@@ -540,42 +540,94 @@ func (v view) rankMatches(
 	return ranked, nil
 }
 
-// matchingMessages reads the newest messages in an entry's chat that a
-// search's text matches, oldest first, and counts the matching
-// messages before them.
-func (v view) matchingMessages(
-	ctx context.Context, key Key, content []FieldCond,
-) ([]api.Message, int, error) {
-	var where whereBuilder
+// showMatchingMessages gives the entries of a page of a search the
+// messages in their chats that the search's text matches, newest first
+// until the page's budget is spent, and counts each entry's matches
+// left out.
+func (v view) showMatchingMessages(
+	ctx context.Context,
+	workspace int64,
+	page []api.MatchedEntry,
+	content []FieldCond,
+) error {
+	ids := make([]int64, len(page))
+	for i, entry := range page {
+		ids[i] = entry.Ref.ID
+	}
+	where := whereBuilder{args: []any{idsJSON(ids)}}
 	if err := where.addField("content", "lower(m.body)",
 		matchAnywhere(content)); err != nil {
-		return nil, 0, err
+		return err
 	}
 	where.clauses = append(where.clauses, `m.workspace_id = ?`,
-		`m.entry_id = ?`)
-	where.args = append(where.args, key.Workspace, key.ID, messagesPerMatch)
+		`m.entry_id = page.value`)
+	where.args = append(where.args, workspace)
 	rows, err := v.tx.QueryContext(ctx, `
-		SELECT `+messageColumns+`, count(*) OVER ()
-		FROM entry_messages AS m`+where.sql()+`
-		ORDER BY m.id DESC LIMIT ?`, where.args...)
+		SELECT m.entry_id, m.post_order
+		FROM json_each(?) AS page CROSS JOIN entry_messages AS m`+
+		where.sql()+`
+		ORDER BY m.modified_utc DESC, m.post_order DESC`, where.args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("reading matching messages: %w", err)
+		return fmt.Errorf("reading matching messages: %w", err)
+	}
+	matches := map[int64]int{}
+	shown := make([]int64, 0, matchingMessageBudget)
+	for rows.Next() {
+		var entryID, postOrder int64
+		if err := rows.Scan(&entryID, &postOrder); err != nil {
+			rows.Close()
+			return fmt.Errorf("reading matching messages: %w", err)
+		}
+		matches[entryID]++
+		if len(shown) < matchingMessageBudget {
+			shown = append(shown, postOrder)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("reading matching messages: %w", err)
+	}
+
+	messages, err := v.messagesByPostOrder(ctx, shown)
+	if err != nil {
+		return err
+	}
+	for i := range page {
+		entry := &page[i]
+		for _, message := range messages {
+			if message.Entry == entry.Ref {
+				entry.MatchingMessages = append(entry.MatchingMessages,
+					message)
+			}
+		}
+		entry.MoreMatchingMessages = matches[entry.Ref.ID] -
+			len(entry.MatchingMessages)
+	}
+	return nil
+}
+
+// messagesByPostOrder reads the messages with the given post orders,
+// oldest first.
+func (v view) messagesByPostOrder(
+	ctx context.Context, postOrders []int64,
+) ([]api.Message, error) {
+	rows, err := v.tx.QueryContext(ctx, `
+		SELECT `+messageColumns+`
+		FROM json_each(?) AS shown CROSS JOIN entry_messages AS m
+			ON m.post_order = shown.value
+		ORDER BY m.modified_utc, m.post_order`, idsJSON(postOrders))
+	if err != nil {
+		return nil, fmt.Errorf("reading messages: %w", err)
 	}
 	defer rows.Close()
 	var messages []api.Message
-	var total int
 	for rows.Next() {
-		message, err := v.store.scanMessage(rows, &total)
+		message, err := v.store.scanMessage(rows)
 		if err != nil {
-			return nil, 0, fmt.Errorf("reading matching messages: %w", err)
+			return nil, fmt.Errorf("reading messages: %w", err)
 		}
 		messages = append(messages, message)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("reading matching messages: %w", err)
-	}
-	slices.Reverse(messages)
-	return messages, total - len(messages), nil
+	return messages, rows.Err()
 }
 
 // searchFlat lists a page of the entries a search matches, and whether
@@ -629,13 +681,9 @@ func (v view) searchFlat(
 		return api.SearchResult{}, err
 	}
 	if searchesChat(filter) {
-		for i := range listed {
-			key := Key{workspace, listed[i].Ref.ID}
-			listed[i].Messages, listed[i].EarlierMessages, err =
-				v.matchingMessages(ctx, key, filter.Content)
-			if err != nil {
-				return api.SearchResult{}, err
-			}
+		err := v.showMatchingMessages(ctx, workspace, listed, filter.Content)
+		if err != nil {
+			return api.SearchResult{}, err
 		}
 	}
 	result := api.SearchResult{

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -355,15 +356,12 @@ func TestSearchMatchesChatMessages(t *testing.T) {
 
 	result := runSearch(t, store, Filter{Content: heron})
 	assertEntryRefs(t, result.Entries, pond.Ref, sighting.Ref)
-	if got, want := messageBodies(result.Entries[0].Messages), []string{
-		"HERON again", "heron thrice", "heron four",
-	}; !reflect.DeepEqual(got, want) {
+	if got, want := messageBodies(result.Entries[0].MatchingMessages),
+		[]string{"a heron landed", "HERON again", "heron thrice",
+			"heron four"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("matching messages = %q, want %q", got, want)
 	}
-	if got := result.Entries[0].EarlierMessages; got != 1 {
-		t.Fatalf("earlier matching messages = %d, want 1", got)
-	}
-	if got := result.Entries[1].Messages; len(got) != 0 {
+	if got := result.Entries[1].MatchingMessages; len(got) != 0 {
 		t.Fatalf("an entry with no matching chat shows messages %v", got)
 	}
 
@@ -400,8 +398,9 @@ func TestSearchMatchesChatMessages(t *testing.T) {
 	})
 	assertEntryRefs(t, without.Entries, quiet.Ref, pond.Ref)
 	for _, entry := range without.Entries {
-		if len(entry.Messages) != 0 {
-			t.Fatalf("%s shows messages %v", entry.Ref, entry.Messages)
+		if len(entry.MatchingMessages) != 0 {
+			t.Fatalf("%s shows messages %v", entry.Ref,
+				entry.MatchingMessages)
 		}
 	}
 }
@@ -426,9 +425,75 @@ func TestSearchMatchesEachMessageOnItsOwn(t *testing.T) {
 		{Value: "heron"}, {Negate: true, Value: "egret"},
 	}})
 	assertEntryRefs(t, result.Entries, both.Ref, split.Ref)
-	if got := messageBodies(result.Entries[0].Messages); !reflect.DeepEqual(
-		got, []string{"heron alone"}) {
+	got := messageBodies(result.Entries[0].MatchingMessages)
+	if !reflect.DeepEqual(got, []string{"heron alone"}) {
 		t.Fatalf("matching messages = %q, want only the one without egret",
 			got)
+	}
+}
+
+func messageRefs(messages []api.Message) []string {
+	var refs []string
+	for _, message := range messages {
+		refs = append(refs, message.Ref().String())
+	}
+	return refs
+}
+
+// The messages a page shows come from one budget, filled with the
+// newest matches across its entries, so a busy entry can take most of
+// it and an older one none.
+func TestSearchSharesOneMessageBudgetAcrossThePage(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	oldest := mustAdd(t, store, "note", "Oldest", "", nil)
+	busy := mustAdd(t, store, "note", "Busy", "", nil)
+	quiet := mustAdd(t, store, "note", "Quiet", "", nil)
+	mustPost(t, store, oldest.Ref, "heron at dawn")
+	for i := range matchingMessageBudget {
+		mustPost(t, store, busy.Ref, fmt.Sprintf("heron %d", i+1))
+		mustPost(t, store, busy.Ref, "no birds")
+	}
+	mustPost(t, store, quiet.Ref, "heron once")
+	mustPost(t, store, quiet.Ref, "heron twice")
+	heron := []FieldCond{{Value: "heron"}}
+
+	result := runSearch(t, store, Filter{Content: heron})
+	assertEntryRefs(t, result.Entries, quiet.Ref, busy.Ref, oldest.Ref)
+	wantBusy := matchingMessageBudget - 2
+	got := result.Entries[1].MatchingMessages
+	if len(got) != wantBusy || got[0].Body != "heron 3" ||
+		got[len(got)-1].Body != fmt.Sprintf("heron %d",
+			matchingMessageBudget) {
+		t.Fatalf("busy entry shows %q, want its newest %d oldest first",
+			messageBodies(got), wantBusy)
+	}
+	shown := map[string]int{}
+	more := map[string]int{}
+	for _, entry := range result.Entries {
+		shown[entry.Subject] = len(entry.MatchingMessages)
+		more[entry.Subject] = entry.MoreMatchingMessages
+	}
+	if want := map[string]int{"Quiet": 2, "Busy": wantBusy,
+		"Oldest": 0}; !reflect.DeepEqual(shown, want) {
+		t.Fatalf("messages shown = %v, want %v", shown, want)
+	}
+	if want := map[string]int{"Quiet": 0, "Busy": 2,
+		"Oldest": 1}; !reflect.DeepEqual(more, want) {
+		t.Fatalf("matching messages left out = %v, want %v", more, want)
+	}
+
+	// An edit makes a message the newest, so it is shown, and last.
+	if _, _, err := store.EditMessage(ctx, store.mustKey(busy.Ref), 1,
+		"heron again"); err != nil {
+		t.Fatal(err)
+	}
+	result = runSearch(t, store, Filter{Content: heron})
+	assertEntryRefs(t, result.Entries, busy.Ref, quiet.Ref, oldest.Ref)
+	got = result.Entries[0].MatchingMessages
+	if len(got) != wantBusy || got[0].Body != "heron 4" ||
+		got[len(got)-1].Body != "heron again" {
+		t.Fatalf("busy entry shows %q, want heron 4 to %d, then the edit",
+			messageBodies(got), matchingMessageBudget)
 	}
 }

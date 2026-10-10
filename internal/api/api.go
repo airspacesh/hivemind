@@ -200,13 +200,17 @@ func (r EditEntryRequest) ChangesContent() bool {
 		r.Body != nil || len(r.Metadata) > 0
 }
 
-// MatchedEntry is an entry a listing shows. Messages holds the newest
-// messages in its chat that a search for text matched, oldest first,
-// and EarlierMessages counts the matching messages before them.
+// MatchedEntry is an entry a listing shows. Messages come oldest
+// first by their modified time.
+//
+// In a search for text, MatchingMessages holds the messages in the
+// entry's chat that matched and that the page's shared budget of
+// messages had room for. MoreMatchingMessages counts the entry's other
+// matching messages.
 type MatchedEntry struct {
 	ListedEntry
-	Messages        []Message `json:"messages,omitempty"`
-	EarlierMessages int       `json:"earlier_messages,omitempty"`
+	MatchingMessages     []Message `json:"matching_messages,omitempty"`
+	MoreMatchingMessages int       `json:"more_matching_messages,omitempty"`
 }
 
 // SearchResult is a page of a listing. More says whether entries

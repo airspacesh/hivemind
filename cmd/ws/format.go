@@ -141,17 +141,16 @@ func printSearchResult(
 	var times []time.Time
 	for _, e := range result.Entries {
 		times = append(times, listTime(e.ListedEntry, order))
-		times = append(times, messageTimes(e.Messages)...)
+		times = append(times, messageTimes(e.MatchingMessages)...)
 	}
 	layout := timeLayout(times)
 	for _, e := range result.Entries {
 		printEntryLine(e.ListedEntry, order, layout)
-		if e.EarlierMessages > 0 {
-			fmt.Printf("    ... %d earlier matching messages\n",
-				e.EarlierMessages)
+		for _, m := range e.MatchingMessages {
+			printMessage(m, "  ", layout)
 		}
-		for _, m := range e.Messages {
-			printMessage(m, "    ", layout)
+		if e.MoreMatchingMessages > 0 {
+			fmt.Printf("  ... %d more matching\n", e.MoreMatchingMessages)
 		}
 	}
 	if result.More {
