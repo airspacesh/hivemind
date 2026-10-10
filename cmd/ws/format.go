@@ -368,6 +368,12 @@ func printChatPage(entry api.Ref, page api.ChatPage, empty string) {
 	printCursorLine(entry, page)
 }
 
+// printChatHeader names the entry a run of chat messages belongs to.
+func printChatHeader(entry api.EntryRef) {
+	fmt.Printf("[%s] %s%s\n", entry.Ref, oneLine(entry.Subject),
+		supersededLabel(entry.SupersededBy))
+}
+
 func printOverview(overview api.ChatOverview, workspace string) {
 	if len(overview.Chats) == 0 {
 		fmt.Printf("No messages in workspace %s yet.\n", workspace)
@@ -379,9 +385,7 @@ func printOverview(overview api.ChatOverview, workspace string) {
 	}
 	layout := timeLayout(times)
 	for _, chat := range overview.Chats {
-		fmt.Printf("[%s] %s%s\n", chat.Entry.Ref,
-			oneLine(chat.Entry.Subject),
-			supersededLabel(chat.Entry.SupersededBy))
+		printChatHeader(chat.Entry)
 		// Message numbers count from 1 in each entry, and the overview
 		// shows each entry's newest messages, so the first number shown
 		// says how many come before it.
@@ -451,5 +455,37 @@ func printProjects(result api.ProjectsResponse) {
 	if more > 0 {
 		fmt.Printf("--- %d more %s (use --limit %d to view all) ---\n",
 			more, noun, result.Count)
+	}
+}
+
+// printChanges prints changes oldest first. An entry's change shows as
+// it does in a flat listing, and a message as it does in the chat
+// overview, under its entry unless the line above is about that entry
+// already.
+func printChanges(changes []api.Change) {
+	var times []time.Time
+	for _, change := range changes {
+		if change.Message != nil {
+			times = append(times, change.Message.Created)
+		} else {
+			times = append(times, change.Entry.Modified)
+		}
+	}
+	layout := timeLayout(times)
+	var above api.Ref
+	for _, change := range changes {
+		e := change.Entry
+		if change.Message == nil {
+			printEntryLine(e, byModified, layout)
+			above = e.Ref
+			continue
+		}
+
+		if e.Ref != above {
+			printChatHeader(api.EntryRef{Ref: e.Ref, Subject: e.Subject,
+				SupersededBy: e.SupersededBy})
+			above = e.Ref
+		}
+		printMessage(*change.Message, "  ", layout)
 	}
 }

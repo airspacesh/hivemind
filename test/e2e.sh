@@ -334,7 +334,8 @@ ws chat send p2 "Protected message PROTECTEDMARK" >/dev/null
 ws chat send "$root" "Open message" >/dev/null
 open_views="$(ws entry "$root"; ws tree "$root"; ws search --under "$root"
     ws recent; ws recent --flat; ws search "$under_protected"
-    ws entry "$under_protected"; ws chat recent; ws chat recent "$root")"
+    ws entry "$under_protected"; ws chat recent; ws chat recent "$root"
+    ws wait --since 0 --timeout 1s)"
 check_equal "no protected content reaches the open workspace" "" \
     "$(echo "$open_views" | grep PROTECTEDMARK || true)"
 check_equal "a tree holds no protected entry" "" \
@@ -418,6 +419,31 @@ check_equal "your own message can still be withdrawn" \
     "Edited [$heron-m1]." "$(ws chat edit "$heron-m1" "Retracted")"
 check_equal "your own entry can still be withdrawn" "Edited entry [$reply]." \
     "$(ws edit "$reply" --subject "Retracted" --no-recent)"
+
+# Changes.
+private_changes="$(ws wait --since 0 --workspace personal --timeout 1s)"
+check "wait lists a workspace's changes from the start" "[p2-m1]" \
+    "$private_changes"
+private_cursor="$(echo "$private_changes" |
+    sed -n 's/^Cursor: \([^ ]*\) .*/\1/p')"
+check "a cursor picks its workspace" "No changes after $private_cursor" \
+    "$(ws wait --since "$private_cursor" --timeout 1s)"
+(sleep 1.5 && ws chat send "$chat" "Changed" >/dev/null) &
+sender_pid=$!
+check "a wait from now returns when anything changes" "[$chat-m5]" \
+    "$(ws wait --timeout 20s)"
+wait "$sender_pid"
+ws firehose --timeout 5s >"$test_dir/firehose.out" &
+firehose_pid=$!
+until [[ -s "$test_dir/firehose.out" ]]; do sleep 0.1; done
+ws chat send "$chat" "Hosed" >/dev/null
+ws add "Hosed entry" --project chat --no-recent >/dev/null
+wait "$firehose_pid"
+firehose_output="$(cat -- "$test_dir/firehose.out")"
+check "a firehose prints messages as they arrive" "[$chat-m6]" \
+    "$firehose_output"
+check "a firehose prints entries as they arrive" "Hosed entry" \
+    "$firehose_output"
 
 # The server log keeps no client text, and records each issued id.
 ws add "Subject OLDSUBJECTMARK" --body "Body OLDBODYMARK" \

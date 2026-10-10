@@ -104,6 +104,11 @@ ws chat read e1 --since 0
 ws chat wait e1 --since 1 --timeout 1m
 ws chat recent
 
+# Wait for anything to change in a workspace, or print every change
+# as it arrives.
+ws wait --since 0
+ws firehose
+
 # Check every configured workspace.
 ws list-workspaces
 ws status

@@ -47,28 +47,30 @@ type systemClock struct{}
 func (systemClock) Now() time.Time        { return time.Now() }
 func (systemClock) Sleep(d time.Duration) { time.Sleep(d) }
 
-// waitForMessages polls until a page holds messages or the timeout
-// passes, when it returns the last, empty, page. A failed connection is
-// retried with backoff, and too many failures in a row end the wait.
-func waitForMessages(
-	poll func() (api.ChatPage, error), timeout time.Duration, clk clock,
-) (api.ChatPage, error) {
+// waitFor polls until a poll finds what it looks for, or the timeout
+// passes, when it returns the last poll's answer. A failed connection
+// is retried with backoff, and too many failures in a row end the
+// wait.
+func waitFor[T any](
+	poll func() (T, bool, error), timeout time.Duration, clk clock,
+) (T, error) {
 	start := clk.Now()
 	failures := 0
+	var none T
 	for {
-		page, err := poll()
+		answer, found, err := poll()
 		elapsed := clk.Now().Sub(start)
 		var delay time.Duration
 		switch {
-		case err == nil && len(page.Messages) > 0:
-			return page, nil
+		case err == nil && found:
+			return answer, nil
 		case err == nil:
 			failures = 0
 			delay = pollInterval(elapsed)
 		case !retryable(err):
-			return api.ChatPage{}, err
+			return none, err
 		case failures == len(retryDelays):
-			return api.ChatPage{}, fmt.Errorf("gave up waiting after %d "+
+			return none, fmt.Errorf("gave up waiting after %d "+
 				"retries failed in a row: %w", failures, err)
 		default:
 			delay = retryDelays[failures]
@@ -77,11 +79,11 @@ func waitForMessages(
 
 		remaining := timeout - elapsed
 		if remaining <= 0 && err != nil {
-			return api.ChatPage{}, fmt.Errorf("the wait timed out while "+
+			return none, fmt.Errorf("the wait timed out while "+
 				"the server could not be reached: %w", err)
 		}
 		if remaining <= 0 {
-			return page, nil
+			return answer, nil
 		}
 		clk.Sleep(min(delay, remaining))
 	}
@@ -290,10 +292,11 @@ func cmdChatWait(c *client, args []string) error {
 		return err
 	}
 	query := url.Values{"since": {fmt.Sprint(since)}}
-	poll := func() (api.ChatPage, error) {
-		return c.chatPage(t, ref, query)
+	poll := func() (api.ChatPage, bool, error) {
+		page, err := c.chatPage(t, ref, query)
+		return page, len(page.Messages) > 0, err
 	}
-	page, err := waitForMessages(poll, timeout, systemClock{})
+	page, err := waitFor(poll, timeout, systemClock{})
 	if err != nil {
 		return err
 	}

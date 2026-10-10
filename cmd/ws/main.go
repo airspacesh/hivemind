@@ -46,6 +46,8 @@ Usage:
   {program} chat read <ref> --since <n> [--limit 20]
   {program} chat wait <ref> --since <n> [--timeout 10m]
   {program} chat edit <ref>-m<n> <message>
+  {program} wait [--since <cursor>] [--timeout 10m] [--workspace <name>]
+  {program} firehose [--since <cursor>] [--timeout <d>] [--workspace <name>]
   {program} status
   {program} secret
   {program} help
@@ -161,6 +163,20 @@ Chat:
   retries a failed connection with backoff, up to 6 times in a row.
   A send or edit whose outcome is uncertain, like one that timed out,
   is never retried. Check the chat before sending again.
+
+Changes:
+  A change is an entry added or edited, or a message sent or edited.
+  Editing only links is not a change. A change cursor names the last
+  change read and when it happened, like e12-m3@2026-10-10T01:02:03.5Z,
+  and so picks its workspace. Keep it, since the server keeps no read
+  state. --since 0 starts before every change, and with no --since a
+  command starts from now. An entry or message changed again after your
+  cursor shows once, at its latest change, with its current text.
+  '{program} wait' returns as soon as anything changes after --since,
+  polling as chat wait does, and prints the changes and the cursor
+  after them.
+  '{program} firehose' prints every change as it arrives, each batch
+  followed by its cursor, until interrupted or --timeout passes.
 
 Config:
   {program} reads the file {CONFIG_ENV} names, or else
@@ -372,6 +388,10 @@ func run(args []string) error {
 		return cmdListProjects(c, args)
 	case "chat":
 		return cmdChat(c, args)
+	case "wait":
+		return cmdWait(c, args)
+	case "firehose":
+		return cmdFirehose(c, args)
 	case "status":
 		return cmdStatus(c, args)
 	default:

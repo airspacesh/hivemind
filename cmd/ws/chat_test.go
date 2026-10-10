@@ -32,17 +32,18 @@ var (
 
 // polls answers each poll in turn with the next outcome, an error or a
 // page, and then with empty pages.
-func polls(outcomes ...any) func() (api.ChatPage, error) {
-	return func() (api.ChatPage, error) {
+func polls(outcomes ...any) func() (api.ChatPage, bool, error) {
+	return func() (api.ChatPage, bool, error) {
 		if len(outcomes) == 0 {
-			return api.ChatPage{Cursor: 3}, nil
+			return api.ChatPage{Cursor: 3}, false, nil
 		}
 		next := outcomes[0]
 		outcomes = outcomes[1:]
 		if err, ok := next.(error); ok {
-			return api.ChatPage{}, err
+			return api.ChatPage{}, false, err
 		}
-		return next.(api.ChatPage), nil
+		page := next.(api.ChatPage)
+		return page, len(page.Messages) > 0, nil
 	}
 }
 
@@ -56,7 +57,7 @@ func seconds(values ...int) string {
 
 func TestWaitPollsEverySecondThenEveryFive(t *testing.T) {
 	clk := &fakeClock{}
-	page, err := waitForMessages(polls(), 22*time.Second, clk)
+	page, err := waitFor(polls(), 22*time.Second, clk)
 	if err != nil || len(page.Messages) != 0 || page.Cursor != 3 {
 		t.Fatalf("got %+v, %v, want the empty page at the timeout", page, err)
 	}
@@ -69,7 +70,7 @@ func TestWaitPollsEverySecondThenEveryFive(t *testing.T) {
 func TestWaitReturnsAsSoonAsMessagesArrive(t *testing.T) {
 	clk := &fakeClock{}
 	empty := api.ChatPage{Cursor: 3}
-	page, err := waitForMessages(polls(empty, empty, newMessages),
+	page, err := waitFor(polls(empty, empty, newMessages),
 		time.Minute, clk)
 	if err != nil || page.Cursor != 4 || len(clk.sleeps) != 2 {
 		t.Fatalf("got %+v, %v after %v", page, err, clk.sleeps)
@@ -82,7 +83,7 @@ func TestWaitBacksOffThenGivesUp(t *testing.T) {
 		failures[i] = errNoConnection
 	}
 	clk := &fakeClock{}
-	_, err := waitForMessages(polls(failures...), time.Hour, clk)
+	_, err := waitFor(polls(failures...), time.Hour, clk)
 	if err == nil || !strings.Contains(err.Error(), "gave up waiting after "+
 		"6 retries") || !errors.Is(err, errNoConnection) {
 		t.Fatalf("got %v", err)
@@ -95,7 +96,7 @@ func TestWaitBacksOffThenGivesUp(t *testing.T) {
 func TestWaitResetsBackoffAfterAnAnswer(t *testing.T) {
 	empty := api.ChatPage{Cursor: 3}
 	clk := &fakeClock{}
-	page, err := waitForMessages(polls(errNoConnection, errNoConnection,
+	page, err := waitFor(polls(errNoConnection, errNoConnection,
 		empty, errNoConnection, newMessages), time.Hour, clk)
 	if err != nil || page.Cursor != 4 {
 		t.Fatalf("got %+v, %v", page, err)
@@ -109,7 +110,7 @@ func TestWaitStopsAtOnceOnARefusal(t *testing.T) {
 	refused := &serverError{server: "http://pond", status: 404,
 		code: api.CodeEntryNotFound, message: "entry not found: e3"}
 	clk := &fakeClock{}
-	_, err := waitForMessages(polls(refused), time.Hour, clk)
+	_, err := waitFor(polls(refused), time.Hour, clk)
 	if !errors.Is(err, refused) || len(clk.sleeps) != 0 {
 		t.Fatalf("got %v after %v", err, clk.sleeps)
 	}
@@ -117,7 +118,7 @@ func TestWaitStopsAtOnceOnARefusal(t *testing.T) {
 
 func TestWaitReportsAnOutageAtItsTimeout(t *testing.T) {
 	clk := &fakeClock{}
-	_, err := waitForMessages(polls(errNoConnection, errNoConnection,
+	_, err := waitFor(polls(errNoConnection, errNoConnection,
 		errNoConnection), 2*time.Second, clk)
 	if err == nil || !strings.Contains(err.Error(), "could not be reached") {
 		t.Fatalf("got %v after %v", err, clk.sleeps)
