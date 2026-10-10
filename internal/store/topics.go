@@ -3,9 +3,7 @@ package store
 import (
 	"cmp"
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -22,10 +20,10 @@ import (
 // match and ranks their trees directly instead.
 
 const (
-	// walksBeforeRanking and walksPerEntry bound the paths up the walk
-	// follows for a page, before ranking directly costs less.
-	walksBeforeRanking = 1024
-	walksPerEntry      = 32
+	// rowsBeforeRanking and rowsPerEntry bound the rows the walk reads
+	// for a page, before ranking directly costs less.
+	rowsBeforeRanking = 1 << 16
+	rowsPerEntry      = 256
 	// firstActivityWindow is how far back the first read of activity
 	// reaches. Each later window doubles while windows come back
 	// sparse.
@@ -69,24 +67,23 @@ func treeCTE(name string) string {
 )`
 }
 
-// topicCandidates lists the top-level entries of a workspace that
-// match the search, and that the view shows: those not superseded,
-// and superseded ones with a current entry under them, as context.
-func (v view) topicCandidates(
+// topicsShown lists the entries a where clause selects that the
+// topics view shows: those not superseded, and superseded ones with a
+// current entry under them, as context.
+func (v view) topicsShown(
 	ctx context.Context,
 	workspace int64,
 	from string,
 	where whereBuilder,
 	includeSuperseded bool,
 ) ([]int64, error) {
-	where.clauses = append(where.clauses, topLevelClause)
 	rows, err := v.tx.QueryContext(ctx, `
 		SELECT e.id, `+supersededClause+` FROM `+from+where.sql()+`
 		ORDER BY e.id`, where.args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing top-level entries: %w", err)
 	}
-	var candidates, superseded []int64
+	var shown, superseded []int64
 	for rows.Next() {
 		var id int64
 		var isSuperseded bool
@@ -97,7 +94,7 @@ func (v view) topicCandidates(
 		if isSuperseded && !includeSuperseded {
 			superseded = append(superseded, id)
 		} else {
-			candidates = append(candidates, id)
+			shown = append(shown, id)
 		}
 	}
 	if err := rows.Close(); err != nil {
@@ -107,9 +104,38 @@ func (v view) topicCandidates(
 	if err != nil {
 		return nil, err
 	}
-	candidates = append(candidates, withCurrent...)
-	slices.Sort(candidates)
-	return candidates, nil
+	shown = append(shown, withCurrent...)
+	slices.Sort(shown)
+	return shown, nil
+}
+
+// topicCandidates lists the top-level entries of a workspace that
+// match the search and that the view shows.
+func (v view) topicCandidates(
+	ctx context.Context,
+	workspace int64,
+	from string,
+	where whereBuilder,
+	includeSuperseded bool,
+) ([]int64, error) {
+	where.clauses = append(slices.Clone(where.clauses), topLevelClause)
+	return v.topicsShown(ctx, workspace, from, where, includeSuperseded)
+}
+
+// shownOf lists which of the given top-level entries of a workspace
+// match the search and the view shows.
+func (v view) shownOf(
+	ctx context.Context,
+	workspace int64,
+	ids []int64,
+	from string,
+	where whereBuilder,
+	includeSuperseded bool,
+) ([]int64, error) {
+	where.clauses = append(slices.Clone(where.clauses),
+		`e.id IN (SELECT value FROM json_each(?))`)
+	where.args = append(slices.Clone(where.args), idsJSON(ids))
+	return v.topicsShown(ctx, workspace, from, where, includeSuperseded)
 }
 
 // currentUnder lists which of the given entries of a workspace have a
@@ -141,36 +167,6 @@ func (v view) currentUnder(
 		found = append(found, id)
 	}
 	return found, rows.Err()
-}
-
-// topicShown reports whether the view shows a top-level entry: whether
-// it matches the search, and is current or has a current entry under
-// it.
-func (v view) topicShown(
-	ctx context.Context,
-	workspace int64,
-	id int64,
-	from string,
-	where whereBuilder,
-	includeSuperseded bool,
-) (bool, error) {
-	where.clauses = append(slices.Clone(where.clauses), `e.id = ?`)
-	where.args = append(slices.Clone(where.args), id)
-	var superseded bool
-	err := v.tx.QueryRowContext(ctx, `
-		SELECT `+supersededClause+` FROM `+from+where.sql(), where.args...,
-	).Scan(&superseded)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("matching a top-level entry: %w", err)
-	}
-	if !superseded || includeSuperseded {
-		return true, nil
-	}
-	withCurrent, err := v.currentUnder(ctx, workspace, []int64{id})
-	return len(withCurrent) > 0, err
 }
 
 // rankTopics orders top-level entries of a workspace by the latest
@@ -269,75 +265,183 @@ func (v view) changeSpan(
 	return *created, latest, nil
 }
 
+// parentsOf reads the parents of the given entries of a workspace,
+// for those that have one.
+func (v view) parentsOf(
+	ctx context.Context, workspace int64, ids []int64,
+) (map[int64]int64, error) {
+	rows, err := v.tx.QueryContext(ctx, `
+		SELECT l.source_id, l.target_workspace_id, l.target_id
+		FROM json_each(?) AS child CROSS JOIN entry_links AS l
+			ON l.source_workspace_id = ? AND l.source_id = child.value
+			AND l.name = 'parent'`, idsJSON(ids), workspace)
+	if err != nil {
+		return nil, fmt.Errorf("reading parents: %w", err)
+	}
+	defer rows.Close()
+	parents := map[int64]int64{}
+	for rows.Next() {
+		var child, parentWorkspace, parent int64
+		if err := rows.Scan(&child, &parentWorkspace, &parent); err != nil {
+			return nil, fmt.Errorf("reading parents: %w", err)
+		}
+		if parentWorkspace != workspace {
+			return nil, fmt.Errorf("the parent of %s is in another workspace",
+				v.store.mustRef(Key{workspace, child}))
+		}
+		parents[child] = parent
+	}
+	return parents, rows.Err()
+}
+
 // topicWalk maps changes, newest first, to the top-level entries whose
 // trees hold them. The first change that reaches a top-level entry is
 // the latest activity in its tree, so the entries come out in the
 // view's order.
 type topicWalk struct {
-	view view
-	// shows reports whether the view shows a top-level entry.
-	shows func(ctx context.Context, id int64) (bool, error)
-	// walked holds every entry whose path up has been followed. A
-	// later, older change to it, or a path up that meets it, reaches a
-	// top-level entry already considered.
-	walked     map[Key]bool
+	view      view
+	workspace int64
+	// shownOf lists which of some top-level entries the view shows.
+	shownOf func(ctx context.Context, ids []int64) ([]int64, error)
+	// topOf maps each entry whose path up has been followed to the
+	// top-level entry above it, itself if it has no parent.
+	topOf      map[int64]int64
 	considered map[int64]bool
 	ranked     []int64
-	// walksLeft bounds the paths up the walk may follow before ranking
+	// rowsLeft bounds the rows the walk may read before ranking
 	// directly is the cheaper way.
-	walksLeft int
+	rowsLeft int
 }
 
-// reach follows a changed entry's path up to its top-level entry, and
-// adds that to sameTime if the view shows it and it was not considered
-// before. It reports false when the walk has run out of paths to
-// follow.
-func (w *topicWalk) reach(
-	ctx context.Context, entry Key, sameTime *[]int64,
-) (bool, error) {
-	if w.walked[entry] {
-		return true, nil
+// spend takes rows from the walk's budget, and reports false when the
+// budget is spent.
+func (w *topicWalk) spend(rows int) bool {
+	w.rowsLeft -= rows
+	return w.rowsLeft >= 0
+}
+
+// followUp finds the top-level entry above each of the given entries.
+// It reads the parents of every entry not yet followed in one query,
+// then theirs, a level at a time, until each path meets a top-level
+// entry or one followed before. It reports false when the walk has run
+// out of rows to read.
+func (w *topicWalk) followUp(ctx context.Context, ids []int64) (bool, error) {
+	queued := map[int64]bool{}
+	var level []int64
+	for _, id := range ids {
+		if _, known := w.topOf[id]; !known && !queued[id] {
+			queued[id] = true
+			level = append(level, id)
+		}
 	}
-	if w.walksLeft == 0 {
-		return false, nil
-	}
-	w.walksLeft--
-	ancestors, err := w.view.pathUp(ctx, entry)
-	if err != nil {
-		return false, err
+	parentOf := map[int64]int64{}
+	var followed []int64
+	for len(level) > 0 {
+		if !w.spend(len(level)) {
+			return false, nil
+		}
+		parents, err := w.view.parentsOf(ctx, w.workspace, level)
+		if err != nil {
+			return false, err
+		}
+		var next []int64
+		for _, id := range level {
+			followed = append(followed, id)
+			parent, ok := parents[id]
+			if !ok {
+				w.topOf[id] = id
+				continue
+			}
+			parentOf[id] = parent
+			if _, known := w.topOf[parent]; !known && !queued[parent] {
+				queued[parent] = true
+				next = append(next, parent)
+			}
+		}
+		level = next
 	}
 
-	path := append([]Key{entry}, ancestors...)
-	for _, node := range path {
-		if w.walked[node] {
-			return true, nil
+	for _, id := range followed {
+		var path []int64
+		at := id
+		for {
+			if _, known := w.topOf[at]; known {
+				break
+			}
+			path = append(path, at)
+			at = parentOf[at]
 		}
-		w.walked[node] = true
-	}
-	top := path[len(path)-1].ID
-	if w.considered[top] {
-		return true, nil
-	}
-	w.considered[top] = true
-	shown, err := w.shows(ctx, top)
-	if err != nil {
-		return false, err
-	}
-	if shown {
-		*sameTime = append(*sameTime, top)
+		for _, node := range path {
+			w.topOf[node] = w.topOf[at]
+		}
 	}
 	return true, nil
 }
 
+// rank maps a window of changes, newest first, to the top-level
+// entries above them, and ranks those the view shows that no newer
+// change reached. It reports whether the walk has count entries, and
+// false when it has run out of rows to read.
+func (w *topicWalk) rank(
+	ctx context.Context, changes []change, count int,
+) (bool, bool, error) {
+	ids := make([]int64, len(changes))
+	for i, c := range changes {
+		ids[i] = c.entry.ID
+	}
+	if ok, err := w.followUp(ctx, ids); err != nil || !ok {
+		return false, ok, err
+	}
+	var reached []int64
+	for _, id := range ids {
+		if top := w.topOf[id]; !w.considered[top] {
+			w.considered[top] = true
+			reached = append(reached, top)
+		}
+	}
+	if !w.spend(len(reached)) {
+		return false, false, nil
+	}
+	shown, err := w.shownOf(ctx, reached)
+	if err != nil {
+		return false, false, err
+	}
+
+	unranked := map[int64]bool{}
+	for _, id := range shown {
+		unranked[id] = true
+	}
+	for start := 0; start < len(changes); {
+		end := start
+		var sameTime []int64
+		for end < len(changes) && changes[end].at == changes[start].at {
+			if top := w.topOf[changes[end].entry.ID]; unranked[top] {
+				delete(unranked, top)
+				sameTime = append(sameTime, top)
+			}
+			end++
+		}
+		slices.SortFunc(sameTime, func(a, b int64) int {
+			return cmp.Compare(b, a)
+		})
+		w.ranked = append(w.ranked, sameTime...)
+		start = end
+		if len(w.ranked) >= count {
+			return true, true, nil
+		}
+	}
+	return false, true, nil
+}
+
 // walkTopics ranks the first count top-level entries the view shows,
 // by reading changes newest first. It reports false when it would
-// follow more than maxWalks paths up.
+// read more than maxRows rows.
 func (v view) walkTopics(
 	ctx context.Context,
 	workspace int64,
 	count int,
-	maxWalks int,
-	shows func(ctx context.Context, id int64) (bool, error),
+	maxRows int,
+	shownOf func(ctx context.Context, ids []int64) ([]int64, error),
 ) ([]int64, bool, error) {
 	earliest, latest, err := v.changeSpan(ctx, workspace)
 	if err != nil {
@@ -355,8 +459,9 @@ func (v view) walkTopics(
 		return nil, false, err
 	}
 	w := topicWalk{
-		view: v, shows: shows, walked: map[Key]bool{},
-		considered: map[int64]bool{}, walksLeft: maxWalks,
+		view: v, workspace: workspace, shownOf: shownOf,
+		topOf: map[int64]int64{}, considered: map[int64]bool{},
+		rowsLeft: maxRows,
 	}
 
 	to := ""
@@ -371,26 +476,14 @@ func (v view) walkTopics(
 		if err != nil {
 			return nil, false, err
 		}
-		for start := 0; start < len(changes); {
-			end := start
-			var sameTime []int64
-			for end < len(changes) && changes[end].at == changes[start].at {
-				ok, err := w.reach(ctx, changes[end].entry, &sameTime)
-				if err != nil || !ok {
-					return nil, false, err
-				}
-				end++
-			}
-			slices.SortFunc(sameTime, func(a, b int64) int {
-				return cmp.Compare(b, a)
-			})
-			w.ranked = append(w.ranked, sameTime...)
-			start = end
-			if len(w.ranked) >= count {
-				return w.ranked, true, nil
-			}
+		if !w.spend(len(changes)) {
+			return nil, false, nil
 		}
-		if !from.After(floor) {
+		full, ok, err := w.rank(ctx, changes, count)
+		if err != nil || !ok {
+			return nil, false, err
+		}
+		if full || !from.After(floor) {
 			return w.ranked, true, nil
 		}
 
@@ -456,7 +549,7 @@ func (v view) newestTreeMessages(
 }
 
 // searchTopics lists a page of the topics view, and whether more
-// follow. It walks activity for at most maxWalks paths up, then ranks
+// follow. It walks activity reading at most maxRows rows, then ranks
 // every match directly.
 func (v view) searchTopics(
 	ctx context.Context,
@@ -464,15 +557,15 @@ func (v view) searchTopics(
 	filter Filter,
 	from string,
 	where whereBuilder,
-	maxWalks int,
+	maxRows int,
 ) (api.SearchResult, error) {
 	count := filter.Offset + filter.Limit + 1
-	shows := func(ctx context.Context, id int64) (bool, error) {
-		return v.topicShown(ctx, workspace, id, from, where,
+	shownOf := func(ctx context.Context, ids []int64) ([]int64, error) {
+		return v.shownOf(ctx, workspace, ids, from, where,
 			filter.IncludeSuperseded)
 	}
-	ranked, walked, err := v.walkTopics(ctx, workspace, count, maxWalks,
-		shows)
+	ranked, walked, err := v.walkTopics(ctx, workspace, count, maxRows,
+		shownOf)
 	if err != nil {
 		return api.SearchResult{}, err
 	}
@@ -530,11 +623,10 @@ func (v view) matchedEntries(
 	return matched, nil
 }
 
-// topicWalks is how many paths up the topics view follows for a page
-// before it ranks every match directly.
-func topicWalks(filter Filter) int {
-	return walksBeforeRanking +
-		walksPerEntry*(filter.Offset+filter.Limit+1)
+// topicWalkRows is how many rows the topics view reads walking
+// activity for a page before it ranks every match directly.
+func topicWalkRows(filter Filter) int {
+	return rowsBeforeRanking + rowsPerEntry*(filter.Offset+filter.Limit+1)
 }
 
 // joinedFrom is the FROM clause of a search: every entry, or with

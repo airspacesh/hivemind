@@ -322,7 +322,7 @@ func (s *Store) Search(
 		where.clauses = append(where.clauses, `e.workspace_id = ?`)
 		where.args = append(where.args, workspace)
 		result, err = v.searchTopics(ctx, workspace, filter, from, where,
-			topicWalks(filter))
+			topicWalkRows(filter))
 	} else {
 		result, err = v.searchFlat(ctx, workspace, filter, from, fromArgs,
 			where)
