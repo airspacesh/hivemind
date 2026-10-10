@@ -343,6 +343,32 @@ func TestAddTakesItsParentsWorkspace(t *testing.T) {
 	}
 }
 
+// The chat overview marks how many older messages an entry has before
+// the ones it shows.
+func TestOverviewMarksEarlierMessages(t *testing.T) {
+	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
+	message := func(number int64) api.Message {
+		return api.Message{Entry: api.Ref{Prefix: "e", ID: 1},
+			Number: number, Created: when, Modified: when, Body: "quack",
+			Origin: api.Origin{User: "duck"}}
+	}
+	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		reply(w, http.StatusOK, api.ChatOverview{Chats: []api.EntryChat{
+			{Entry: api.EntryRef{Ref: api.Ref{Prefix: "e", ID: 1},
+				Type: "question", Subject: "Why?"},
+				Messages: []api.Message{message(7), message(8)}},
+		}})
+	})
+	config := writeConfig(t, "workspaces:\n  default:\n    server: "+
+		server.URL+"\n", 0o600)
+	got := ws(t, config, "chat", "recent")
+	want := "[e1] (question) Why?\n  ... 6 earlier\n" +
+		"  [e1-m7] 05:20 duck: quack\n  [e1-m8] 05:20 duck: quack\n"
+	if !got.ok || got.stdout != want {
+		t.Fatalf("overview =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
+	}
+}
+
 // TestResolutionMovesOnOnlyForAnAbsentPrefix checks that an id goes to
 // the first server listing its prefix, and that only that server's own
 // workspace's secret travels, and only with the entry request.

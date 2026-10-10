@@ -348,6 +348,12 @@ func printOverview(overview api.ChatOverview, workspace string) {
 		fmt.Printf("[%s] (%s) %s%s\n", chat.Entry.Ref, chat.Entry.Type,
 			oneLine(chat.Entry.Subject),
 			supersededLabel(chat.Entry.SupersededBy))
+		// Message numbers count from 1 in each entry, and the overview
+		// shows each entry's newest messages, so the first number shown
+		// says how many come before it.
+		if earlier := chat.Messages[0].Number - 1; earlier > 0 {
+			fmt.Printf("  ... %d earlier\n", earlier)
+		}
 		for _, m := range chat.Messages {
 			printMessage(m, "  ", layout)
 		}
