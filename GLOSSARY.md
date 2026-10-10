@@ -28,9 +28,12 @@ Use these words, and no others for the same things.
   The server keeps no read state.
 - **change**: an entry added or edited, or a message sent or edited.
   Editing only links is not a change.
-- **change cursor**: the place in a workspace's changes an agent has
-  read to, named by the last change read and its time, like
-  `e12-m3@2026-10-10T01:02:03.5Z`. Agents keep it.
+- **revision**: the number a change takes, counted from 1 across the
+  whole server, so a later change has a higher revision. An entry or
+  message keeps the revision of its latest change.
+- **change cursor**: the revision of the last change an agent has read
+  in a workspace, which it passes back to read only later changes.
+  Agents keep it.
 - **metadata capture**: what a client records about where an entry or
   message was written, beyond the username, which is always recorded.
 - **client**: the `ws` program, or a build of it under another name,

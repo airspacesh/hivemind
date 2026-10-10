@@ -186,14 +186,18 @@ func (s *Store) Add(
 	).Scan(&key.ID); err != nil {
 		return api.Entry{}, fmt.Errorf("numbering entry: %w", err)
 	}
+	revision, err := nextRevision(ctx, v.tx)
+	if err != nil {
+		return api.Entry{}, err
+	}
 	now := nowUTC()
 	if _, err := v.tx.ExecContext(ctx, `
 		INSERT INTO entries (
 			workspace_id, id, created_utc, modified_utc, activity_utc,
-			project, subject, body, origin_user, origin_host, origin_dir,
-			origin_claude_session
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		key.Workspace, key.ID, now, now, now, req.Project,
+			revision, project, subject, body, origin_user, origin_host,
+			origin_dir, origin_claude_session
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		key.Workspace, key.ID, now, now, now, revision, req.Project,
 		req.Subject, req.Body, req.Origin.User, req.Origin.Host,
 		req.Origin.Dir, req.Origin.ClaudeSession,
 	); err != nil {
@@ -215,15 +219,21 @@ func (s *Store) Add(
 	return entry, nil
 }
 
-// editContent updates an entry's own fields and its modified and
-// activity times. A change to links alone leaves both times as they
-// are, so organising old entries does not reorder listings.
+// editContent updates an entry's own fields, its modified and activity
+// times, and its revision. A change to links alone leaves all three as
+// they are, so organising old entries does not reorder listings or
+// show in the changes feed.
 func (v view) editContent(
 	ctx context.Context, key Key, req api.EditEntryRequest,
 ) error {
+	revision, err := nextRevision(ctx, v.tx)
+	if err != nil {
+		return err
+	}
 	now := nowUTC()
-	query := `UPDATE entries SET modified_utc = ?, activity_utc = ?`
-	args := []any{now, now}
+	query := `UPDATE entries SET modified_utc = ?, activity_utc = ?,
+		revision = ?`
+	args := []any{now, now, revision}
 	if req.Project != nil {
 		query += `, project = ?`
 		args = append(args, *req.Project)

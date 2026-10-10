@@ -44,13 +44,25 @@ CREATE TABLE workspaces (
 	prefix TEXT UNIQUE
 )`
 
+// createRevisionCounter holds the revision of the latest change on the
+// server, in its one row. Each change takes the next revision.
+const createRevisionCounter = `
+CREATE TABLE revision_counter (
+	only_row INTEGER PRIMARY KEY CHECK (only_row = 1),
+	revision INTEGER NOT NULL
+)`
+
+const startRevisionCounter = `
+INSERT INTO revision_counter (only_row, revision) VALUES (1, 0)`
+
 // createEntries defines the entries table. An entry's id counts from 1
 // within its workspace. Each entry records its origin: the OS user,
 // host, working directory, and Claude Code session that created it.
 // Every searchable text field has a lowered twin so GLOB can match
 // without regard to ASCII case. activity_utc is the latest change to
 // the entry or its chat. Every write to either sets it, so listings
-// read it rather than the chat.
+// read it rather than the chat. revision is the revision of the
+// entry's own latest change, which also set modified_utc.
 const createEntries = `
 CREATE TABLE entries (
 	workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
@@ -58,6 +70,7 @@ CREATE TABLE entries (
 	created_utc TEXT NOT NULL,
 	modified_utc TEXT NOT NULL,
 	activity_utc TEXT NOT NULL,
+	revision INTEGER NOT NULL,
 	project TEXT NOT NULL,
 	project_lower TEXT COLLATE BINARY
 		GENERATED ALWAYS AS (lower(project)) STORED,
@@ -101,6 +114,11 @@ ON entries(workspace_id, created_utc DESC, id DESC)`
 const createModifiedIndex = `
 CREATE INDEX entries_modified_order
 ON entries(workspace_id, modified_utc DESC, id DESC)`
+
+// createRevisionIndex reads a workspace's entries changed after a
+// revision, in revision order.
+const createRevisionIndex = `
+CREATE INDEX entries_revision ON entries(workspace_id, revision)`
 
 const createSubjectIndex = `
 CREATE INDEX entries_subject_search ON entries(subject_lower)`
@@ -151,7 +169,8 @@ ON entry_links(source_workspace_id, source_id) WHERE name = 'parent'`
 // counts from 1 within its entry. post_order numbers every message on
 // the server in the order it was posted, so the chat overview orders
 // by it rather than by a clock. An edit overwrites the body, so no
-// earlier text is kept.
+// earlier text is kept. revision is the revision of the post or of the
+// latest edit.
 const createMessages = `
 CREATE TABLE entry_messages (
 	post_order INTEGER PRIMARY KEY,
@@ -160,6 +179,7 @@ CREATE TABLE entry_messages (
 	id INTEGER NOT NULL,
 	created_utc TEXT NOT NULL,
 	modified_utc TEXT NOT NULL,
+	revision INTEGER NOT NULL,
 	body TEXT NOT NULL,
 	origin_user TEXT NOT NULL DEFAULT '',
 	origin_host TEXT NOT NULL DEFAULT '',
@@ -178,6 +198,10 @@ ON entry_messages(workspace_id, post_order)`
 const createMessageModifiedIndex = `
 CREATE INDEX entry_messages_modified
 ON entry_messages(workspace_id, modified_utc)`
+
+const createMessageRevisionIndex = `
+CREATE INDEX entry_messages_revision
+ON entry_messages(workspace_id, revision)`
 
 // The text indexes hold the trigrams of the lowered text a search
 // matches, so a search finds the entries and messages that hold a
@@ -280,12 +304,14 @@ type schemaStep struct {
 var schemaSteps = []schemaStep{
 	{
 		statements: []string{
-			createWorkspaces, createEntries, createMetadata,
-			createCreatedIndex, createModifiedIndex,
+			createWorkspaces, createRevisionCounter,
+			startRevisionCounter, createEntries, createMetadata,
+			createCreatedIndex, createModifiedIndex, createRevisionIndex,
 			createSubjectIndex, createProjectIndex,
 			createProjectCreatedIndex, createLinks,
 			createLinkTargetIndex, createOneParentIndex, createMessages,
 			createMessageOrderIndex, createMessageModifiedIndex,
+			createMessageRevisionIndex,
 			createEntryText, secureEntryText, createEntryTextInsert,
 			createEntryTextUpdate, createMessageText, secureMessageText,
 			createMessageTextInsert, createMessageTextUpdate,
@@ -295,6 +321,8 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createCreatedIndex)},
 			{"index", "entries_modified_order", "entries",
 				normalizeSchemaSQL(createModifiedIndex)},
+			{"index", "entries_revision", "entries",
+				normalizeSchemaSQL(createRevisionIndex)},
 			{"index", "entries_project_activity", "entries",
 				normalizeSchemaSQL(createProjectIndex)},
 			{"index", "entries_project_created", "entries",
@@ -307,6 +335,8 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createLinkTargetIndex)},
 			{"index", "entry_messages_modified", "entry_messages",
 				normalizeSchemaSQL(createMessageModifiedIndex)},
+			{"index", "entry_messages_revision", "entry_messages",
+				normalizeSchemaSQL(createMessageRevisionIndex)},
 			{"index", "entry_messages_workspace_order", "entry_messages",
 				normalizeSchemaSQL(createMessageOrderIndex)},
 			{"table", "entries", "entries",
@@ -317,6 +347,8 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createMessages)},
 			{"table", "entry_metadata", "entry_metadata",
 				normalizeSchemaSQL(createMetadata)},
+			{"table", "revision_counter", "revision_counter",
+				normalizeSchemaSQL(createRevisionCounter)},
 			{"table", "workspaces", "workspaces",
 				normalizeSchemaSQL(createWorkspaces)},
 			{"trigger", "entry_text_insert", "entries",

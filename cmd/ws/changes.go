@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/airspacesh/workstream/internal/api"
@@ -29,7 +30,7 @@ func (c *client) pollChanges(
 	return func() (api.ChangesPage, bool, error) {
 		page, err := c.changesPage(t, since)
 		if err == nil {
-			since = page.Cursor.String()
+			since = fmt.Sprint(page.Cursor)
 		}
 		return page, len(page.Changes) > 0, err
 	}
@@ -59,14 +60,13 @@ func follow(
 
 type changesArgs struct {
 	target target
-	// since is a cursor, 0 for the start, or now for the latest change.
+	// since is a change cursor, 0 for the start, or now for the
+	// latest change.
 	since   string
 	timeout time.Duration
 }
 
-// parseChangesArgs reads the arguments of firehose and wait. They work
-// in the workspace --workspace names, or else the one the cursor
-// names an entry of, or else the default.
+// parseChangesArgs reads the arguments of firehose and wait.
 func (c *client) parseChangesArgs(
 	command string, args []string, timeout time.Duration,
 ) (changesArgs, error) {
@@ -84,6 +84,11 @@ func (c *client) parseChangesArgs(
 	if p.has("--since") {
 		parsed.since = p.strs["--since"]
 	}
+	revision, err := strconv.ParseInt(parsed.since, 10, 64)
+	if parsed.since != "now" && (err != nil || revision < 0) {
+		return changesArgs{}, fmt.Errorf("--since must be a cursor, 0 for "+
+			"the start, or now, not %q", parsed.since)
+	}
 	if p.has("--timeout") {
 		parsed.timeout, err = time.ParseDuration(p.strs["--timeout"])
 		if err != nil || parsed.timeout <= 0 {
@@ -91,33 +96,19 @@ func (c *client) parseChangesArgs(
 				"positive duration, like 1m, not %q", p.strs["--timeout"])
 		}
 	}
-
-	var cursor api.ChangeCursor
-	if parsed.since != "now" {
-		if cursor, err = api.ParseChangeCursor(parsed.since); err != nil {
-			return changesArgs{}, err
-		}
-	}
-	if p.has("--workspace") || cursor.IsZero() {
-		workspace, err := c.config.chooseWorkspace(p.strs["--workspace"])
-		if err != nil {
-			return changesArgs{}, err
-		}
-		parsed.target = targetOf(workspace)
-	} else if parsed.target, err = c.resolve(cursor.Entry); err != nil {
+	workspace, err := c.config.chooseWorkspace(p.strs["--workspace"])
+	if err != nil {
 		return changesArgs{}, err
 	}
+	parsed.target = targetOf(workspace)
 	return parsed, nil
 }
 
-// changesCommand is the command that waits on from a cursor. A cursor
-// that names no entry names no workspace either, so --workspace does.
-func changesCommand(t target, cursor api.ChangeCursor) string {
-	command := programName + " wait --since " + cursor.String()
-	if cursor.IsZero() {
-		command += " --workspace " + t.workspace
-	}
-	return command
+// changesCommand is the command that waits on in a workspace from a
+// revision.
+func changesCommand(t target, revision int64) string {
+	return fmt.Sprintf("%s wait --since %d --workspace %s", programName,
+		revision, t.workspace)
 }
 
 func cmdFirehose(c *client, args []string) error {
@@ -132,14 +123,14 @@ func cmdFirehose(c *client, args []string) error {
 		if err != nil {
 			return err
 		}
-		since = page.Cursor.String()
+		since = fmt.Sprint(page.Cursor)
 	}
 
 	fmt.Printf("Following workspace %s after %s.\n", t.workspace, since)
 	cursor := since
 	show := func(page api.ChangesPage) {
 		printChanges(page.Changes)
-		cursor = page.Cursor.String()
+		cursor = fmt.Sprint(page.Cursor)
 		fmt.Printf("Cursor: %s\n", cursor)
 	}
 	err = follow(c.pollChanges(t, since), show, parsed.timeout,
@@ -165,7 +156,7 @@ func cmdWait(c *client, args []string) error {
 	}
 
 	if len(page.Changes) == 0 {
-		fmt.Printf("No changes after %s within %s.\n", page.Cursor,
+		fmt.Printf("No changes after %d within %s.\n", page.Cursor,
 			parsed.timeout)
 	}
 	printChanges(page.Changes)
@@ -174,7 +165,7 @@ func cmdWait(c *client, args []string) error {
 			changesCommand(t, page.Cursor))
 		return nil
 	}
-	fmt.Printf("Cursor: %s (wait for more: %s)\n", page.Cursor,
+	fmt.Printf("Cursor: %d (wait for more: %s)\n", page.Cursor,
 		changesCommand(t, page.Cursor))
 	return nil
 }

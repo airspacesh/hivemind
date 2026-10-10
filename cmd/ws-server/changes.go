@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/airspacesh/workstream/internal/api"
 )
@@ -11,27 +12,21 @@ const (
 	maxChangesLimit     = 500
 )
 
-// changes returns a page of a workspace's changes after a cursor,
-// given since, or an empty page whose cursor is the latest change,
-// given since=now.
+// changes returns a page of a workspace's changes after the revision
+// since, or an empty page whose cursor is the latest revision, given
+// since=now.
 func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 	query, ok := parseQueryOf(w, r, "since", "limit")
 	if !ok {
 		return
 	}
-	if !query.Has("since") {
-		writeBadRequest(w, "since is required. Give a cursor, 0 for "+
-			"the start, or now for the latest change")
-		return
-	}
 	text := query.Get("since")
-	var since api.ChangeCursor
-	if text != "now" {
-		var err error
-		if since, err = api.ParseChangeCursor(text); err != nil {
-			writeBadRequest(w, err.Error())
-			return
-		}
+	now := text == "now"
+	since, err := strconv.ParseInt(text, 10, 64)
+	if !now && (err != nil || since < 0) {
+		writeBadRequest(w, "since must be a revision, 0 for the start, "+
+			"or now for the latest change")
+		return
 	}
 	limit, err := queryInteger(query, "limit", defaultChangesLimit,
 		1, maxChangesLimit)
@@ -49,9 +44,9 @@ func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var page api.ChangesPage
-	if text == "now" {
+	if now {
 		page.Changes = []api.Change{}
-		page.Cursor, err = h.store.LatestChange(r.Context(), workspace.ID)
+		page.Cursor, err = h.store.LatestRevision(r.Context())
 	} else {
 		page, err = h.store.Changes(r.Context(), access, workspace.ID,
 			since, int(limit))

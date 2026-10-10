@@ -174,14 +174,14 @@ type Change struct {
 	Message *Message    `json:"message,omitempty"`
 }
 
-// ChangesPage holds a workspace's changes after a cursor, oldest
-// first. Cursor marks the last change in the page, or is the cursor
-// read from when the page is empty. More says whether changes follow
-// it.
+// ChangesPage holds a workspace's changes after a revision, oldest
+// first. Cursor is the revision of the last change in the page, or the
+// revision read from when the page is empty. More says whether changes
+// follow it.
 type ChangesPage struct {
-	Changes []Change     `json:"changes"`
-	Cursor  ChangeCursor `json:"cursor"`
-	More    bool         `json:"more"`
+	Changes []Change `json:"changes"`
+	Cursor  int64    `json:"cursor"`
+	More    bool     `json:"more"`
 }
 
 type AddEntryRequest struct {

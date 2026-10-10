@@ -352,17 +352,18 @@ func addBusyTree(
 
 	for _, statement := range []string{`
 		INSERT INTO entries (workspace_id, id, created_utc, modified_utc,
-			activity_utc, project, subject)
+			activity_utc, revision, project, subject)
 		SELECT ?1, r.value ->> 'id', r.value ->> 'created',
-			r.value ->> 'created', r.value ->> 'activity', 'pond', 'duck'
+			r.value ->> 'created', r.value ->> 'activity', 0, 'pond',
+			'duck'
 		FROM json_each(?2) AS r`, `
 		INSERT INTO entry_links
 		SELECT ?1, r.value ->> 'id', 'parent', ?1, r.value ->> 'parent'
 		FROM json_each(?2) AS r WHERE r.value ->> 'parent' != 0`, `
 		INSERT INTO entry_messages (workspace_id, entry_id, id,
-			created_utc, modified_utc, body)
+			created_utc, modified_utc, revision, body)
 		SELECT ?1, r.value ->> 'id', 1, r.value ->> 'activity',
-			r.value ->> 'activity', 'quack'
+			r.value ->> 'activity', 0, 'quack'
 		FROM json_each(?2) AS r`,
 	} {
 		if _, err := store.db.Exec(statement, workspace,

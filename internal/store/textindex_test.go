@@ -50,10 +50,10 @@ func addFiller(t *testing.T, store *Store) {
 		)
 		INSERT INTO entries (
 			workspace_id, id, created_utc, modified_utc, activity_utc,
-			project, subject
+			revision, project, subject
 		)
 		SELECT ?2, (SELECT max(id) FROM entries WHERE workspace_id = ?2) + i,
-			?3, ?3, ?3, 'pond', '0'
+			?3, ?3, ?3, 0, 'pond', '0'
 		FROM n`,
 		changesBeforeIndex+changesPerMatch*100,
 		workspaceID(t, store, "default"), nowUTC()); err != nil {

@@ -99,13 +99,18 @@ func (s *Store) Post(
 	).Scan(&number); err != nil {
 		return api.Message{}, fmt.Errorf("numbering message: %w", err)
 	}
+	revision, err := nextRevision(ctx, v.tx)
+	if err != nil {
+		return api.Message{}, err
+	}
 	now := nowUTC()
 	if _, err := v.tx.ExecContext(ctx, `
 		INSERT INTO entry_messages (
-			workspace_id, entry_id, id, created_utc, modified_utc, body,
-			origin_user, origin_host, origin_dir, origin_claude_session
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		entry.Workspace, entry.ID, number, now, now, req.Body,
+			workspace_id, entry_id, id, created_utc, modified_utc,
+			revision, body, origin_user, origin_host, origin_dir,
+			origin_claude_session
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		entry.Workspace, entry.ID, number, now, now, revision, req.Body,
 		req.Origin.User, req.Origin.Host, req.Origin.Dir,
 		req.Origin.ClaudeSession,
 	); err != nil {
@@ -149,11 +154,15 @@ func (s *Store) EditMessage(
 		return message, false, nil
 	}
 
+	revision, err := nextRevision(ctx, tx)
+	if err != nil {
+		return api.Message{}, false, err
+	}
 	now := nowUTC()
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE entry_messages SET body = ?, modified_utc = ?
+		UPDATE entry_messages SET body = ?, modified_utc = ?, revision = ?
 		WHERE workspace_id = ? AND entry_id = ? AND id = ?`,
-		req.Body, now, entry.Workspace, entry.ID, number,
+		req.Body, now, revision, entry.Workspace, entry.ID, number,
 	); err != nil {
 		return api.Message{}, false, fmt.Errorf("editing message: %w", err)
 	}

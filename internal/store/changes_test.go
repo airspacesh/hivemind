@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/airspacesh/workstream/internal/api"
 )
 
 func readChanges(
-	t *testing.T, store *Store, since api.ChangeCursor, limit int,
+	t *testing.T, store *Store, since int64, limit int,
 ) api.ChangesPage {
 	t.Helper()
 	page, err := store.Changes(context.Background(), everyAccess(store),
@@ -39,8 +41,8 @@ func changeIDs(page api.ChangesPage) []string {
 // readAllChanges pages through every change after since, limit at a
 // time, and returns the changes and the final cursor.
 func readAllChanges(
-	t *testing.T, store *Store, since api.ChangeCursor, limit int,
-) ([]string, api.ChangeCursor) {
+	t *testing.T, store *Store, since int64, limit int,
+) ([]string, int64) {
 	t.Helper()
 	var ids []string
 	for {
@@ -53,20 +55,7 @@ func readAllChanges(
 	}
 }
 
-// stampAll gives every entry and message the same modified time.
-func stampAll(t *testing.T, store *Store) {
-	t.Helper()
-	const stamp = "2026-10-10T01:02:03.000000000Z"
-	for _, table := range []string{"entries", "entry_messages"} {
-		if _, err := store.db.Exec(
-			`UPDATE `+table+` SET modified_utc = ?`, stamp,
-		); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func TestChangesSharingAStampPageOnceEachInOrder(t *testing.T) {
+func TestChangesPageOnceEachInTheOrderTheyHappened(t *testing.T) {
 	store := openTestStore(t)
 	first := mustAdd(t, store, "first", "", nil)
 	second := mustAdd(t, store, "second", "", nil)
@@ -74,11 +63,10 @@ func TestChangesSharingAStampPageOnceEachInOrder(t *testing.T) {
 	mustPost(t, store, first.Ref, "hi")
 	mustPost(t, store, first.Ref, "again")
 	mustAdd(t, store, "third", "", nil)
-	stampAll(t, store)
 
-	want := []string{"e1", "e1-m1", "e1-m2", "e2", "e2-m1", "e3"}
+	want := []string{"e1", "e2", "e2-m1", "e1-m1", "e1-m2", "e3"}
 	for limit := 1; limit <= len(want); limit++ {
-		got, _ := readAllChanges(t, store, api.ChangeCursor{}, limit)
+		got, _ := readAllChanges(t, store, 0, limit)
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("limit %d read %v, want %v", limit, got, want)
 		}
@@ -90,7 +78,7 @@ func TestChangesListAChangeAgainOnlyWhenItChangesAfterTheCursor(t *testing.T) {
 	store := openTestStore(t)
 	seen := mustAdd(t, store, "seen", "", nil)
 	message := mustPost(t, store, seen.Ref, "hi")
-	_, cursor := readAllChanges(t, store, api.ChangeCursor{}, 10)
+	_, cursor := readAllChanges(t, store, 0, 10)
 
 	unseen := mustAdd(t, store, "unseen", "", nil)
 	for _, entry := range []api.Entry{unseen, seen, unseen} {
@@ -114,25 +102,123 @@ func TestChangesListAChangeAgainOnlyWhenItChangesAfterTheCursor(t *testing.T) {
 	}
 }
 
-func TestLatestChangeSkipsEveryChangeSoFar(t *testing.T) {
+func TestChangesLeaveOutEditsToLinksAlone(t *testing.T) {
+	store := openTestStore(t)
+	parent := mustAdd(t, store, "parent", "", nil)
+	child := mustAdd(t, store, "child", "", nil)
+	_, cursor := readAllChanges(t, store, 0, 10)
+
+	if _, err := store.Edit(context.Background(), everyAccess(store),
+		store.mustKey(child.Ref), api.EditEntryRequest{
+			AddLinks: []api.Link{link("parent", parent.Ref)},
+			User:     testUser,
+		}); err != nil {
+		t.Fatal(err)
+	}
+	if got := changeIDs(readChanges(t, store, cursor, 10)); len(got) != 0 {
+		t.Fatalf("a link edit showed as changes %v", got)
+	}
+}
+
+func TestLatestRevisionSkipsEveryChangeSoFar(t *testing.T) {
 	store := openTestStore(t)
 	entry := mustAdd(t, store, "first", "", nil)
 	mustPost(t, store, entry.Ref, "hi")
-	mustAdd(t, store, "second", "", nil)
-	stampAll(t, store)
-	latest, err := store.LatestChange(context.Background(),
-		workspaceID(t, store, "default"))
+	addTo(t, store, "personal", api.AddEntryRequest{Subject: "private"})
+	latest, err := store.LatestRevision(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := changeIDs(readChanges(t, store, latest, 10)); len(got) != 0 {
-		t.Fatalf("after the latest change read %v", got)
+		t.Fatalf("after the latest revision read %v", got)
 	}
 
 	mustPost(t, store, entry.Ref, "later")
 	if got := changeIDs(readChanges(t, store, latest, 10)); !reflect.DeepEqual(
 		got, []string{"e1-m2"}) {
 		t.Fatalf("read %v, want the later message alone", got)
+	}
+}
+
+func TestRefusedEditsTakeNoRevision(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	entry := mustAdd(t, store, "mine", "", nil)
+	message := mustPost(t, store, entry.Ref, "hi")
+	before, err := store.LatestRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	subject := "taken"
+	if _, err := store.Edit(ctx, everyAccess(store),
+		store.mustKey(entry.Ref), api.EditEntryRequest{
+			Subject: &subject, User: "heron"}); err == nil {
+		t.Fatal("another user edited the entry")
+	}
+	if _, _, err := store.EditMessage(ctx, store.mustKey(entry.Ref),
+		message.Number, api.EditMessageRequest{
+			Body: "taken", User: "heron"}); err == nil {
+		t.Fatal("another user edited the message")
+	}
+	after, err := store.LatestRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("refused edits moved the latest revision from %d to %d",
+			before, after)
+	}
+}
+
+func TestChangesReadDuringWritesMissNone(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	entry := mustAdd(t, store, "busy", "", nil)
+	const posts = 40
+	var wg sync.WaitGroup
+	for range posts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := store.Post(ctx, store.mustKey(entry.Ref),
+				api.PostMessageRequest{Body: "hi"}); err != nil {
+				t.Errorf("posting: %v", err)
+			}
+		}()
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	read := map[string]int{}
+	var cursor int64
+	deadline := time.Now().Add(time.Minute)
+	for finished := false; !finished; {
+		select {
+		case <-done:
+			finished = true
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the posts did not finish in a minute, after %d "+
+				"changes read", len(read))
+		}
+		var ids []string
+		ids, cursor = readAllChanges(t, store, cursor, 3)
+		for _, id := range ids {
+			read[id]++
+		}
+	}
+	if len(read) != posts+1 {
+		t.Fatalf("read %d changes, want %d: %v", len(read), posts+1, read)
+	}
+	for id, count := range read {
+		if count != 1 {
+			t.Fatalf("read %s %d times", id, count)
+		}
 	}
 }
 
@@ -154,7 +240,7 @@ func TestChangesStayInTheirWorkspace(t *testing.T) {
 
 	page, err := store.Changes(context.Background(),
 		accessTo(t, store, "default"), workspaceID(t, store, "default"),
-		api.ChangeCursor{}, 10)
+		0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

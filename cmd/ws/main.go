@@ -166,9 +166,10 @@ Chat:
 
 Changes:
   A change is an entry added or edited, or a message sent or edited.
-  Editing only links is not a change. A change cursor names the last
-  change read and when it happened, like e12-m3@2026-10-10T01:02:03.5Z,
-  and so picks its workspace. Keep it, since the server keeps no read
+  Editing only links is not a change. Each change takes the next
+  revision, a number counted across the whole server. A change cursor
+  is the revision of the last change read. Pass it as --since to read
+  only later changes, and keep it, since the server keeps no read
   state. --since 0 starts before every change, and with no --since a
   command starts from now. An entry or message changed again after your
   cursor shows once, at its latest change, with its current text.

@@ -2,108 +2,61 @@ package store
 
 import (
 	"context"
-	"errors"
+	"database/sql"
 	"fmt"
 
 	"github.com/airspacesh/workstream/internal/api"
 )
 
-var ErrInvalidCursor = errors.New("invalid cursor")
+// The changes feed lists a workspace's changes in revision order. A
+// change takes its revision with a write inside its transaction, and
+// SQLite runs one write transaction at a time, so changes commit in
+// revision order. A read that sees a revision therefore sees every
+// earlier one, and a cursor never passes a change still to commit.
 
-// The changes feed lists a workspace's changes in the order of a
-// changeKey. The server stamps each change inside its write
-// transaction, and writes take turns on one connection, so a change
-// that commits after a read is stamped later than every change that
-// read saw. A cursor therefore never passes a change still to commit,
-// as long as the clock does not step back.
+// nextRevision takes the next revision on the server for a change the
+// transaction makes.
+func nextRevision(ctx context.Context, tx *sql.Tx) (int64, error) {
+	var revision int64
+	if err := tx.QueryRowContext(ctx, `
+		UPDATE revision_counter SET revision = revision + 1
+		RETURNING revision`,
+	).Scan(&revision); err != nil {
+		return 0, fmt.Errorf("taking a revision: %w", err)
+	}
+	return revision, nil
+}
 
-// changeKey orders changes by their stamp, then by entry, then by
-// message, where message 0 stands for the entry itself.
+// changeKey names a change by its revision and the entry or message
+// that changed, where message 0 stands for the entry itself.
 type changeKey struct {
-	at      string
-	entry   int64
-	message int64
+	revision int64
+	entry    int64
+	message  int64
 }
 
-// changeKeyOf finds where a cursor of a workspace points. The zero
-// cursor points before every change.
-func (s *Store) changeKeyOf(
-	workspace int64, cursor api.ChangeCursor,
-) (changeKey, error) {
-	if cursor.IsZero() {
-		return changeKey{}, nil
-	}
-	key, err := s.Resolve(cursor.Entry)
-	if err != nil || key.Workspace != workspace {
-		return changeKey{}, fmt.Errorf("%w: %s is from another workspace",
-			ErrInvalidCursor, cursor)
-	}
-	return changeKey{
-		at:      cursor.At.UTC().Format(timeLayout),
-		entry:   cursor.Entry.ID,
-		message: cursor.Message,
-	}, nil
-}
-
-func (s *Store) changeCursor(
-	workspace int64, key changeKey,
-) (api.ChangeCursor, error) {
-	at, err := parseTime(key.at)
-	if err != nil {
-		return api.ChangeCursor{}, err
-	}
-	return api.ChangeCursor{
-		At:      at,
-		Entry:   s.mustRef(Key{Workspace: workspace, ID: key.entry}),
-		Message: key.message,
-	}, nil
-}
-
-// changesSQL reads the changes of workspace ?1 after the change key
-// (?2, ?3, ?4), at most ?5 of them, oldest first.
+// changesSQL reads the changes of workspace ?1 after revision ?2, at
+// most ?3 of them, oldest first.
 const changesSQL = `
-	SELECT at, entry_id, number FROM (
-		SELECT modified_utc AS at, id AS entry_id, 0 AS number
+	SELECT revision, entry_id, number FROM (
+		SELECT revision, id AS entry_id, 0 AS number
 		FROM entries
-		WHERE workspace_id = ?1 AND (modified_utc, id) > (?2, ?3)
-		ORDER BY modified_utc, id LIMIT ?5
+		WHERE workspace_id = ?1 AND revision > ?2
+		ORDER BY revision LIMIT ?3
 	)
 	UNION ALL
-	SELECT at, entry_id, number FROM (
-		SELECT modified_utc AS at, entry_id, id AS number
+	SELECT revision, entry_id, number FROM (
+		SELECT revision, entry_id, id AS number
 		FROM entry_messages
-		WHERE workspace_id = ?1
-			AND (modified_utc, entry_id, id) > (?2, ?3, ?4)
-		ORDER BY modified_utc, entry_id, id LIMIT ?5
+		WHERE workspace_id = ?1 AND revision > ?2
+		ORDER BY revision LIMIT ?3
 	)
-	ORDER BY at, entry_id, number LIMIT ?5`
-
-// latestChangeSQL reads the key of the latest change in workspace ?1.
-// The messages side finds the latest stamp, then breaks a tie between
-// the messages stamped then. Ordering by all three columns at once
-// makes SQLite sort every message of the workspace, and left to
-// itself, SQLite walks the messages in entry order to find the stamp.
-const latestChangeSQL = `
-	SELECT at, entry_id, number FROM (
-		SELECT modified_utc AS at, id AS entry_id, 0 AS number
-		FROM entries WHERE workspace_id = ?1
-		ORDER BY modified_utc DESC, id DESC LIMIT 1
-	)
-	UNION ALL
-	SELECT at, entry_id, number FROM (
-		SELECT modified_utc AS at, entry_id, id AS number
-		FROM entry_messages INDEXED BY entry_messages_modified
-		WHERE workspace_id = ?1 AND modified_utc = (
-			SELECT max(modified_utc) FROM entry_messages
-			WHERE workspace_id = ?1)
-		ORDER BY entry_id DESC, id DESC LIMIT 1
-	)
-	ORDER BY at DESC, entry_id DESC, number DESC LIMIT 1`
+	ORDER BY revision LIMIT ?3`
 
 func (v view) readChangeKeys(
-	ctx context.Context, query string, args ...any,
+	ctx context.Context, workspace int64, since int64, limit int,
 ) ([]changeKey, error) {
-	rows, err := v.tx.QueryContext(ctx, query, args...)
+	rows, err := v.tx.QueryContext(ctx, changesSQL, workspace, since, limit)
 	if err != nil {
 		return nil, fmt.Errorf("reading changes: %w", err)
 	}
@@ -111,7 +64,9 @@ func (v view) readChangeKeys(
 	var keys []changeKey
 	for rows.Next() {
 		var key changeKey
-		if err := rows.Scan(&key.at, &key.entry, &key.message); err != nil {
+		if err := rows.Scan(
+			&key.revision, &key.entry, &key.message,
+		); err != nil {
 			return nil, fmt.Errorf("reading changes: %w", err)
 		}
 		keys = append(keys, key)
@@ -119,27 +74,22 @@ func (v view) readChangeKeys(
 	return keys, rows.Err()
 }
 
-// Changes returns up to limit changes in a workspace after the cursor
-// since, oldest first.
+// Changes returns up to limit changes in a workspace after the
+// revision since, oldest first.
 func (s *Store) Changes(
 	ctx context.Context,
 	access Access,
 	workspace int64,
-	since api.ChangeCursor,
+	since int64,
 	limit int,
 ) (api.ChangesPage, error) {
-	from, err := s.changeKeyOf(workspace, since)
-	if err != nil {
-		return api.ChangesPage{}, err
-	}
 	v, err := s.begin(ctx, access, true)
 	if err != nil {
 		return api.ChangesPage{}, fmt.Errorf("reading changes: %w", err)
 	}
 	defer v.tx.Rollback()
 
-	keys, err := v.readChangeKeys(ctx, changesSQL, workspace, from.at,
-		from.entry, from.message, limit+1)
+	keys, err := v.readChangeKeys(ctx, workspace, since, limit+1)
 	if err != nil {
 		return api.ChangesPage{}, err
 	}
@@ -176,10 +126,7 @@ func (s *Store) Changes(
 		page.Changes = append(page.Changes, change)
 	}
 	if len(keys) > 0 {
-		page.Cursor, err = s.changeCursor(workspace, keys[len(keys)-1])
-		if err != nil {
-			return api.ChangesPage{}, err
-		}
+		page.Cursor = keys[len(keys)-1].revision
 	}
 	if err := v.tx.Commit(); err != nil {
 		return api.ChangesPage{}, fmt.Errorf("finishing changes read: %w",
@@ -188,19 +135,14 @@ func (s *Store) Changes(
 	return page, nil
 }
 
-// LatestChange returns the cursor of the latest change in a
-// workspace, or the zero cursor when it has none.
-func (s *Store) LatestChange(
-	ctx context.Context, workspace int64,
-) (api.ChangeCursor, error) {
-	v, err := s.begin(ctx, NewAccess(workspace), true)
-	if err != nil {
-		return api.ChangeCursor{}, fmt.Errorf("reading changes: %w", err)
+// LatestRevision returns the revision of the latest change on the
+// server, in any workspace.
+func (s *Store) LatestRevision(ctx context.Context) (int64, error) {
+	var revision int64
+	if err := s.reads.QueryRowContext(ctx, `
+		SELECT revision FROM revision_counter`,
+	).Scan(&revision); err != nil {
+		return 0, fmt.Errorf("reading the latest revision: %w", err)
 	}
-	defer v.tx.Rollback()
-	keys, err := v.readChangeKeys(ctx, latestChangeSQL, workspace)
-	if err != nil || len(keys) == 0 {
-		return api.ChangeCursor{}, err
-	}
-	return s.changeCursor(workspace, keys[0])
+	return revision, nil
 }

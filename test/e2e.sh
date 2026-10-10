@@ -424,10 +424,13 @@ check_equal "your own entry can still be withdrawn" "Edited entry [$reply]." \
 private_changes="$(ws wait --since 0 --workspace personal --timeout 1s)"
 check "wait lists a workspace's changes from the start" "[p2-m1]" \
     "$private_changes"
+check "wait names the workspace to wait on in" "--workspace personal" \
+    "$private_changes"
 private_cursor="$(echo "$private_changes" |
-    sed -n 's/^Cursor: \([^ ]*\) .*/\1/p')"
-check "a cursor picks its workspace" "No changes after $private_cursor" \
-    "$(ws wait --since "$private_cursor" --timeout 1s)"
+    sed -n 's/^Cursor: \([0-9]*\) .*/\1/p')"
+check "a wait from the last cursor finds nothing new" \
+    "No changes after $private_cursor" \
+    "$(ws wait --since "$private_cursor" --workspace personal --timeout 1s)"
 (sleep 1.5 && ws chat send "$chat" "Changed" >/dev/null) &
 sender_pid=$!
 check "a wait from now returns when anything changes" "[$chat-m5]" \
