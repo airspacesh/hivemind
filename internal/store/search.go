@@ -63,9 +63,8 @@ const (
 	// ViewFlat lists every matching entry by its own change time.
 	ViewFlat View = iota
 	// ViewTopics lists the top-level entries of a workspace by the
-	// latest change anywhere in their trees. An entry whose parent is
-	// in another workspace is top-level in its own. A superseded entry
-	// stays while a current entry is under it, as context for it.
+	// latest change anywhere in their trees. A superseded entry stays
+	// while a current entry is under it, as context for it.
 	ViewTopics
 )
 
