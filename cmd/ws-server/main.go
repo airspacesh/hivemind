@@ -191,6 +191,7 @@ func (h *handler) routes() http.Handler {
 	route("POST /api/workspaces/{workspace}/entries", h.addEntry)
 	route("GET /api/workspaces/{workspace}/projects", h.projects)
 	route("GET /api/workspaces/{workspace}/messages", h.overview)
+	route("GET /api/workspaces/{workspace}/changes", h.changes)
 	route("GET /api/entries/{ref}", h.getEntry)
 	route("PATCH /api/entries/{ref}", h.editEntry)
 	route("GET /api/entries/{ref}/tree", h.tree)

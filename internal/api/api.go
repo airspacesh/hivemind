@@ -165,6 +165,25 @@ type ChatOverview struct {
 	Chats []EntryChat `json:"chats"`
 }
 
+// Change is an entry added or edited, or a message posted or edited
+// in an entry's chat. Message is nil for a change to the entry
+// itself. Each carries its current content, so an entry or message
+// changed twice after a cursor appears once, at its latest change.
+type Change struct {
+	Entry   ListedEntry `json:"entry"`
+	Message *Message    `json:"message,omitempty"`
+}
+
+// ChangesPage holds a workspace's changes after a cursor, oldest
+// first. Cursor marks the last change in the page, or is the cursor
+// read from when the page is empty. More says whether changes follow
+// it.
+type ChangesPage struct {
+	Changes []Change     `json:"changes"`
+	Cursor  ChangeCursor `json:"cursor"`
+	More    bool         `json:"more"`
+}
+
 type AddEntryRequest struct {
 	Project  string            `json:"project"`
 	Subject  string            `json:"subject"`

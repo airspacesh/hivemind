@@ -68,7 +68,8 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrInvalidFilter),
 		errors.Is(err, store.ErrInvalidTreeLimit),
-		errors.Is(err, store.ErrInvalidProjectLimit):
+		errors.Is(err, store.ErrInvalidProjectLimit),
+		errors.Is(err, store.ErrInvalidCursor):
 		status, code, message = http.StatusBadRequest,
 			api.CodeBadRequest, err.Error()
 	case errors.Is(err, store.ErrUnknownPrefix):

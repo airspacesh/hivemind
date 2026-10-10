@@ -45,7 +45,8 @@ var singleQueryParameters = map[string]bool{
 	"under":              true,
 }
 
-// chatQueryParameters are the parameters of a chat read.
+// chatQueryParameters are the parameters of a chat read, and of the
+// changes feed.
 var chatQueryParameters = map[string]bool{
 	"since":  true,
 	"latest": true,
