@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -379,5 +380,65 @@ func printOverview(overview api.ChatOverview, workspace string) {
 		for _, m := range chat.Messages {
 			printMessage(m, "  ", layout)
 		}
+	}
+}
+
+// withThousands writes a count with commas between groups of three
+// digits, like 1,204.
+func withThousands(n int) string {
+	digits := strconv.Itoa(n)
+	for i := len(digits) - 3; i > 0; i -= 3 {
+		digits = digits[:i] + "," + digits[i:]
+	}
+	return digits
+}
+
+// shareOf shows part as a whole percentage of total, or <1% for a part
+// too small to round to 1%.
+func shareOf(part, total int) string {
+	if part == 0 {
+		return "0%"
+	}
+	percent := float64(part) * 100 / float64(total)
+	if percent < 0.5 {
+		return "<1%"
+	}
+	return fmt.Sprintf("%.0f%%", percent)
+}
+
+// printProjects prints one project a line, in columns, with its share
+// of the workspace's recent entries.
+func printProjects(result api.ProjectsResponse) {
+	var times []time.Time
+	nameWidth, countWidth := 0, 0
+	for _, project := range result.Projects {
+		times = append(times, project.Latest)
+		nameWidth = max(nameWidth, len(project.Name))
+		countWidth = max(countWidth,
+			len(withThousands(project.RecentEntries)))
+	}
+	layout := timeLayout(times)
+	days := int(time.Since(result.RecentSince).Round(24*time.Hour) /
+		(24 * time.Hour))
+	fmt.Printf("Projects by latest activity, with entries from the last "+
+		"%d days:\n", days)
+	for _, project := range result.Projects {
+		noun := "entries"
+		if project.RecentEntries == 1 {
+			noun = "entry"
+		}
+		fmt.Printf("%-*s   %s   %*s %-7s  %4s\n", nameWidth, project.Name,
+			project.Latest.Local().Format(layout), countWidth,
+			withThousands(project.RecentEntries), noun,
+			shareOf(project.RecentEntries, result.RecentEntries))
+	}
+	more := result.Count - len(result.Projects)
+	noun := "projects"
+	if more == 1 {
+		noun = "project"
+	}
+	if more > 0 {
+		fmt.Printf("--- %d more %s (use --limit %d to view all) ---\n",
+			more, noun, result.Count)
 	}
 }

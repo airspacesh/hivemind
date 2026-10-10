@@ -66,7 +66,8 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	message := "internal server error"
 	switch {
 	case errors.Is(err, store.ErrInvalidFilter),
-		errors.Is(err, store.ErrInvalidTreeLimit):
+		errors.Is(err, store.ErrInvalidTreeLimit),
+		errors.Is(err, store.ErrInvalidProjectLimit):
 		status, code, message = http.StatusBadRequest,
 			api.CodeBadRequest, err.Error()
 	case errors.Is(err, store.ErrUnknownPrefix):

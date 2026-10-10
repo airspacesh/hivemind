@@ -111,14 +111,20 @@ CREATE INDEX entries_type_search ON entries(type_lower)`
 const createSubjectIndex = `
 CREATE INDEX entries_subject_search ON entries(subject_lower)`
 
-// createProjectIndex lists a workspace's projects, each with its count
-// of entries and its latest activity, without reading the entries. No
+// createProjectIndex finds a workspace's projects, and each one's
+// latest activity, by seeking rather than reading the entries. No
 // index serves the project filters. A listing reads entries newest
 // first and stops at a full page, which an index on project_lower would
 // turn into reading and sorting every entry of the project.
 const createProjectIndex = `
 CREATE INDEX entries_project_activity
 ON entries(workspace_id, project, activity_utc)`
+
+// createProjectCreatedIndex counts a project's entries created since a
+// time by reading only those entries' part of the index.
+const createProjectCreatedIndex = `
+CREATE INDEX entries_project_created
+ON entries(workspace_id, project, created_utc)`
 
 // createLinks defines named links between entries, which may join
 // workspaces. Each link is stored once, on its source, and
@@ -282,7 +288,8 @@ var schemaSteps = []schemaStep{
 		statements: []string{
 			createWorkspaces, createEntries, createMetadata,
 			createCreatedIndex, createModifiedIndex, createTypeIndex,
-			createSubjectIndex, createProjectIndex, createLinks,
+			createSubjectIndex, createProjectIndex,
+			createProjectCreatedIndex, createLinks,
 			createLinkTargetIndex, createOneParentIndex, createMessages,
 			createMessageOrderIndex, createMessageModifiedIndex,
 			createEntryText, secureEntryText, createEntryTextInsert,
@@ -296,6 +303,8 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createModifiedIndex)},
 			{"index", "entries_project_activity", "entries",
 				normalizeSchemaSQL(createProjectIndex)},
+			{"index", "entries_project_created", "entries",
+				normalizeSchemaSQL(createProjectCreatedIndex)},
 			{"index", "entries_subject_search", "entries",
 				normalizeSchemaSQL(createSubjectIndex)},
 			{"index", "entries_type_search", "entries",
@@ -760,6 +769,10 @@ func parseTime(value string) (time.Time, error) {
 	return parsed, nil
 }
 
+func formatTime(t time.Time) string {
+	return t.UTC().Format(timeLayout)
+}
+
 func nowUTC() string {
-	return time.Now().UTC().Format(timeLayout)
+	return formatTime(time.Now())
 }

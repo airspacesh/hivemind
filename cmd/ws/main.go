@@ -40,7 +40,7 @@ Usage:
   {program} recent [--flat] [search filters] [--workspace <name>]
   {program} search [<text>] [--under <ref>] [search filters] [--workspace <name>]
   {program} list-workspaces
-  {program} list-projects [--workspace <name>]
+  {program} list-projects [--limit 30] [--workspace <name>]
   {program} chat send <ref> <message>
   {program} chat recent [<ref>] [--limit 20] [--workspace <name>]
   {program} chat read <ref> --since <n> [--limit 20]
@@ -108,9 +108,11 @@ Listings:
   change. '{program} search' lists every level, with the path to each
   match. --under <ref> keeps a search to an entry and what is beneath
   it. '{program} tree <ref>' shows the path to an entry, then its
-  subtree, at most --limit entries, marking where it was cut. Times show
-  as 13:20 when an output's times all fall on one day, or else as
-  23/07/2025 13:20.
+  subtree, at most --limit entries, marking where it was cut.
+  '{program} list-projects' lists the --limit most recently active
+  projects, each with the number of its entries created in the last 90
+  days, and their share of the workspace's. Times show as 13:20 when an
+  output's times all fall on one day, or else as 23/07/2025 13:20.
 
 Search filters (recent and search):
   --subject --body --content --type --project --key --meta <key>=<value>

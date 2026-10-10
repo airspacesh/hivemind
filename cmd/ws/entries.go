@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/user"
 	"strings"
-	"time"
 
 	"github.com/airspacesh/workstream/internal/api"
 )
@@ -192,14 +191,19 @@ func (c *client) collectLinks(t target, p *parsedArgs) ([]api.Link, error) {
 	return links, nil
 }
 
-func (c *client) projects(t target) (api.ProjectsResponse, error) {
+func (c *client) projects(
+	t target, limit int,
+) (api.ProjectsResponse, error) {
 	var projects api.ProjectsResponse
-	err := c.do(t, "GET", workspacePath(t, "/projects"), nil, &projects)
+	query := url.Values{"limit": {fmt.Sprint(limit)}}.Encode()
+	err := c.do(t, "GET", workspacePath(t, "/projects?"+query), nil,
+		&projects)
 	return projects, err
 }
 
-// project reads one project of a workspace, which costs the server
-// time in proportion to that project, not to the workspace.
+// project reads one project of a workspace, with its count of every
+// entry, which costs the server time in proportion to that project, not
+// to the workspace.
 func (c *client) project(
 	t target, name string,
 ) (api.ProjectsResponse, error) {
@@ -217,7 +221,7 @@ func (c *client) noticeNewProject(t target, project string) error {
 		return err
 	}
 	for _, existing := range result.Projects {
-		if existing.Name == project && existing.Entries == 1 {
+		if existing.Name == project && *existing.Entries == 1 {
 			fmt.Printf("This is the first entry in project %q. Run '%s "+
 				"list-projects' if you meant an existing one.\n", project,
 				programName)
@@ -596,18 +600,26 @@ func cmdSearch(c *client, command string, args []string) error {
 }
 
 func cmdListProjects(c *client, args []string) error {
-	p, err := parseArgs(args, flagSpec{strs: []string{"--workspace"}})
+	p, err := parseArgs(args, flagSpec{
+		strs: []string{"--limit", "--workspace"},
+	})
 	if err != nil {
 		return err
 	}
 	if len(p.pos) != 0 {
-		return usageError("list-projects [--workspace <name>]")
+		return usageError("list-projects [--limit 30] [--workspace <name>]")
+	}
+	limit := 30
+	if p.has("--limit") {
+		if limit, err = parsePositive("--limit", p.strs["--limit"]); err != nil {
+			return err
+		}
 	}
 	workspace, err := c.config.chooseWorkspace(p.strs["--workspace"])
 	if err != nil {
 		return err
 	}
-	result, err := c.projects(targetOf(workspace))
+	result, err := c.projects(targetOf(workspace), limit)
 	if err != nil {
 		return err
 	}
@@ -615,15 +627,6 @@ func cmdListProjects(c *client, args []string) error {
 		fmt.Printf("Workspace %s has no projects yet.\n", workspace.name)
 		return nil
 	}
-
-	var times []time.Time
-	for _, project := range result.Projects {
-		times = append(times, project.Latest)
-	}
-	layout := timeLayout(times)
-	for _, project := range result.Projects {
-		fmt.Printf("%s: %d entries, latest %s\n", project.Name,
-			project.Entries, project.Latest.Local().Format(layout))
-	}
+	printProjects(result)
 	return nil
 }

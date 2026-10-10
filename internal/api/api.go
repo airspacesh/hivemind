@@ -254,15 +254,29 @@ type ErrorResponse struct {
 }
 
 type Project struct {
-	Name    string `json:"name"`
-	Entries int    `json:"entries"`
+	Name string `json:"name"`
 	// Latest is the latest change to an entry of the project or to
 	// its chat.
 	Latest time.Time `json:"latest"`
+	// RecentEntries counts the project's entries created since the
+	// response's RecentSince.
+	RecentEntries int `json:"recent_entries"`
+	// Entries counts every entry of the project. Only a request that
+	// names the project gets it, since counting every project's entries
+	// takes time in proportion to the workspace.
+	Entries *int `json:"entries,omitempty"`
 }
 
+// ProjectsResponse lists projects, the most recently active first.
 type ProjectsResponse struct {
 	Projects []Project `json:"projects"`
+	// Count is the number of projects the request matched, including
+	// any the limit left out.
+	Count       int       `json:"count"`
+	RecentSince time.Time `json:"recent_since"`
+	// RecentEntries sums the RecentEntries of every project the request
+	// matched, including any the limit left out.
+	RecentEntries int `json:"recent_entries"`
 }
 
 type StatusResponse struct {

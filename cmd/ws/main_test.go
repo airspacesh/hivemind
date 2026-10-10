@@ -300,6 +300,47 @@ func TestWorkspaceChoiceOrder(t *testing.T) {
 	}
 }
 
+func TestListProjectsShowsSharesOfRecentEntries(t *testing.T) {
+	at := func(text string) time.Time {
+		moment, err := time.Parse("2006-01-02 15:04", text)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return moment
+	}
+	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		reply(w, http.StatusOK, api.ProjectsResponse{
+			Projects: []api.Project{
+				{Name: "duck-pond", Latest: at("2026-10-10 20:41"),
+					RecentEntries: 1204},
+				{Name: "heron", Latest: at("2026-10-09 14:10"),
+					RecentEntries: 4},
+				{Name: "nest", Latest: at("2026-10-08 09:15"),
+					RecentEntries: 1},
+				{Name: "old-lake", Latest: at("2026-05-01 10:00")},
+			},
+			Count:         6,
+			RecentSince:   time.Now().Add(-90 * 24 * time.Hour),
+			RecentEntries: 3200,
+		})
+	})
+	config := writeConfig(t, "workspaces:\n  default:\n    server: "+
+		server.URL+"\n", 0o600)
+
+	got := ws(t, config, "list-projects", "--limit", "4")
+	want := `Projects by latest activity, with entries from the last 90 days:
+duck-pond   10/10/2026 20:41   1,204 entries   38%
+heron       09/10/2026 14:10       4 entries   <1%
+nest        08/10/2026 09:15       1 entry     <1%
+old-lake    01/05/2026 10:00       0 entries    0%
+--- 2 more projects (use --limit 6 to view all) ---
+`
+	if !got.ok || got.stdout != want {
+		t.Fatalf("list-projects printed\n%s\nwant\n%s%s", got.stdout, want,
+			got.stderr)
+	}
+}
+
 func TestConfiguredPrefixSkipsAskingServers(t *testing.T) {
 	first := newFakeServer(t, unexpected(t))
 	second := newFakeServer(t, answering("r7"))

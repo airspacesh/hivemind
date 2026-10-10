@@ -223,8 +223,8 @@ check "the project is not metadata" "project is not a metadata key" \
 check "the first entry in a project is noticed" \
     'first entry in project "lake-shore"' \
     "$(ws add note "Shore duck" --project lake-shore --no-recent)"
-check "list-projects lists each project" "lake-shore: 1 entries" \
-    "$(ws list-projects)"
+check "list-projects counts a project's recent entries" "1 entry" \
+    "$(ws list-projects | grep lake-shore)"
 
 # Links: one parent, supersession hides the older entry, no loops.
 topic="$(ws add idea "Topic" --project links --no-recent | added)"

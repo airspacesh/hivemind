@@ -236,9 +236,21 @@ func (h *handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+const defaultProjectLimit = 30
+
 func (h *handler) projects(w http.ResponseWriter, r *http.Request) {
-	query, ok := parseQueryOf(w, r, "name")
+	query, ok := parseQueryOf(w, r, "name", "limit")
 	if !ok {
+		return
+	}
+	if query.Has("name") && query.Has("limit") {
+		writeBadRequest(w, "give name or limit, not both")
+		return
+	}
+	limit, err := queryInteger(query, "limit", defaultProjectLimit,
+		1, store.MaxProjectLimit)
+	if err != nil {
+		writeBadRequest(w, err.Error())
 		return
 	}
 	access, ok := h.access(w, r)
@@ -249,13 +261,20 @@ func (h *handler) projects(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	projects, err := h.store.Projects(r.Context(), workspace.ID,
-		query.Get("name"))
+
+	var projects api.ProjectsResponse
+	if query.Has("name") {
+		projects, err = h.store.Project(r.Context(), workspace.ID,
+			query.Get("name"), time.Now())
+	} else {
+		projects, err = h.store.Projects(r.Context(), workspace.ID,
+			int(limit), time.Now())
+	}
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, api.ProjectsResponse{Projects: projects})
+	writeJSON(w, http.StatusOK, projects)
 }
 
 func (h *handler) addEntry(w http.ResponseWriter, r *http.Request) {

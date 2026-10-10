@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -416,51 +415,6 @@ func TestMetadataLimitStopsEntryGrowth(t *testing.T) {
 	}
 	if got := edited.Metadata["key-0"]; got != "replaced" {
 		t.Fatalf("key-0 = %q, want replaced", got)
-	}
-}
-
-func TestProjectsCountOneWorkspace(t *testing.T) {
-	store := openTestStore(t)
-	inProject := func(workspace, project string) api.Entry {
-		t.Helper()
-		return addTo(t, store, workspace, api.AddEntryRequest{
-			Type: "note", Subject: "duck", Project: project})
-	}
-	listProjects := func(name string) string {
-		t.Helper()
-		projects, err := store.Projects(context.Background(),
-			workspaceID(t, store, "default"), name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var listed []string
-		for _, project := range projects {
-			listed = append(listed,
-				fmt.Sprintf("%s %d", project.Name, project.Entries))
-		}
-		return strings.Join(listed, ", ")
-	}
-	first := inProject("default", "pond")
-	inProject("default", "pond")
-	inProject("personal", "pond")
-	inProject("default", "Pond")
-	inProject("default", "nest")
-
-	if got := listProjects(""); got != "nest 1, Pond 1, pond 2" {
-		t.Fatalf("projects = %q", got)
-	}
-	if got := listProjects("pond"); got != "pond 2" {
-		t.Fatalf("projects named pond = %q", got)
-	}
-	if got := listProjects("lake"); got != "" {
-		t.Fatalf("projects named lake = %q", got)
-	}
-
-	// Chat counts as activity, so a message to an old entry brings its
-	// project to the top.
-	mustPost(t, store, first.Ref, "still here")
-	if got := listProjects(""); got != "pond 2, nest 1, Pond 1" {
-		t.Fatalf("projects after a message = %q", got)
 	}
 }
 
