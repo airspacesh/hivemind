@@ -93,7 +93,6 @@ func (v view) findTextCandidates(
 	ctx context.Context,
 	workspace int64,
 	filter Filter,
-	chat bool,
 	limit int,
 ) ([]int64, bool, error) {
 	var entryQuery indexQuery
@@ -104,7 +103,7 @@ func (v view) findTextCandidates(
 		SELECT rowid & 0xffffffff FROM entry_text
 		WHERE entry_text MATCH ? AND rowid BETWEEN ? AND ? LIMIT ?`,
 		entryQuery, workspace, limit)
-	if err != nil || !ok || !chat {
+	if err != nil || !ok || !searchesChat(filter) {
 		return entries, ok, err
 	}
 

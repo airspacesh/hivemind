@@ -653,8 +653,7 @@ func (v view) searchFlat(
 	if len(ranked) < count && since != "" {
 		scope := matchScope{}
 		scope.candidates, scope.indexed, err = v.findTextCandidates(ctx,
-			workspace, filter, searchesChat(filter),
-			candidatesPerChange*walked)
+			workspace, filter, candidatesPerChange*walked)
 		if err != nil {
 			return api.SearchResult{}, err
 		}
