@@ -53,12 +53,11 @@ func run(args []string) error {
 	}
 	databasePath := filepath.Join(config.Data, "ws.db")
 	workTimeout := serverWorkTimeout(config.Timeout)
-	openContext, cancel := context.WithTimeout(
-		context.Background(), config.Timeout,
-	)
-	stream, err := store.Open(openContext, databasePath, workTimeout,
-		config.workspaces())
-	cancel()
+	// The request timeout does not bound opening, since the integrity
+	// check reads the whole database and takes time in proportion to
+	// it. Waits for locks are bounded by the busy timeout instead.
+	stream, err := store.Open(context.Background(), databasePath,
+		workTimeout, config.workspaces())
 	if err != nil {
 		return fmt.Errorf("opening database %s: %w", databasePath, err)
 	}
