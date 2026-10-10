@@ -3,6 +3,7 @@ package store
 import (
 	"cmp"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
@@ -335,9 +336,21 @@ func (s *Store) Search(
 	return result, nil
 }
 
-// messagesPerMatch is how many matching messages a search shows under
-// each entry.
-const messagesPerMatch = 3
+const (
+	// changesBeforeIndex and changesPerMatch bound the newest changes
+	// a flat search walks for a page before it looks its text up in
+	// the text indexes. Common text fills a page from the newest
+	// changes sooner than the indexes can list where it is.
+	changesBeforeIndex = 2048
+	changesPerMatch    = 32
+	// candidatesPerChange bounds the candidates a search reads from
+	// the text indexes, per change it walked first, before it walks
+	// every change instead.
+	candidatesPerChange = 8
+	// messagesPerMatch is how many matching messages a search shows
+	// under each entry.
+	messagesPerMatch = 3
+)
 
 // searchesChat reports whether a flat search matches messages as well
 // as entries, which it does when it requires some text, unless it
@@ -364,18 +377,29 @@ func (builder *whereBuilder) keepTo(workspace int64, filter Filter) {
 	}
 }
 
+// matchScope narrows the matches a flat search reads.
+type matchScope struct {
+	// since, unless empty, keeps to the matches at or after a time.
+	since string
+	// indexed keeps to the candidates, the entries the text indexes
+	// found, and their chats.
+	indexed    bool
+	candidates []int64
+}
+
 // matchQuery selects a flat search's matches as entry ids, each with
 // the time it ranks by, newest first. A match is an entry the search
 // matches, or when it searches chat, a message the search's text
-// matches in the chat of an entry the rest of the search matches. It
-// walks the entries and messages newest first, so a reader can stop
-// once it has a page.
+// matches in the chat of an entry the rest of the search matches.
+// Unless it keeps to candidates, it walks the entries and messages
+// newest first, so a reader can stop once it has a page.
 func matchQuery(
 	workspace int64,
 	filter Filter,
 	from string,
 	fromArgs []any,
 	where whereBuilder,
+	scope matchScope,
 ) (string, []any, error) {
 	entryKey, messageKey, join := `e.modified_utc`, `m.modified_utc`, `JOIN`
 	if filter.OrderByCreation {
@@ -385,6 +409,18 @@ func matchQuery(
 		// sorting them instead.
 		entryKey, messageKey = `e.created_utc`, `e.created_utc`
 		join = `CROSS JOIN`
+	}
+	if scope.indexed {
+		// Reading the candidates first, and each one's chat within,
+		// keeps SQLite from walking every entry to keep them in order.
+		from = `json_each(?) AS candidate CROSS JOIN ` + from
+		fromArgs = append([]any{idsJSON(scope.candidates)}, fromArgs...)
+		where.clauses = append(where.clauses, `e.id = candidate.value`)
+		join = `CROSS JOIN`
+	}
+	if scope.since != "" {
+		where.clauses = append(where.clauses, entryKey+` >= ?`)
+		where.args = append(where.args, scope.since)
 	}
 	where.keepTo(workspace, filter)
 	query := `SELECT e.id, ` + entryKey + ` AS at FROM ` + from + where.sql()
@@ -404,12 +440,47 @@ func matchQuery(
 		return "", nil, err
 	}
 	messageWhere.keepTo(workspace, filter)
+	if scope.indexed {
+		messageWhere.clauses = append(messageWhere.clauses,
+			`e.id = candidate.value`)
+	}
+	if scope.since != "" {
+		messageWhere.clauses = append(messageWhere.clauses,
+			messageKey+` >= ?`)
+		messageWhere.args = append(messageWhere.args, scope.since)
+	}
 	query += ` UNION ALL SELECT e.id, ` + messageKey + ` AS at FROM ` +
 		from + ` ` + join + ` entry_messages AS m
 			ON m.workspace_id = e.workspace_id AND m.entry_id = e.id` +
 		messageWhere.sql() + ` ORDER BY at DESC`
 	args = append(append(args, fromArgs...), messageWhere.args...)
 	return query, args, nil
+}
+
+// walkStart is the time of the n-th newest change a flat search ranks
+// matches by, or empty when there are fewer.
+func (v view) walkStart(
+	ctx context.Context, workspace int64, filter Filter, n int,
+) (string, error) {
+	changes := `SELECT modified_utc AS at FROM entries
+		WHERE workspace_id = ?1`
+	if filter.OrderByCreation {
+		changes = `SELECT created_utc AS at FROM entries
+			WHERE workspace_id = ?1`
+	} else if searchesChat(filter) {
+		changes += ` UNION ALL SELECT modified_utc FROM entry_messages
+			WHERE workspace_id = ?1`
+	}
+	var start string
+	err := v.tx.QueryRowContext(ctx, changes+` ORDER BY at DESC
+		LIMIT 1 OFFSET ?2`, workspace, n-1).Scan(&start)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("finding where a search starts: %w", err)
+	}
+	return start, nil
 }
 
 // match is an entry a search matched, and the time of its newest
@@ -419,12 +490,24 @@ type match struct {
 	at string
 }
 
-// rankMatches reads matches newest first until it has count entries,
-// and returns the entries by their newest match, then by id, the
-// newest first.
+// rankMatches reads a flat search's matches within a scope, newest
+// first, until it has count entries, and returns the entries by their
+// newest match, then by id, the newest first.
 func (v view) rankMatches(
-	ctx context.Context, query string, args []any, count int,
+	ctx context.Context,
+	workspace int64,
+	filter Filter,
+	from string,
+	fromArgs []any,
+	where whereBuilder,
+	scope matchScope,
+	count int,
 ) ([]match, error) {
+	query, args, err := matchQuery(workspace, filter, from, fromArgs, where,
+		scope)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := v.tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("reading search results: %w", err)
@@ -508,14 +591,32 @@ func (v view) searchFlat(
 	fromArgs []any,
 	where whereBuilder,
 ) (api.SearchResult, error) {
-	query, args, err := matchQuery(workspace, filter, from, fromArgs, where)
+	count := filter.Offset + filter.Limit + 1
+	walked := changesBeforeIndex + changesPerMatch*count
+	since, err := v.walkStart(ctx, workspace, filter, walked)
 	if err != nil {
 		return api.SearchResult{}, err
 	}
-	ranked, err := v.rankMatches(ctx, query, args,
-		filter.Offset+filter.Limit+1)
+	ranked, err := v.rankMatches(ctx, workspace, filter, from, fromArgs, where,
+		matchScope{since: since}, count)
 	if err != nil {
 		return api.SearchResult{}, err
+	}
+	// The newest changes held too few matches for a page, so the text
+	// indexes find the rest, or else the walk goes on to the oldest.
+	if len(ranked) < count && since != "" {
+		scope := matchScope{}
+		scope.candidates, scope.indexed, err = v.findTextCandidates(ctx,
+			workspace, filter, searchesChat(filter),
+			candidatesPerChange*walked)
+		if err != nil {
+			return api.SearchResult{}, err
+		}
+		ranked, err = v.rankMatches(ctx, workspace, filter, from, fromArgs,
+			where, scope, count)
+		if err != nil {
+			return api.SearchResult{}, err
+		}
 	}
 
 	ids := make([]int64, 0, len(ranked))

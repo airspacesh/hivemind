@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -178,11 +179,94 @@ const createMessageModifiedIndex = `
 CREATE INDEX entry_messages_modified
 ON entry_messages(workspace_id, modified_utc)`
 
+// The text indexes hold the trigrams of the lowered text a search
+// matches, so a search finds the entries and messages that hold a
+// pattern's literal text without reading them all. They are
+// contentless, so they hold no copy of the text, and keep no
+// positions, so they cannot tell where in a row its trigrams are. Each
+// row is keyed by its workspace id in the high 32 bits and its entry
+// id or message post_order in the low 32. secure-delete makes FTS5
+// remove the trigrams of overwritten text at once rather than at a
+// later merge, as the secure_delete pragma zeroes overwritten text in
+// the tables.
+const createEntryText = `
+CREATE VIRTUAL TABLE entry_text USING fts5(
+	subject_lower, body_lower,
+	content='', columnsize=0, detail=none,
+	tokenize='trigram case_sensitive 1'
+)`
+
+const createMessageText = `
+CREATE VIRTUAL TABLE message_text USING fts5(
+	body_lower,
+	content='', columnsize=0, detail=none,
+	tokenize='trigram case_sensitive 1'
+)`
+
+const secureEntryText = `
+INSERT INTO entry_text (entry_text, rank) VALUES ('secure-delete', 1)`
+
+const secureMessageText = `
+INSERT INTO message_text (message_text, rank) VALUES ('secure-delete', 1)`
+
+// A contentless index forgets a row through the FTS5 'delete' command,
+// given the text it indexed.
+const createEntryTextInsert = `
+CREATE TRIGGER entry_text_insert AFTER INSERT ON entries BEGIN
+	INSERT INTO entry_text (rowid, subject_lower, body_lower)
+	VALUES ((new.workspace_id << 32) | new.id, new.subject_lower,
+		new.body_lower);
+END`
+
+const createEntryTextUpdate = `
+CREATE TRIGGER entry_text_update AFTER UPDATE OF subject, body ON entries
+BEGIN
+	INSERT INTO entry_text (entry_text, rowid, subject_lower, body_lower)
+	VALUES ('delete', (old.workspace_id << 32) | old.id, old.subject_lower,
+		old.body_lower);
+	INSERT INTO entry_text (rowid, subject_lower, body_lower)
+	VALUES ((new.workspace_id << 32) | new.id, new.subject_lower,
+		new.body_lower);
+END`
+
+const createMessageTextInsert = `
+CREATE TRIGGER message_text_insert AFTER INSERT ON entry_messages BEGIN
+	INSERT INTO message_text (rowid, body_lower)
+	VALUES ((new.workspace_id << 32) | new.post_order, lower(new.body));
+END`
+
+const createMessageTextUpdate = `
+CREATE TRIGGER message_text_update AFTER UPDATE OF body ON entry_messages
+BEGIN
+	INSERT INTO message_text (message_text, rowid, body_lower)
+	VALUES ('delete', (old.workspace_id << 32) | old.post_order,
+		lower(old.body));
+	INSERT INTO message_text (rowid, body_lower)
+	VALUES ((new.workspace_id << 32) | new.post_order, lower(new.body));
+END`
+
 type schemaObject struct {
 	typ   string
 	name  string
 	table string
 	defn  string
+}
+
+// textIndexObjects lists a text index and the shadow tables FTS5
+// creates for it, with their definitions as FTS5 writes them.
+func textIndexObjects(name, definition string) []schemaObject {
+	shadow := func(suffix, columns string) schemaObject {
+		table := name + suffix
+		return schemaObject{"table", table, table,
+			"CREATE TABLE '" + table + "'" + columns}
+	}
+	return []schemaObject{
+		{"table", name, name, normalizeSchemaSQL(definition)},
+		shadow("_config", "(k PRIMARY KEY, v) WITHOUT ROWID"),
+		shadow("_data", "(id INTEGER PRIMARY KEY, block BLOB)"),
+		shadow("_idx",
+			"(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"),
+	}
 }
 
 // schemaStep takes a database from one version to the next: from
@@ -201,8 +285,11 @@ var schemaSteps = []schemaStep{
 			createSubjectIndex, createProjectIndex, createLinks,
 			createLinkTargetIndex, createOneParentIndex, createMessages,
 			createMessageOrderIndex, createMessageModifiedIndex,
+			createEntryText, secureEntryText, createEntryTextInsert,
+			createEntryTextUpdate, createMessageText, secureMessageText,
+			createMessageTextInsert, createMessageTextUpdate,
 		},
-		objects: []schemaObject{
+		objects: slices.Concat([]schemaObject{
 			{"index", "entries_created_order", "entries",
 				normalizeSchemaSQL(createCreatedIndex)},
 			{"index", "entries_modified_order", "entries",
@@ -231,7 +318,16 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createMetadata)},
 			{"table", "workspaces", "workspaces",
 				normalizeSchemaSQL(createWorkspaces)},
-		},
+			{"trigger", "entry_text_insert", "entries",
+				normalizeSchemaSQL(createEntryTextInsert)},
+			{"trigger", "entry_text_update", "entries",
+				normalizeSchemaSQL(createEntryTextUpdate)},
+			{"trigger", "message_text_insert", "entry_messages",
+				normalizeSchemaSQL(createMessageTextInsert)},
+			{"trigger", "message_text_update", "entry_messages",
+				normalizeSchemaSQL(createMessageTextUpdate)},
+		}, textIndexObjects("entry_text", createEntryText),
+			textIndexObjects("message_text", createMessageText)),
 	},
 }
 
