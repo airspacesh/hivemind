@@ -158,7 +158,7 @@ func TestTopicsShowTheNewestMessagesInEachTree(t *testing.T) {
 	// An edit keeps the message in its place, so an old message edited
 	// does not become one of the newest.
 	if _, _, err := store.EditMessage(context.Background(),
-		store.mustKey(root.Ref), 1, "first, edited"); err != nil {
+		store.mustKey(root.Ref), 1, ownEdit("first, edited")); err != nil {
 		t.Fatal(err)
 	}
 	treeMessages := map[api.Ref][]api.Message{}
