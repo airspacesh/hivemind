@@ -366,14 +366,24 @@ check_equal "no read returns the old text" "" \
 overview="$(ws chat recent)"
 check_equal "the overview lists the entry with the newest message last" \
     "[$chat] Chat thread" "$(echo "$overview" | grep '^\[' | tail -1)"
-# A send is not a read: read to 1, a peer sends 2, you send 3, and
-# reading on from 1 must still show the peer's message.
+# Read to 1, a peer sends 2, you send 3 with --since 1. The send shows
+# the peer's message and yours, and a wait from its cursor waits for
+# the next message rather than returning yours.
 race="$(ws add "Cursor race" --project chat --no-recent | added)"
 ws chat send "$race" "Read first" >/dev/null
 ws chat send "$race" "From a peer" >/dev/null
-ws chat send "$race" "My own" >/dev/null
-check "reading on from the last read shows a message sent before yours" \
-    "[$race-m2]" "$(ws chat read "$race" --since 1)"
+check_equal "a send with --since shows what others sent, then yours" \
+    "Sent [$race-m3].
+[$race-m2]
+[$race-m3]
+Cursor: 3 (wait for more: ws chat wait $race --since 3)" \
+    "$(ws chat send "$race" "My own" --since 1 |
+        sed 's/^\(\[[a-z0-9-]*\]\).*/\1/')"
+check "a wait from a send's cursor does not return your own message" \
+    "No messages after 3 within 1s." \
+    "$(ws chat wait "$race" --since 3 --timeout 1s)"
+check "a message may start with a dash beside --since" \
+    ": -1 to that" "$(ws chat send --since 3 "$race" "-1 to that")"
 (sleep 1.5 && ws chat send "$chat" "Woken" >/dev/null) &
 sender_pid=$!
 check "a wait returns when a message arrives" "[$chat-m4]" \

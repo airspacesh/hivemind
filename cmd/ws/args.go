@@ -15,6 +15,9 @@ type flagSpec struct {
 	bools  []string          // flags taking no value
 	repeat []string          // repeatable flags taking a value
 	alias  map[string]string // short form -> canonical flag
+	// passUnknown keeps an unknown flag as a positional argument, so
+	// free text that starts with - needs no --.
+	passUnknown bool
 }
 
 type parsedArgs struct {
@@ -91,6 +94,8 @@ func parseArgs(args []string, spec flagSpec) (*parsedArgs, error) {
 			}
 			p.lists[name] = append(p.lists[name], value)
 			p.present[name] = true
+		case spec.passUnknown:
+			p.pos = append(p.pos, arg)
 		default:
 			return nil, fmt.Errorf("unknown flag: %s", name)
 		}

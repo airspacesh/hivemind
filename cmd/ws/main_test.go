@@ -431,6 +431,41 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 	}
 }
 
+// A message sent after yours, between the send and the read that
+// follows it, shows too, and the cursor moves past it, so a wait from
+// the cursor neither repeats nor skips a message.
+func TestSendSinceShowsMessagesThatRaceIt(t *testing.T) {
+	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
+	message := func(number int64, user string) api.Message {
+		return api.Message{Entry: api.Ref{Prefix: "e", ID: 1},
+			Number: number, Created: when, Modified: when, Body: "quack",
+			Origin: api.Origin{User: user}}
+	}
+	server := newFakeServer(t, hosting(func(w http.ResponseWriter,
+		r *http.Request) {
+		switch {
+		case r.Method == "POST":
+			reply(w, http.StatusCreated, message(3, "duck"))
+		case r.URL.Query().Get("since") == "1":
+			reply(w, http.StatusOK, api.ChatPage{Messages: []api.Message{
+				message(2, "heron"), message(3, "duck"),
+				message(4, "heron")}, Cursor: 4})
+		default:
+			refuse(w, http.StatusNotFound, api.CodeRouteNotFound, "no route")
+		}
+	}, "default=e"))
+	config := writeConfig(t, "workspaces:\n  default:\n    server: "+
+		server.URL+"\n", 0o600)
+	got := ws(t, config, "chat", "send", "e1", "quack", "--since", "1")
+	want := "Sent [e1-m3].\n" +
+		"[e1-m2] 05:20 heron: quack\n[e1-m3] 05:20 duck: quack\n" +
+		"[e1-m4] 05:20 heron: quack\n" +
+		"Cursor: 4 (wait for more: ws chat wait e1 --since 4)\n"
+	if !got.ok || got.stdout != want {
+		t.Fatalf("send =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
+	}
+}
+
 // A search shows the messages that matched in an entry's chat beneath
 // it, and how many more matched than the page had room for.
 func TestSearchShowsMatchingMessages(t *testing.T) {

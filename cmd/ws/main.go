@@ -41,7 +41,7 @@ Usage:
   {program} search [<text>] [--under <ref>] [search filters] [--workspace <name>]
   {program} list-workspaces
   {program} list-projects [--limit 30] [--workspace <name>]
-  {program} chat send <ref> <message>
+  {program} chat send <ref> <message> [--since <n>]
   {program} chat recent [<ref>] [--limit 20] [--workspace <name>]
   {program} chat read <ref> --since <n> [--limit 20]
   {program} chat wait <ref> --since <n> [--timeout 10m]
@@ -152,9 +152,9 @@ Chat:
   the order they were sent, and an edit overwrites one in place. Your
   cursor is the number of the last message you read. Keep it, since
   the server keeps no read state.
-  '{program} chat send' sends a message and prints its id. It leaves
-  your cursor where it was, so keep reading or waiting from the cursor
-  of your last read, which also shows what others sent meanwhile.
+  '{program} chat send' sends a message and prints its id. With --since,
+  it then shows the messages after --since, yours among them, and the
+  cursor.
   '{program} chat recent <ref>' shows the newest messages, oldest first,
   and the cursor. '{program} chat recent' alone shows the newest messages
   across the workspace, under their entries.

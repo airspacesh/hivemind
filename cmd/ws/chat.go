@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/airspacesh/workstream/internal/api"
@@ -99,12 +100,31 @@ func (c *client) chatPage(
 }
 
 func cmdChatSend(c *client, args []string) error {
-	if len(args) != 2 {
-		return usageError("chat send <ref> <message>")
-	}
-	ref, err := api.ParseRef(args[0])
+	p, err := parseArgs(args, flagSpec{
+		strs: []string{"--since"}, passUnknown: true,
+	})
 	if err != nil {
 		return err
+	}
+	if len(p.pos) != 2 {
+		usage := usageError("chat send <ref> <message> [--since <n>]")
+		for _, arg := range p.pos {
+			if strings.HasPrefix(arg, "--") {
+				return fmt.Errorf("%s looks like a flag, but chat send "+
+					"has only --since\n%w", arg, usage)
+			}
+		}
+		return usage
+	}
+	ref, err := api.ParseRef(p.pos[0])
+	if err != nil {
+		return err
+	}
+	var since int64
+	if p.has("--since") {
+		if since, err = parseCursor(p); err != nil {
+			return err
+		}
 	}
 	t, err := c.resolve(ref)
 	if err != nil {
@@ -114,7 +134,7 @@ func cmdChatSend(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	request := api.PostMessageRequest{Body: args[1], Origin: origin}
+	request := api.PostMessageRequest{Body: p.pos[1], Origin: origin}
 	if err := request.Validate(); err != nil {
 		return err
 	}
@@ -125,9 +145,18 @@ func cmdChatSend(c *client, args []string) error {
 		return uncertainWrite(err, "The message",
 			programName+" chat recent "+ref.String())
 	}
-	// A send prints no cursor, since others may have sent messages
-	// between the reader's last read and this one.
 	fmt.Printf("Sent [%s].\n", message.Ref())
+	// Without --since a send prints no cursor, since others may have
+	// sent messages between the reader's last read and this one.
+	if !p.has("--since") {
+		return nil
+	}
+
+	page, err := c.chatPage(t, ref, url.Values{"since": {fmt.Sprint(since)}})
+	if err != nil {
+		return fmt.Errorf("reading the chat after the send: %w", err)
+	}
+	printChatPage(ref, page, fmt.Sprintf("No messages after %d.", since))
 	return nil
 }
 
