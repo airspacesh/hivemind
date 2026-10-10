@@ -64,8 +64,9 @@ Workspaces and entries:
 
   A command that takes a <ref> works in that entry's workspace, and
   add with --parent works in the parent's. Any other command works in
-  the workspace --workspace names, or else the workspace this variable
-  names, or else the one called default: {DEFAULT_WORKSPACE}. '{program} list-workspaces' shows them all.
+  the workspace --workspace names, or else in the one the variable
+  {DEFAULT_WORKSPACE} names, or else in the one called default.
+  '{program} list-workspaces' shows them all.
 
   Each entry and message records the username, and as far as the
   workspace's metadata_capture allows, the host, directory and Claude
