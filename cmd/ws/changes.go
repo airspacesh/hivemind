@@ -104,9 +104,9 @@ func (c *client) parseChangesArgs(
 	return parsed, nil
 }
 
-// changesCommand is the command that waits on in a workspace from a
-// revision.
-func changesCommand(t target, revision int64) string {
+// waitCommand is the wait command that reads a workspace's changes
+// after a revision.
+func waitCommand(t target, revision int64) string {
 	return fmt.Sprintf("%s wait --since %d --workspace %s", programName,
 		revision, t.workspace)
 }
@@ -162,10 +162,10 @@ func cmdWait(c *client, args []string) error {
 	printChanges(page.Changes)
 	if page.More {
 		fmt.Printf("Next: %s (more changes follow)\n",
-			changesCommand(t, page.Cursor))
+			waitCommand(t, page.Cursor))
 		return nil
 	}
 	fmt.Printf("Cursor: %d (wait for more: %s)\n", page.Cursor,
-		changesCommand(t, page.Cursor))
+		waitCommand(t, page.Cursor))
 	return nil
 }
