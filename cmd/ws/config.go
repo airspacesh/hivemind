@@ -304,13 +304,18 @@ func (c clientConfig) names() string {
 	return strings.Join(names, ", ")
 }
 
+// fallbackWorkspace is the default workspace when
+// <PREFIX>_DEFAULT_WORKSPACE names none.
+const fallbackWorkspace = "general"
+
 // defaultWorkspace names the workspace a command uses when it is given
-// no --workspace: the one <PREFIX>_DEFAULT_WORKSPACE names, or general.
+// no --workspace: the one <PREFIX>_DEFAULT_WORKSPACE names, or
+// fallbackWorkspace.
 func defaultWorkspace() string {
 	if name := os.Getenv(defaultWorkspaceEnvironment()); name != "" {
 		return name
 	}
-	return "general"
+	return fallbackWorkspace
 }
 
 // chooseWorkspace finds the workspace for a command that takes no post
@@ -328,8 +333,9 @@ func (c clientConfig) chooseWorkspace(flag string) (workspaceConfig, error) {
 
 	if flag == "" && os.Getenv(defaultWorkspaceEnvironment()) == "" {
 		return workspaceConfig{}, fmt.Errorf("%s configures no workspace "+
-			"called general. Pass --workspace <name> or set %s (configured: "+
-			"%s)", c.path, defaultWorkspaceEnvironment(), c.names())
+			"called %s. Pass --workspace <name> or set %s (configured: %s)",
+			c.path, fallbackWorkspace, defaultWorkspaceEnvironment(),
+			c.names())
 	}
 	return workspaceConfig{}, fmt.Errorf("%s names workspace %q, which %s "+
 		"does not configure (configured: %s)", source, name, c.path,
