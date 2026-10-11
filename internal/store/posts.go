@@ -40,17 +40,15 @@ type rowScanner interface {
 	Scan(...any) error
 }
 
-// scanPost reads the postColumns, and any extra columns into extra.
-func (v view) scanPost(row rowScanner, extra ...any) (api.Post, error) {
+// scanPost reads the postColumns.
+func (v view) scanPost(row rowScanner) (api.Post, error) {
 	var post api.Post
 	var key Key
 	var created, modified string
-	err := row.Scan(append([]any{
-		&key.Workspace, &key.ID, &created, &modified,
+	err := row.Scan(&key.Workspace, &key.ID, &created, &modified,
 		&post.Project, &post.Subject, &post.Body, &post.Deleted,
 		&post.Origin.User, &post.Origin.Host,
-		&post.Origin.Dir, &post.Origin.ClaudeSession,
-	}, extra...)...)
+		&post.Origin.Dir, &post.Origin.ClaudeSession)
 	if err != nil {
 		return api.Post{}, err
 	}

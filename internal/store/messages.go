@@ -17,20 +17,15 @@ const messageColumns = `m.workspace_id, m.post_id, m.id, m.created_utc,
 	m.modified_utc, m.body, m.deleted, m.origin_user, m.origin_host,
 	m.origin_dir, m.origin_claude_session`
 
-// scanMessage reads the messageColumns, and any extra columns into
-// extra.
-func (s *Store) scanMessage(
-	row rowScanner, extra ...any,
-) (api.Message, error) {
+// scanMessage reads the messageColumns.
+func (s *Store) scanMessage(row rowScanner) (api.Message, error) {
 	var message api.Message
 	var key Key
 	var created, modified string
-	err := row.Scan(append([]any{
-		&key.Workspace, &key.ID, &message.Number, &created, &modified,
-		&message.Body, &message.Deleted, &message.Origin.User,
+	err := row.Scan(&key.Workspace, &key.ID, &message.Number, &created,
+		&modified, &message.Body, &message.Deleted, &message.Origin.User,
 		&message.Origin.Host, &message.Origin.Dir,
-		&message.Origin.ClaudeSession,
-	}, extra...)...)
+		&message.Origin.ClaudeSession)
 	if err != nil {
 		return api.Message{}, err
 	}
