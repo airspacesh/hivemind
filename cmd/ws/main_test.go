@@ -492,7 +492,7 @@ func TestSendSinceLeavesOutOlderMessages(t *testing.T) {
 			len(lines), got.stdout, got)
 	}
 	want := []string{"Sent [e1-m24].",
-		"  ... 4 earlier (ws chat read e1 --since 1)",
+		"... 4 earlier (ws chat read e1 --since 1)",
 		"[e1-m6] 05:20 heron: quack"}
 	if !slices.Equal(lines[:3], want) {
 		t.Fatalf("send began\n%s\nwant\n%s", strings.Join(lines[:3], "\n"),

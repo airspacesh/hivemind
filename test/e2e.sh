@@ -391,7 +391,7 @@ sent="$(ws chat send "$race" "Catching up" --since 4 |
     sed 's/^\(\[[a-z0-9-]*\]\).*/\1/')"
 check_equal "a send shows at most the newest 20 messages after --since" \
     "Sent [$race-m26].
-  ... 2 earlier (ws chat read $race --since 4)
+... 2 earlier (ws chat read $race --since 4)
 [$race-m7]" "$(echo "$sent" | head -3)"
 check_equal "a send that left messages out ends with yours and its cursor" \
     "[$race-m26]

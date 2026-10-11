@@ -166,7 +166,7 @@ func cmdChatSend(c *client, args []string) error {
 	// so the first number shown says how many after since are left out.
 	earlier := page.Messages[0].Number - 1 - since
 	if earlier > 0 {
-		fmt.Printf("  ... %d earlier (%s chat read %s --since %d)\n",
+		fmt.Printf("... %d earlier (%s chat read %s --since %d)\n",
 			earlier, programName, ref, since)
 	}
 	page.Messages = slices.DeleteFunc(page.Messages, func(m api.Message) bool {
