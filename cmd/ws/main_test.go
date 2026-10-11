@@ -579,7 +579,7 @@ func TestListingShowsAMatchALine(t *testing.T) {
 	want := `[f21] 08:59 ruth: Fixture rules (4 new messages)
 [f6-m4] 08:58 lena in f4.f5 (edited): two
     lines
-[f7] 08:40 omar in f4: (deleted) (1 new message)
+[f7] 08:40 omar in f4 (deleted) (1 new message)
 [f6-m2] 08:38 ines in f4.f5 (deleted)
 Next: ws recent --before @81 --workspace general --after @12 --limit 4 --project ai (more older matches)
 `

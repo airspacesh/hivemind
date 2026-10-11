@@ -54,6 +54,16 @@ func subjectLine(subject string, deleted bool) string {
 	return oneLine(subject)
 }
 
+// headedSubject follows the head of a post's line with its subject
+// after a colon, or with (deleted) for a deleted post, as a deleted
+// message's line ends.
+func headedSubject(subject string, deleted bool) string {
+	if deleted {
+		return " (deleted)"
+	}
+	return ": " + oneLine(subject)
+}
+
 func joinRefs(refs []api.Ref) string {
 	names := make([]string, len(refs))
 	for i, ref := range refs {
@@ -119,9 +129,9 @@ func printPostLine(
 	post api.Post, ancestors []api.PostRef, at time.Time, layout string,
 	suffix string,
 ) {
-	fmt.Printf("%s: %s%s%s\n",
+	fmt.Printf("%s%s%s%s\n",
 		lineHead(post.Ref, at, layout, post.Origin.User, ancestors),
-		subjectLine(post.Subject, post.Deleted),
+		headedSubject(post.Subject, post.Deleted),
 		supersededLabel(post.SupersededBy), suffix)
 }
 
@@ -284,9 +294,9 @@ func printTree(tree api.TreeResponse, root api.Ref) {
 	var printFrom func(post api.TreePost, depth int)
 	printFrom = func(post api.TreePost, depth int) {
 		indent := strings.Repeat("  ", depth)
-		fmt.Printf("%s[%s] %s: %s%s\n", indent, post.Ref,
+		fmt.Printf("%s[%s] %s%s%s\n", indent, post.Ref,
 			post.Modified.Local().Format(layout),
-			subjectLine(post.Subject, post.Deleted),
+			headedSubject(post.Subject, post.Deleted),
 			supersededLabel(post.SupersededBy))
 		if post.MoreBelow > 0 {
 			fmt.Printf("%s  ... %d more below %s\n", indent, post.MoreBelow,

@@ -557,7 +557,7 @@ check "a deleted post keeps its place in the tree" \
     "  [$gadwall] (deleted)
     [$egg] Eggs counted" "$(ws tree "$reply" | untimed)"
 check "a listing shows a deleted post as deleted" \
-    "[$gadwall] $(id -un) in $heron.$reply: (deleted)" \
+    "[$gadwall] $(id -un) in $heron.$reply (deleted)" \
     "$(ws recent --project owners | untimed)"
 check "a listing shows a deleted message as deleted" \
     "[$gadwall-m2] $(id -un) in $heron.$reply (deleted)" \
@@ -573,7 +573,7 @@ check_equal "search no longer finds deleted text" "No matches." \
 deletes="$(ws wait --after "$before_delete" --include-mine --timeout 1s |
     untimed)"
 check "a wait shows the deleted post and message" \
-    "[$gadwall] $(id -un) in $heron.$reply: (deleted)
+    "[$gadwall] $(id -un) in $heron.$reply (deleted)
 [$gadwall-m2] $(id -un) in $heron.$reply (deleted)" "$deletes"
 after_delete="$(echo "$deletes" | cursor_of)"
 check "an edit of a deleted post is refused" \
