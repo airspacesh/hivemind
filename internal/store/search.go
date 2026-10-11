@@ -276,8 +276,10 @@ func buildWhere(filter Filter) (whereBuilder, error) {
 	if err := builder.addContent(matchAnywhere(filter.Content)); err != nil {
 		return whereBuilder{}, err
 	}
+	// Unary + keeps SQLite off the origin user index, as
+	// createOriginUserIndex explains.
 	if err := builder.addFields(originFilters(filter,
-		func(field string) string { return "e." + field + "_lower" },
+		func(field string) string { return "+e." + field + "_lower" },
 	)); err != nil {
 		return whereBuilder{}, err
 	}
@@ -441,15 +443,20 @@ func (s *Store) Search(
 
 const (
 	// changesBeforeIndex and changesPerMatch bound the newest changes
-	// a flat search walks for a page before it looks its text up in
-	// the text indexes. Common text fills a page from the newest
-	// changes sooner than the indexes can list where it is.
+	// a flat search walks for a page before it looks its text and
+	// origin user up in the indexes. Common text fills a page from the
+	// newest changes sooner than the indexes can list where it is.
 	changesBeforeIndex = 2048
 	changesPerMatch    = 32
 	// candidatesPerChange bounds the candidates a search reads from
-	// the text indexes, per change it walked first, before it walks
-	// every change instead.
+	// each index, per change it walked first, before it walks every
+	// change instead.
 	candidatesPerChange = 8
+	// candidateReadCost is what reading a candidate costs a search, in
+	// changes walked. A walk reads changes in the order they are
+	// stored, but candidates lie scattered, so each takes reads of its
+	// own.
+	candidateReadCost = 20
 	// matchingMessageBudget is how many matching messages a page of a
 	// search shows, shared by its entries and filled newest first.
 	matchingMessageBudget = 30
@@ -489,14 +496,26 @@ func (builder *whereBuilder) keepTo(workspace int64, filter Filter) {
 	}
 }
 
+// candidateSet holds the entries, by id, and the messages, by
+// post_order, that a search may match, as the indexes found them.
+type candidateSet struct {
+	entries  []int64
+	messages []int64
+}
+
+// readCost is what reading the candidates costs a search, in changes
+// walked.
+func (c candidateSet) readCost() int {
+	return candidateReadCost * (len(c.entries) + len(c.messages))
+}
+
 // matchScope narrows the matches a flat search reads.
 type matchScope struct {
 	// since, unless empty, keeps to the matches at or after a time.
 	since string
-	// indexed keeps to the candidates, the entries the text indexes
-	// found, and their chats.
+	// indexed keeps to the candidates.
 	indexed    bool
-	candidates []int64
+	candidates candidateSet
 }
 
 // eachChat joins the entries read first to the messages m in their
@@ -530,21 +549,31 @@ func matchQuery(
 		entryKey, messageKey = `e.created_utc`, `e.created_utc`
 		chat = eachChat
 	}
+	entryFrom, entryFromArgs := from, fromArgs
+	messageFrom := from + ` ` + chat + `
+		ON m.workspace_id = e.workspace_id AND m.entry_id = e.id`
+	messageFromArgs := fromArgs
 	if scope.indexed {
-		// Reading the candidates first, and each one's chat within,
-		// keeps SQLite from walking every entry to keep them in order.
-		from = `json_each(?) AS candidate CROSS JOIN ` + from
-		fromArgs = append([]any{idsJSON(scope.candidates)}, fromArgs...)
+		// Reading the candidates first, by their keys, keeps SQLite
+		// from walking every entry and message to keep them in order.
+		entryFrom = `json_each(?) AS candidate CROSS JOIN ` + from
+		entryFromArgs = append([]any{idsJSON(scope.candidates.entries)},
+			fromArgs...)
 		where.clauses = append(where.clauses, `e.id = candidate.value`)
-		chat = eachChat
+		messageFrom = `json_each(?) AS candidate
+			CROSS JOIN entry_messages AS m ON m.post_order = candidate.value
+			CROSS JOIN ` + from
+		messageFromArgs = append([]any{idsJSON(scope.candidates.messages)},
+			fromArgs...)
 	}
 	if scope.since != "" {
 		where.clauses = append(where.clauses, entryKey+` >= ?`)
 		where.args = append(where.args, scope.since)
 	}
 	where.keepTo(workspace, filter)
-	query := `SELECT e.id, ` + entryKey + ` AS at FROM ` + from + where.sql()
-	args := append(slices.Clone(fromArgs), where.args...)
+	query := `SELECT e.id, ` + entryKey + ` AS at FROM ` + entryFrom +
+		where.sql()
+	args := append(slices.Clone(entryFromArgs), where.args...)
 	if !searchesChat(filter) {
 		return query + ` ORDER BY at DESC`, args, nil
 	}
@@ -556,7 +585,7 @@ func matchQuery(
 	messageWhere.keepTo(workspace, filter)
 	if scope.indexed {
 		messageWhere.clauses = append(messageWhere.clauses,
-			`e.id = candidate.value`)
+			`e.workspace_id = m.workspace_id`, `e.id = m.entry_id`)
 	}
 	if scope.since != "" {
 		messageWhere.clauses = append(messageWhere.clauses,
@@ -564,10 +593,8 @@ func matchQuery(
 		messageWhere.args = append(messageWhere.args, scope.since)
 	}
 	query += ` UNION ALL SELECT e.id, ` + messageKey + ` AS at FROM ` +
-		from + ` ` + chat + `
-			ON m.workspace_id = e.workspace_id AND m.entry_id = e.id` +
-		messageWhere.sql() + ` ORDER BY at DESC`
-	args = append(append(args, fromArgs...), messageWhere.args...)
+		messageFrom + messageWhere.sql() + ` ORDER BY at DESC`
+	args = append(append(args, messageFromArgs...), messageWhere.args...)
 	return query, args, nil
 }
 
@@ -603,6 +630,98 @@ func (v view) walkStart(
 		return "", fmt.Errorf("finding where a search starts: %w", err)
 	}
 	return start, nil
+}
+
+// findOriginCandidates lists the entries of a workspace, and when the
+// search covers chat, the messages, that came from a user, by looking
+// up the first origin user pattern that starts with literal text in
+// the origin user indexes. SQLite reads only the part of an index
+// that starts with that text, as its LIKE optimization describes. The
+// candidates come sorted. It reports false when no pattern starts
+// with literal text, or when a lookup finds more than limit rows.
+func (v view) findOriginCandidates(
+	ctx context.Context, workspace int64, filter Filter, limit int,
+) (candidateSet, bool, error) {
+	var pattern string
+	for _, condition := range filter.OriginUser {
+		value := lowerASCII(condition.Value)
+		if condition.Negate || strings.IndexAny(value, "*?[") == 0 ||
+			value == "" {
+			continue
+		}
+		pattern = value
+		break
+	}
+	if pattern == "" {
+		return candidateSet{}, false, nil
+	}
+
+	var found candidateSet
+	var ok bool
+	var err error
+	found.entries, ok, err = v.readCandidates(ctx, `
+		SELECT id FROM entries
+		WHERE workspace_id = ? AND origin_user_lower GLOB ? LIMIT ?`,
+		limit, workspace, pattern)
+	if err != nil {
+		return candidateSet{}, false, fmt.Errorf(
+			"looking up origin users: %w", err)
+	}
+	if !ok {
+		return candidateSet{}, false, nil
+	}
+	if searchesChat(filter) {
+		found.messages, ok, err = v.readCandidates(ctx, `
+			SELECT post_order FROM entry_messages
+			WHERE workspace_id = ? AND origin_user_lower GLOB ? LIMIT ?`,
+			limit, workspace, pattern)
+		if err != nil {
+			return candidateSet{}, false, fmt.Errorf(
+				"looking up origin users: %w", err)
+		}
+		if !ok {
+			return candidateSet{}, false, nil
+		}
+	}
+	slices.Sort(found.entries)
+	slices.Sort(found.messages)
+	return found, true, nil
+}
+
+// findCandidates lists the entries and messages of a workspace a
+// search may match, as the text and origin user indexes find them. It
+// reports false when neither index narrows the search to at most limit
+// rows of each.
+func (v view) findCandidates(
+	ctx context.Context, workspace int64, filter Filter, limit int,
+) (candidateSet, bool, error) {
+	text, textFound, err := v.findTextCandidates(ctx, workspace, filter,
+		limit)
+	if err != nil {
+		return candidateSet{}, false, err
+	}
+	origin, originFound, err := v.findOriginCandidates(ctx, workspace,
+		filter, limit)
+	if err != nil {
+		return candidateSet{}, false, err
+	}
+	if !originFound {
+		return text, textFound, nil
+	}
+	if !textFound {
+		return origin, true, nil
+	}
+	// Each index finds every match, so the matches are among both.
+	within := func(ids, sorted []int64) []int64 {
+		return slices.DeleteFunc(ids, func(id int64) bool {
+			_, found := slices.BinarySearch(sorted, id)
+			return !found
+		})
+	}
+	return candidateSet{
+		entries:  within(text.entries, origin.entries),
+		messages: within(text.messages, origin.messages),
+	}, true, nil
 }
 
 // match is an entry a search matched, and the time of its newest
@@ -799,14 +918,21 @@ func (v view) searchFlat(
 	if err != nil {
 		return api.SearchResult{}, err
 	}
-	// The newest changes held too few matches for a page, so the text
-	// indexes find the rest, or else the walk goes on to the oldest.
+	// The newest changes held too few matches for a page, so the
+	// search reads the candidates the indexes find, unless walking on
+	// to the oldest should cost less.
 	if len(ranked) < count && since != "" {
-		scope := matchScope{}
-		scope.candidates, scope.indexed, err = v.findTextCandidates(ctx,
-			workspace, filter, candidatesPerChange*walked)
+		candidates, found, err := v.findCandidates(ctx, workspace, filter,
+			candidatesPerChange*walked)
 		if err != nil {
 			return api.SearchResult{}, err
+		}
+		scope := matchScope{}
+		// At the rate the walk found matches, it should find the rest
+		// within (count-len(ranked))*walked/len(ranked) more changes.
+		if found && candidates.readCost()*len(ranked) <
+			(count-len(ranked))*walked {
+			scope = matchScope{indexed: true, candidates: candidates}
 		}
 		ranked, err = v.rankMatches(ctx, workspace, filter, from, fromArgs,
 			where, scope, count)

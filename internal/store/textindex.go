@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -83,50 +82,63 @@ func (q *indexQuery) add(conditions []FieldCond) {
 	}
 }
 
-// findTextCandidates lists the entries of a workspace whose text, or
-// when the search covers chat, a message in whose chat, holds the
-// literal text the search requires, by looking it up in the text
+// findTextCandidates lists the entries of a workspace whose text holds
+// the literal text the search requires, and when the search covers
+// chat, the messages whose text does, by looking it up in the text
 // indexes. It reports false when the search names no text the indexes
-// can look up for the entries, or when an index finds more than limit
+// can look up for the entries, or when a lookup finds more than limit
 // rows.
 func (v view) findTextCandidates(
 	ctx context.Context,
 	workspace int64,
 	filter Filter,
 	limit int,
-) ([]int64, bool, error) {
+) (candidateSet, bool, error) {
 	var entryQuery indexQuery
 	entryQuery.add(filter.Subject)
 	entryQuery.add(filter.Body)
 	entryQuery.add(filter.Content)
-	entries, ok, err := v.lookUpText(ctx, `
+	var found candidateSet
+	var ok bool
+	var err error
+	found.entries, ok, err = v.lookUpText(ctx, `
 		SELECT rowid & 0xffffffff FROM entry_text
 		WHERE entry_text MATCH ? AND rowid BETWEEN ? AND ? LIMIT ?`,
 		entryQuery, workspace, limit)
-	if err != nil || !ok || !searchesChat(filter) {
-		return entries, ok, err
+	if err != nil || !ok {
+		return candidateSet{}, false, err
+	}
+	if !searchesChat(filter) {
+		return found, true, nil
 	}
 
-	// A matching message's entry holds the subject and body text, so
-	// with no text for the messages, the entries found are enough.
 	var messageQuery indexQuery
 	messageQuery.add(filter.Content)
 	if len(messageQuery) == 0 {
-		return entries, true, nil
+		// A matching message's entry holds the subject and body text,
+		// so with no text for the messages, the messages in the chats
+		// of the entries found are the candidates.
+		found.messages, ok, err = v.readCandidates(ctx, `
+			SELECT m.post_order FROM json_each(?) AS candidate `+eachChat+`
+				ON m.workspace_id = ? AND m.entry_id = candidate.value
+			LIMIT ?`, limit, idsJSON(found.entries), workspace)
+		if err != nil {
+			return candidateSet{}, false, fmt.Errorf(
+				"reading the chats of search candidates: %w", err)
+		}
+	} else {
+		found.messages, ok, err = v.lookUpText(ctx, `
+			SELECT rowid & 0xffffffff FROM message_text
+			WHERE message_text MATCH ? AND rowid BETWEEN ? AND ? LIMIT ?`,
+			messageQuery, workspace, limit)
+		if err != nil {
+			return candidateSet{}, false, err
+		}
 	}
-	chats, ok, err := v.lookUpText(ctx, `
-		SELECT m.entry_id FROM message_text
-		JOIN entry_messages AS m
-			ON m.post_order = message_text.rowid & 0xffffffff
-		WHERE message_text MATCH ?
-			AND message_text.rowid BETWEEN ? AND ? LIMIT ?`,
-		messageQuery, workspace, limit)
-	if err != nil || !ok {
-		return nil, false, err
+	if !ok {
+		return candidateSet{}, false, nil
 	}
-	candidates := append(entries, chats...)
-	slices.Sort(candidates)
-	return slices.Compact(candidates), true, nil
+	return found, true, nil
 }
 
 // lookUpText runs a lookup in a text index, restricted to one
@@ -143,22 +155,35 @@ func (v view) lookUpText(
 		return nil, false, nil
 	}
 	first := workspace << 32
-	rows, err := v.tx.QueryContext(ctx, lookup,
-		strings.Join(query, " AND "), first, first|0xffffffff, limit+1)
+	ids, ok, err := v.readCandidates(ctx, lookup, limit,
+		strings.Join(query, " AND "), first, first|0xffffffff)
 	if err != nil {
 		return nil, false, fmt.Errorf("looking up search text: %w", err)
+	}
+	return ids, ok, nil
+}
+
+// readCandidates runs a lookup of candidates for a search, given its
+// arguments and then its limit, and lists the ids it selects. It
+// reports false when the lookup finds more than limit rows.
+func (v view) readCandidates(
+	ctx context.Context, lookup string, limit int, args ...any,
+) ([]int64, bool, error) {
+	rows, err := v.tx.QueryContext(ctx, lookup, append(args, limit+1)...)
+	if err != nil {
+		return nil, false, err
 	}
 	defer rows.Close()
 	var ids []int64
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
-			return nil, false, fmt.Errorf("looking up search text: %w", err)
+			return nil, false, err
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, false, fmt.Errorf("looking up search text: %w", err)
+		return nil, false, err
 	}
 	if len(ids) > limit {
 		return nil, false, nil

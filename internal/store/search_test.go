@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -516,6 +517,63 @@ func TestSearchMatchesMessagesByOriginInEntriesTheIndexFinds(t *testing.T) {
 	if !reflect.DeepEqual(got, []string{"seen twice"}) {
 		t.Fatalf("matching messages = %q, want ines's alone", got)
 	}
+}
+
+// The origin user indexes find old entries, by their own origin or a
+// message's, and keep the GLOB semantics of the walk.
+func TestOriginUserIndexKeepsGlobSemantics(t *testing.T) {
+	store := openTestStore(t)
+	add := func(user string) api.Entry {
+		t.Helper()
+		return addTo(t, store, "default", api.AddEntryRequest{
+			Project: "pond", Subject: "Duck", Origin: api.Origin{User: user},
+		})
+	}
+	add("Ines")
+	add("inesa")
+	add("ken")
+	chat := add("ken")
+	postAs(t, store, "INES", chat.Ref, "quack")
+	postAs(t, store, "inez", chat.Ref, "honk")
+	addFiller(t, store)
+
+	matches := `e.origin_user_lower GLOB ?2 OR EXISTS (
+		SELECT 1 FROM entry_messages AS m
+		WHERE m.workspace_id = e.workspace_id AND m.entry_id = e.id
+			AND lower(m.origin_user) GLOB ?2
+	)`
+	for _, pattern := range []string{
+		"ines", "INES", "ines*", "ine?", "ine[sz]", "inez", "in", "i*",
+		"*nes", "ken", "nobody",
+	} {
+		t.Run(pattern, func(t *testing.T) {
+			want := globMatches(t, store, matches, lowerASCII(pattern))
+			result := runSearch(t, store, Filter{
+				OriginUser: []FieldCond{{Value: pattern}},
+			})
+			var got []int64
+			for _, entry := range result.Entries {
+				got = append(got, entry.Ref.ID)
+			}
+			slices.Sort(got)
+			if !slices.Equal(got, want) {
+				t.Fatalf("matched entries %v, want %v", got, want)
+			}
+		})
+	}
+
+	// A message must match the text and the origin, so ken's chat has no
+	// match from ken, though both indexes find it.
+	result := runSearch(t, store, Filter{
+		Content:    []FieldCond{{Value: "quack"}},
+		OriginUser: []FieldCond{{Value: "ines"}},
+	})
+	assertEntryRefs(t, result.Entries, chat.Ref)
+	result = runSearch(t, store, Filter{
+		Content:    []FieldCond{{Value: "quack"}},
+		OriginUser: []FieldCond{{Value: "ken"}},
+	})
+	assertEntryRefs(t, result.Entries)
 }
 
 func messageRefs(messages []api.Message) []string {

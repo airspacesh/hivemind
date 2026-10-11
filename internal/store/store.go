@@ -132,6 +132,16 @@ const createProjectIndex = `
 CREATE INDEX entries_project_activity
 ON entries(workspace_id, project, activity_utc)`
 
+// createOriginUserIndex finds the entries a user created, so a search
+// by user need not read them all. Only the search's lookup of
+// candidates reads it. A listing that reads entries newest first and
+// stops at a full page would read and sort every entry of the user
+// through it instead, so the listings' origin filters keep SQLite off
+// it with unary +.
+const createOriginUserIndex = `
+CREATE INDEX entries_origin_user
+ON entries(workspace_id, origin_user_lower, id)`
+
 // createProjectCreatedIndex counts a project's entries created since a
 // time by reading only those entries' part of the index.
 const createProjectCreatedIndex = `
@@ -170,7 +180,8 @@ ON entry_links(source_workspace_id, source_id) WHERE name = 'parent'`
 // the server in the order it was posted, so the chat overview orders
 // by it rather than by a clock. An edit overwrites the body, so no
 // earlier text is kept. revision is the revision of the post or of the
-// latest edit.
+// latest edit. origin_user has a lowered twin for
+// createMessageOriginUserIndex to hold.
 const createMessages = `
 CREATE TABLE entry_messages (
 	post_order INTEGER PRIMARY KEY,
@@ -182,6 +193,8 @@ CREATE TABLE entry_messages (
 	revision INTEGER NOT NULL,
 	body TEXT NOT NULL,
 	origin_user TEXT NOT NULL DEFAULT '',
+	origin_user_lower TEXT COLLATE BINARY
+		GENERATED ALWAYS AS (lower(origin_user)) STORED,
 	origin_host TEXT NOT NULL DEFAULT '',
 	origin_dir TEXT NOT NULL DEFAULT '',
 	origin_claude_session TEXT NOT NULL DEFAULT '',
@@ -202,6 +215,14 @@ ON entry_messages(workspace_id, modified_utc)`
 const createMessageRevisionIndex = `
 CREATE INDEX entry_messages_revision
 ON entry_messages(workspace_id, revision)`
+
+// createMessageOriginUserIndex finds the messages a user posted, as
+// createOriginUserIndex finds the entries they created. The listings
+// match messages on lower(origin_user), which SQLite does not read
+// through it.
+const createMessageOriginUserIndex = `
+CREATE INDEX entry_messages_origin_user
+ON entry_messages(workspace_id, origin_user_lower)`
 
 // The text indexes hold the trigrams of the lowered text a search
 // matches, so a search finds the entries and messages that hold a
@@ -308,10 +329,10 @@ var schemaSteps = []schemaStep{
 			startRevisionCounter, createEntries, createMetadata,
 			createCreatedIndex, createModifiedIndex, createRevisionIndex,
 			createSubjectIndex, createProjectIndex,
-			createProjectCreatedIndex, createLinks,
+			createProjectCreatedIndex, createOriginUserIndex, createLinks,
 			createLinkTargetIndex, createOneParentIndex, createMessages,
 			createMessageOrderIndex, createMessageModifiedIndex,
-			createMessageRevisionIndex,
+			createMessageRevisionIndex, createMessageOriginUserIndex,
 			createEntryText, secureEntryText, createEntryTextInsert,
 			createEntryTextUpdate, createMessageText, secureMessageText,
 			createMessageTextInsert, createMessageTextUpdate,
@@ -321,6 +342,8 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createCreatedIndex)},
 			{"index", "entries_modified_order", "entries",
 				normalizeSchemaSQL(createModifiedIndex)},
+			{"index", "entries_origin_user", "entries",
+				normalizeSchemaSQL(createOriginUserIndex)},
 			{"index", "entries_revision", "entries",
 				normalizeSchemaSQL(createRevisionIndex)},
 			{"index", "entries_project_activity", "entries",
@@ -335,6 +358,8 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createLinkTargetIndex)},
 			{"index", "entry_messages_modified", "entry_messages",
 				normalizeSchemaSQL(createMessageModifiedIndex)},
+			{"index", "entry_messages_origin_user", "entry_messages",
+				normalizeSchemaSQL(createMessageOriginUserIndex)},
 			{"index", "entry_messages_revision", "entry_messages",
 				normalizeSchemaSQL(createMessageRevisionIndex)},
 			{"index", "entry_messages_workspace_order", "entry_messages",
