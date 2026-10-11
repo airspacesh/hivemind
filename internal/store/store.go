@@ -564,6 +564,13 @@ func sqliteDSN(
 	query.Add("_pragma", "secure_delete(1)")
 	query.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", msecs))
 	query.Add("_pragma", fmt.Sprintf("mmap_size(%d)", mmapSizeBytes))
+	// synchronous NORMAL syncs the WAL to disk at checkpoints rather
+	// than at every commit. A commit survives a crash of the server,
+	// but the latest commits can be lost to a power loss or an OS
+	// crash. A sync at every commit makes each write wait on the disk,
+	// which takes seconds at a time on busy shared
+	// storage, while the write holds the one write connection.
+	query.Add("_pragma", "synchronous(1)")
 	if readOnly {
 		query.Add("_pragma", "query_only(1)")
 	}
