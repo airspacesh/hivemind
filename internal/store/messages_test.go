@@ -16,17 +16,31 @@ import (
 	"github.com/airspacesh/workstream/internal/api"
 )
 
+// postFrom posts a message with the given origin.
+func postFrom(
+	t *testing.T, store *Store, post api.Ref, body string, origin api.Origin,
+) api.Message {
+	t.Helper()
+	message, err := store.PostMessage(context.Background(),
+		store.mustKey(post), api.PostMessageRequest{Body: body, Origin: origin})
+	if err != nil {
+		t.Fatalf("posting to %s as %s: %v", post, origin.User, err)
+	}
+	return message
+}
+
+func postAs(
+	t *testing.T, store *Store, user string, post api.Ref, body string,
+) api.Message {
+	t.Helper()
+	return postFrom(t, store, post, body, api.Origin{User: user})
+}
+
 func mustPostMessage(
 	t *testing.T, store *Store, post api.Ref, body string,
 ) api.Message {
 	t.Helper()
-	message, err := store.PostMessage(context.Background(),
-		store.mustKey(post),
-		api.PostMessageRequest{Body: body, Origin: api.Origin{User: testUser}})
-	if err != nil {
-		t.Fatalf("posting to %s: %v", post, err)
-	}
-	return message
+	return postAs(t, store, testUser, post, body)
 }
 
 // ownEdit is an edit to a message by the user mustPostMessage posts as.

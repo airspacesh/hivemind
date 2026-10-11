@@ -291,17 +291,6 @@ func latestRevision(t *testing.T, store *Store) int64 {
 	return latest
 }
 
-// postFrom posts a message with the given origin.
-func postFrom(
-	t *testing.T, store *Store, post api.Ref, body string, origin api.Origin,
-) {
-	t.Helper()
-	if _, err := store.PostMessage(context.Background(), store.mustKey(post),
-		api.PostMessageRequest{Body: body, Origin: origin}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestFilteredChangesShowEachMatchOnceAtAnyLimitAndSpan(t *testing.T) {
 	store := openTestStore(t)
 	lead := api.Origin{User: testUser, ClaudeSession: "lead"}

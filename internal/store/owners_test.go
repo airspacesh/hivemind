@@ -18,19 +18,6 @@ func addAs(
 	})
 }
 
-func postAs(
-	t *testing.T, store *Store, user string, post api.Ref, body string,
-) api.Message {
-	t.Helper()
-	message, err := store.PostMessage(context.Background(),
-		store.mustKey(post),
-		api.PostMessageRequest{Body: body, Origin: api.Origin{User: user}})
-	if err != nil {
-		t.Fatalf("posting to %s as %s: %v", post, user, err)
-	}
-	return message
-}
-
 func assertNotOwner(t *testing.T, err error, want string) {
 	t.Helper()
 	var notOwner *NotOwnerError
