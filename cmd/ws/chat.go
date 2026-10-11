@@ -230,7 +230,7 @@ func cmdChatSend(c *client, args []string) error {
 		return nil
 	}
 
-	since, err := c.numberBefore(t, ref, after)
+	start, err := c.numberBefore(t, ref, after)
 	if err != nil {
 		return fmt.Errorf("reading the chat after the send: %w", err)
 	}
@@ -240,15 +240,15 @@ func cmdChatSend(c *client, args []string) error {
 		return fmt.Errorf("reading the chat after the send: %w", err)
 	}
 	// Message numbers count from 1 in each post and none are removed,
-	// so the first number shown says how many after since are left out.
-	cursor := api.MessageRef{Post: ref, Number: since}
-	earlier := page.Messages[0].Number - 1 - since
+	// so the first number shown says how many after start are left out.
+	cursor := api.MessageRef{Post: ref, Number: start}
+	earlier := page.Messages[0].Number - 1 - start
 	if earlier > 0 {
 		fmt.Printf("... %d earlier (%s chat read %s --after %s)\n",
 			earlier, programName, ref, cursor)
 	}
 	page.Messages = slices.DeleteFunc(page.Messages, func(m api.Message) bool {
-		return m.Number <= since
+		return m.Number <= start
 	})
 	printChatPage(ref, page, fmt.Sprintf("No messages after %s.", cursor),
 		"")
