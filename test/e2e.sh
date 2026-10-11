@@ -384,6 +384,21 @@ check "a wait from a send's cursor does not return your own message" \
     "$(ws chat wait "$race" --since 3 --timeout 1s)"
 check "a message may start with a dash beside --since" \
     ": -1 to that" "$(ws chat send --since 3 "$race" "-1 to that")"
+# With 22 messages after the cursor, the send shows the newest 20 and
+# how to read the 2 it left out.
+for n in $(seq 21); do ws chat send "$race" "Peer $n" >/dev/null; done
+sent="$(ws chat send "$race" "Catching up" --since 4 |
+    sed 's/^\(\[[a-z0-9-]*\]\).*/\1/')"
+check_equal "a send shows at most the newest 20 messages after --since" \
+    "Sent [$race-m26].
+  ... 2 earlier (ws chat read $race --since 4)
+[$race-m7]" "$(echo "$sent" | head -3)"
+check_equal "a send that left messages out ends with yours and its cursor" \
+    "[$race-m26]
+Cursor: 26 (wait for more: ws chat wait $race --since 26)" \
+    "$(echo "$sent" | tail -2)"
+check_equal "a send that left messages out shows 20 of them" 20 \
+    "$(echo "$sent" | grep -c '^\[')"
 (sleep 1.5 && ws chat send "$chat" "Woken" >/dev/null) &
 sender_pid=$!
 check "a wait returns when a message arrives" "[$chat-m4]" \

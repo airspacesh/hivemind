@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -431,12 +432,16 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 	}
 }
 
-// A message sent after yours, between the send and the read that
-// follows it, shows too, and the cursor moves past it, so a wait from
-// the cursor neither repeats nor skips a message.
-func TestSendSinceShowsMessagesThatRaceIt(t *testing.T) {
+// sendSinceServer serves e1, where a send posts message number sent
+// and the chat then holds messages 1 to newest. Heron sent all the
+// others.
+func sendSinceServer(t *testing.T, sent, newest int64) string {
 	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
-	message := func(number int64, user string) api.Message {
+	message := func(number int64) api.Message {
+		user := "heron"
+		if number == sent {
+			user = "duck"
+		}
 		return api.Message{Entry: api.Ref{Prefix: "e", ID: 1},
 			Number: number, Created: when, Modified: when, Body: "quack",
 			Origin: api.Origin{User: user}}
@@ -445,17 +450,27 @@ func TestSendSinceShowsMessagesThatRaceIt(t *testing.T) {
 		r *http.Request) {
 		switch {
 		case r.Method == "POST":
-			reply(w, http.StatusCreated, message(3, "duck"))
-		case r.URL.Query().Get("since") == "1":
-			reply(w, http.StatusOK, api.ChatPage{Messages: []api.Message{
-				message(2, "heron"), message(3, "duck"),
-				message(4, "heron")}, Cursor: 4})
+			reply(w, http.StatusCreated, message(sent))
+		case r.URL.Query().Has("latest"):
+			count, _ := strconv.ParseInt(r.URL.Query().Get("latest"), 10, 64)
+			page := api.ChatPage{Messages: []api.Message{}, Cursor: newest}
+			for n := max(1, newest-count+1); n <= newest; n++ {
+				page.Messages = append(page.Messages, message(n))
+			}
+			reply(w, http.StatusOK, page)
 		default:
 			refuse(w, http.StatusNotFound, api.CodeRouteNotFound, "no route")
 		}
 	}, "default=e"))
-	config := writeConfig(t, "workspaces:\n  default:\n    server: "+
+	return writeConfig(t, "workspaces:\n  default:\n    server: "+
 		server.URL+"\n", 0o600)
+}
+
+// A message sent after yours, between the send and the read that
+// follows it, shows too, and the cursor moves past it, so a wait from
+// the cursor neither repeats nor skips a message.
+func TestSendSinceShowsMessagesThatRaceIt(t *testing.T) {
+	config := sendSinceServer(t, 3, 4)
 	got := ws(t, config, "chat", "send", "e1", "quack", "--since", "1")
 	want := "Sent [e1-m3].\n" +
 		"[e1-m2] 05:20 heron: quack\n[e1-m3] 05:20 duck: quack\n" +
@@ -463,6 +478,29 @@ func TestSendSinceShowsMessagesThatRaceIt(t *testing.T) {
 		"Cursor: 4 (wait for more: ws chat wait e1 --since 4)\n"
 	if !got.ok || got.stdout != want {
 		t.Fatalf("send =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
+	}
+}
+
+// When more than 20 messages follow the cursor, a send shows the
+// newest 20 and says how to read the ones it left out.
+func TestSendSinceLeavesOutOlderMessages(t *testing.T) {
+	config := sendSinceServer(t, 24, 25)
+	got := ws(t, config, "chat", "send", "e1", "quack", "--since", "1")
+	lines := strings.Split(strings.TrimSuffix(got.stdout, "\n"), "\n")
+	if !got.ok || len(lines) != 23 {
+		t.Fatalf("send printed %d lines, want 23:\n%s (%+v)",
+			len(lines), got.stdout, got)
+	}
+	want := []string{"Sent [e1-m24].",
+		"  ... 4 earlier (ws chat read e1 --since 1)",
+		"[e1-m6] 05:20 heron: quack"}
+	if !slices.Equal(lines[:3], want) {
+		t.Fatalf("send began\n%s\nwant\n%s", strings.Join(lines[:3], "\n"),
+			strings.Join(want, "\n"))
+	}
+	end := "Cursor: 25 (wait for more: ws chat wait e1 --since 25)"
+	if lines[22] != end {
+		t.Fatalf("send ended %q, want %q", lines[22], end)
 	}
 }
 

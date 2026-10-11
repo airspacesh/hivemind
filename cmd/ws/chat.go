@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,6 +12,10 @@ import (
 )
 
 const defaultWaitTimeout = 10 * time.Minute
+
+// sendShownLimit is how many of the newest messages a chat send with
+// --since shows at most.
+const sendShownLimit = 20
 
 // retryDelays are the waits before each retry of a chat wait's poll
 // after a failed connection. The wait gives up when the retry after
@@ -152,10 +157,21 @@ func cmdChatSend(c *client, args []string) error {
 		return nil
 	}
 
-	page, err := c.chatPage(t, ref, url.Values{"since": {fmt.Sprint(since)}})
+	latest := url.Values{"latest": {fmt.Sprint(sendShownLimit)}}
+	page, err := c.chatPage(t, ref, latest)
 	if err != nil {
 		return fmt.Errorf("reading the chat after the send: %w", err)
 	}
+	// Message numbers count from 1 in each entry and none are removed,
+	// so the first number shown says how many after since are left out.
+	earlier := page.Messages[0].Number - 1 - since
+	if earlier > 0 {
+		fmt.Printf("  ... %d earlier (%s chat read %s --since %d)\n",
+			earlier, programName, ref, since)
+	}
+	page.Messages = slices.DeleteFunc(page.Messages, func(m api.Message) bool {
+		return m.Number <= since
+	})
 	printChatPage(ref, page, fmt.Sprintf("No messages after %d.", since))
 	return nil
 }

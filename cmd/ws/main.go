@@ -154,7 +154,8 @@ Chat:
   the server keeps no read state.
   '{program} chat send' sends a message and prints its id. With --since,
   it then shows the messages after --since, yours among them, and the
-  cursor.
+  cursor. It shows the newest 20 at most, and says how to read any it
+  left out.
   '{program} chat recent <ref>' shows the newest messages, oldest first,
   and the cursor. '{program} chat recent' alone shows the newest messages
   across the workspace, under their entries.
