@@ -661,8 +661,7 @@ filtered="$(peer wait --after "$start" --project own --content 'lead MESSAGE' \
     --timeout 1s)"
 check "a wait's filters match a message by its own text" "[$own-m1]" \
     "$filtered"
-# A post's own change lists it with its time, and a message's change
-# names it above the message without one.
+# Only a change to the post itself starts a line with its bare id.
 own_post_line="^\[$own\] [0-9]"
 check_equal "a wait's filters leave out what does not match" "" \
     "$(echo "$filtered" | grep -e "$own_post_line" -e "\[$own-m2\]" ||
