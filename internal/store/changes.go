@@ -27,6 +27,19 @@ func nextRevision(ctx context.Context, tx *sql.Tx) (int64, error) {
 	return revision, nil
 }
 
+// revisionSeen reads the revision of the latest change a transaction
+// sees. Read in the transaction that reads some data, it is a cursor
+// from which a read of changes misses nothing that data left out.
+func revisionSeen(ctx context.Context, tx *sql.Tx) (int64, error) {
+	var revision int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT revision FROM revision_counter`,
+	).Scan(&revision); err != nil {
+		return 0, fmt.Errorf("reading the latest revision: %w", err)
+	}
+	return revision, nil
+}
+
 // revisionsPerRead bounds the revisions a read of changes checks, so a
 // filter that matches few changes still answers quickly, however far
 // behind its cursor is.
@@ -196,12 +209,9 @@ func (s *Store) changes(
 
 	// The latest revision and the changes come from one snapshot, so
 	// every change up to that revision is there to be checked.
-	var latest int64
-	if err := v.tx.QueryRowContext(ctx, `
-		SELECT revision FROM revision_counter`,
-	).Scan(&latest); err != nil {
-		return api.ChangesPage{}, fmt.Errorf("reading the latest "+
-			"revision: %w", err)
+	latest, err := revisionSeen(ctx, v.tx)
+	if err != nil {
+		return api.ChangesPage{}, err
 	}
 	through := max(since, latest)
 	if latest-since > span {

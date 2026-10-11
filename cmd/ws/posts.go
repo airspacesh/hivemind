@@ -341,7 +341,8 @@ func cmdAdd(c *client, args []string) error {
 		return uncertainWrite(err, "The post",
 			programName+" recent --flat --workspace "+t.workspace)
 	}
-	fmt.Printf("Added post [%s].\n", post.Ref)
+	fmt.Printf("Added post [%s] at %s.\n", post.Ref,
+		api.FormatRevision(post.Revision))
 	if err := c.noticeNewProject(t, request.Project); err != nil {
 		return fmt.Errorf("the post was added, but listing projects "+
 			"failed: %w", err)
@@ -437,7 +438,8 @@ func cmdEdit(c *client, args []string) error {
 		return uncertainWrite(explainNotOwner(err, ref), "The edit",
 			programName+" post "+ref.String())
 	}
-	fmt.Printf("Edited post [%s].\n", post.Ref)
+	fmt.Printf("Edited post [%s] at %s.\n", post.Ref,
+		api.FormatRevision(post.Revision))
 	if p.bools["--no-recent"] {
 		return nil
 	}
@@ -471,7 +473,8 @@ func cmdDelete(c *client, args []string) error {
 		return uncertainWrite(explainNotOwner(err, ref), "The delete",
 			programName+" post "+ref.String())
 	}
-	fmt.Printf("Deleted post [%s].\n", post.Ref)
+	fmt.Printf("Deleted post [%s] at %s.\n", post.Ref,
+		api.FormatRevision(post.Revision))
 	return nil
 }
 
@@ -744,7 +747,7 @@ func cmdListing(c *client, command string, args []string) error {
 	fmt.Fprintln(os.Stderr, listingHeader(p, limit, includeChat))
 	// With --id-only, stdout holds only ids, so the footer goes to
 	// stderr with the header, where a script can still find the next
-	// page.
+	// page and the cursor.
 	footer := os.Stdout
 	if p.bools["--id-only"] {
 		printMatchRefs(page)
@@ -760,6 +763,11 @@ func cmdListing(c *client, command string, args []string) error {
 		fmt.Fprintf(footer, "Next: %s (more older matches)\n",
 			olderCommand(command, t, p, after, oldest))
 	}
+	waitFilters := filterArgs(p)
+	if len(p.pos) == 1 {
+		waitFilters = " --content " + shellQuote(p.pos[0]) + waitFilters
+	}
+	printChangeCursor(footer, t, page.Revision, waitFilters)
 	return nil
 }
 

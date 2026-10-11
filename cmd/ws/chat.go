@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -223,7 +224,8 @@ func cmdChatSend(c *client, args []string) error {
 		return uncertainWrite(err, "The message",
 			programName+" chat recent "+ref.String())
 	}
-	fmt.Printf("Sent [%s].\n", message.Ref())
+	fmt.Printf("Sent [%s] at %s.\n", message.Ref(),
+		api.FormatRevision(message.Revision))
 	// Without --after a send prints no cursor, since others may have
 	// sent messages between the reader's last read and this one.
 	if !p.has("--after") {
@@ -271,7 +273,8 @@ func cmdChatEdit(c *client, args []string) error {
 		return uncertainWrite(explainNotOwner(err, ref.Post), "The edit",
 			programName+" chat recent "+ref.Post.String())
 	}
-	fmt.Printf("Edited [%s].\n", message.Ref())
+	fmt.Printf("Edited [%s] at %s.\n", message.Ref(),
+		api.FormatRevision(message.Revision))
 	return nil
 }
 
@@ -298,7 +301,8 @@ func cmdChatDelete(c *client, args []string) error {
 		return uncertainWrite(explainNotOwner(err, ref.Post), "The delete",
 			programName+" chat recent "+ref.Post.String())
 	}
-	fmt.Printf("Deleted [%s].\n", message.Ref())
+	fmt.Printf("Deleted [%s] at %s.\n", message.Ref(),
+		api.FormatRevision(message.Revision))
 	return nil
 }
 
@@ -332,6 +336,7 @@ func cmdChatRecent(c *client, args []string) error {
 			return err
 		}
 		printOverview(overview, t.workspace)
+		printChangeCursor(os.Stdout, t, overview.Revision, "")
 		return nil
 	}
 
@@ -497,7 +502,8 @@ func cmdChatWait(c *client, args []string) error {
 		fmt.Printf("Next: %s (more messages to check)\n", next)
 		return nil
 	}
-	fmt.Printf("Cursor: %s (wait for more: %s)\n", last, next)
+	fmt.Printf("Cursor: %s, %s (wait for more: %s)\n", last,
+		api.FormatRevision(page.Revision), next)
 	return nil
 }
 

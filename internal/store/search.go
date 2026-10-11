@@ -951,6 +951,10 @@ func (s *Store) Search(
 			return api.MatchPage{}, err
 		}
 	}
+	revision, err := revisionSeen(ctx, v.tx)
+	if err != nil {
+		return api.MatchPage{}, err
+	}
 	found, ok, err := v.findIndexedCandidates(ctx, workspace, filter,
 		candidateLimit)
 	if err != nil {
@@ -985,6 +989,7 @@ func (s *Store) Search(
 		return api.MatchPage{}, err
 	}
 	page.More = len(matches) > filter.Limit
+	page.Revision = revision
 	if err := v.tx.Commit(); err != nil {
 		return api.MatchPage{}, fmt.Errorf("finishing search: %w", err)
 	}

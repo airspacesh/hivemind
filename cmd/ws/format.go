@@ -367,7 +367,9 @@ func chatWaitCommand(cursor api.MessageRef, filterArgs string) string {
 }
 
 // printCursorLine ends a chat read with the cursor to read on from, as
-// the command that uses it.
+// the command that uses it. When the read reached the newest message,
+// the line gives the revision it read at too, for a wait on the whole
+// workspace.
 func printCursorLine(post api.Ref, page api.ChatPage) {
 	cursor := api.MessageRef{Post: post, Number: page.Cursor}
 	if page.Remaining > 0 {
@@ -379,8 +381,8 @@ func printCursorLine(post api.Ref, page api.ChatPage) {
 			programName, post, cursor, page.Remaining, noun)
 		return
 	}
-	fmt.Printf("Cursor: %s (wait for more: %s)\n", cursor,
-		chatWaitCommand(cursor, ""))
+	fmt.Printf("Cursor: %s, %s (wait for more: %s)\n", cursor,
+		api.FormatRevision(page.Revision), chatWaitCommand(cursor, ""))
 }
 
 // printEarlier marks how many messages after the number start a chat

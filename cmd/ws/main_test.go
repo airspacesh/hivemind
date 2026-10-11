@@ -378,7 +378,7 @@ func TestAddTakesItsParentsWorkspace(t *testing.T) {
 		"prefix: p\n", server.URL, server.URL), 0o600)
 	got := ws(t, config, "add", "Answer", "--project", "pond",
 		"--parent", "p3", "--no-recent")
-	if !got.ok || !strings.Contains(got.stdout, "Added post [p4].") {
+	if !got.ok || !strings.Contains(got.stdout, "Added post [p4] at @0.") {
 		t.Fatal(got)
 	}
 	if posted := server.recorded()[0]; posted.path !=
@@ -431,14 +431,16 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 			{Post: api.PostRef{Ref: api.Ref{Prefix: "e", ID: 1},
 				Subject: "Why?"},
 				Messages: []api.Message{message(7), message(8)}},
-		}})
+		}, Revision: 31})
 	})
 	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
 	got := ws(t, config, "chat", "recent")
 	want := "[e1] Why?\n" +
 		"  ... 6 earlier (ws chat read e1 --after e1-m0)\n" +
-		"  [e1-m7] 05:20 duck: quack\n  [e1-m8] 05:20 duck: quack\n"
+		"  [e1-m7] 05:20 duck: quack\n  [e1-m8] 05:20 duck: quack\n" +
+		"Cursor: @31 (wait for more: ws wait --after @31 --workspace " +
+		"general)\n"
 	if !got.ok || got.stdout != want {
 		t.Fatalf("overview =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
 	}
@@ -455,7 +457,8 @@ func sendAfterServer(t *testing.T, sent, newest int64) string {
 			user = "duck"
 		}
 		return api.Message{Post: api.Ref{Prefix: "e", ID: 1},
-			Number: number, Created: when, Modified: when, Body: "quack",
+			Number: number, Created: when, Modified: when,
+			Revision: 10 + number, Body: "quack",
 			Origin: api.Origin{User: user}}
 	}
 	server := newFakeServer(t, hosting(func(w http.ResponseWriter,
@@ -465,7 +468,8 @@ func sendAfterServer(t *testing.T, sent, newest int64) string {
 			reply(w, http.StatusCreated, message(sent))
 		case r.URL.Query().Has("latest"):
 			count, _ := strconv.ParseInt(r.URL.Query().Get("latest"), 10, 64)
-			page := api.ChatPage{Messages: []api.Message{}, Cursor: newest}
+			page := api.ChatPage{Messages: []api.Message{}, Cursor: newest,
+				Revision: 10 + newest}
 			for n := max(1, newest-count+1); n <= newest; n++ {
 				page.Messages = append(page.Messages, message(n))
 			}
@@ -484,10 +488,11 @@ func sendAfterServer(t *testing.T, sent, newest int64) string {
 func TestSendAfterShowsMessagesThatRaceIt(t *testing.T) {
 	config := sendAfterServer(t, 3, 4)
 	got := ws(t, config, "chat", "send", "e1", "quack", "--after", "e1-m1")
-	want := "Sent [e1-m3].\n" +
+	want := "Sent [e1-m3] at @13.\n" +
 		"[e1-m2] 05:20 heron: quack\n[e1-m3] 05:20 duck: quack\n" +
 		"[e1-m4] 05:20 heron: quack\n" +
-		"Cursor: e1-m4 (wait for more: ws chat wait e1 --after e1-m4)\n"
+		"Cursor: e1-m4, @14 (wait for more: ws chat wait e1 --after " +
+		"e1-m4)\n"
 	if !got.ok || got.stdout != want {
 		t.Fatalf("send =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
 	}
@@ -503,14 +508,15 @@ func TestSendAfterLeavesOutOlderMessages(t *testing.T) {
 		t.Fatalf("send printed %d lines, want 23:\n%s (%+v)",
 			len(lines), got.stdout, got)
 	}
-	want := []string{"Sent [e1-m24].",
+	want := []string{"Sent [e1-m24] at @34.",
 		"... 4 earlier (ws chat read e1 --after e1-m1)",
 		"[e1-m6] 05:20 heron: quack"}
 	if !slices.Equal(lines[:3], want) {
 		t.Fatalf("send began\n%s\nwant\n%s", strings.Join(lines[:3], "\n"),
 			strings.Join(want, "\n"))
 	}
-	end := "Cursor: e1-m25 (wait for more: ws chat wait e1 --after e1-m25)"
+	end := "Cursor: e1-m25, @35 (wait for more: ws chat wait e1 " +
+		"--after e1-m25)"
 	if lines[22] != end {
 		t.Fatalf("send ended %q, want %q", lines[22], end)
 	}
@@ -544,7 +550,8 @@ func listingServer(
 
 // A listing shows a match a line, each with its author and the path to
 // its post, says on stderr what it ran, and ends with the command that
-// lists the older matches, on stderr with --id-only.
+// lists the older matches and the wait for newer changes, on stderr
+// with --id-only.
 func TestListingShowsAMatchALine(t *testing.T) {
 	at := func(minute int) time.Time {
 		return time.Date(2026, 10, 9, 8, minute, 0, 0, time.UTC)
@@ -572,7 +579,8 @@ func TestListingShowsAMatchALine(t *testing.T) {
 					Created: at(38), Modified: at(38), Deleted: true,
 					Origin: by("ines")}, Revision: 81, At: at(38)},
 		},
-		More: true,
+		More:     true,
+		Revision: 93,
 	})
 
 	got := ws(t, config, "recent", "-n", "4", "--project", "ai",
@@ -583,6 +591,7 @@ func TestListingShowsAMatchALine(t *testing.T) {
 [f7] 08:40 omar in f4 (deleted) (1 new message)
 [f6-m2] 08:38 ines in f4.f5.f6 (deleted)
 Next: ws recent --before @81 --workspace general --after @12 --limit 4 --project ai (more older matches)
+Cursor: @93 (wait for more: ws wait --after @93 --workspace general --project ai)
 `
 	if !got.ok || got.stdout != want {
 		t.Fatalf("recent =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
@@ -599,7 +608,9 @@ Next: ws recent --before @81 --workspace general --after @12 --limit 4 --project
 	}
 	stderr := "Newest 20 posts and messages matching hook:\n" +
 		"Next: ws search hook --before @81 --workspace general " +
-		"(more older matches)\n"
+		"(more older matches)\n" +
+		"Cursor: @93 (wait for more: ws wait --after @93 --workspace " +
+		"general --content hook)\n"
 	if got.stderr != stderr {
 		t.Fatalf("search --id-only said %q on stderr, want %q",
 			got.stderr, stderr)
@@ -676,7 +687,7 @@ func TestFooterAsksForTheNextPage(t *testing.T) {
 			"--posts-only", "--after", after, "--no-project", "x", "-n",
 			"1", "--include-superseded")
 		lines := strings.Split(strings.TrimSpace(first.stdout), "\n")
-		footer, ok := strings.CutPrefix(lines[len(lines)-1], "Next: ws ")
+		footer, ok := strings.CutPrefix(lines[len(lines)-2], "Next: ws ")
 		if !first.ok || !ok {
 			t.Fatalf("search printed no footer: %+v", first)
 		}
@@ -971,6 +982,7 @@ func TestTimesShowDatesOnlyWhenDaysDiffer(t *testing.T) {
 			got := runBinary(t, wsBinary, append(utcPlus8,
 				"WORKSTREAM_CONFIG="+config), "search")
 			lines := strings.Split(strings.TrimSpace(got.stdout), "\n")
+			lines = lines[:len(lines)-1]
 			if strings.Join(lines, "\n") != strings.Join(test.want, "\n") {
 				t.Errorf("got\n%s\nwant\n%s", got.stdout,
 					strings.Join(test.want, "\n"))
@@ -1069,8 +1081,8 @@ func TestWaitsExcludeTheirOwnSession(t *testing.T) {
 			"--after @9 --workspace general --include-mine)"},
 		{"chat wait", "all", []string{"chat", "wait", "e1", "--after",
 			"e1-m3", "--content", "quack"}, []string{"lead"},
-			"Cursor: e1-m7 (wait for more: ws chat wait e1 --after e1-m7 " +
-				"--content quack)"},
+			"Cursor: e1-m7, @0 (wait for more: ws chat wait e1 --after " +
+				"e1-m7 --content quack)"},
 		{"chat wait without the session", "none", []string{"chat", "wait",
 			"e1", "--after", "e1-m3"}, []string{""}, "--after e1-m7)"},
 	}

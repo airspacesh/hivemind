@@ -544,3 +544,54 @@ func TestFilteredChangesReadDuringWritesMissNone(t *testing.T) {
 		}
 	}
 }
+
+// A read gives the latest revision it saw, and a write the revision of
+// its change, so the changes after either are exactly those that came
+// after it.
+func TestReadsAndWritesGiveARevisionToReadChangesAfter(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	pond := mustAdd(t, store, "pond", "", nil)
+	first := mustPostMessage(t, store, pond.Ref, "hi")
+	if pond.Revision != 1 || first.Revision != 2 {
+		t.Fatalf("the writes gave revisions %d and %d, want 1 and 2",
+			pond.Revision, first.Revision)
+	}
+
+	general := workspaceID(t, store, "general")
+	key := store.mustKey(pond.Ref)
+	listing, err := store.Search(ctx, everyAccess(store), general,
+		Filter{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, err := store.Messages(ctx, key, api.ChatBound{}, Filter{}, nil,
+		20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest, err := store.LatestMessages(ctx, key, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overview, err := store.Overview(ctx, general, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, revision := range map[string]int64{
+		"a listing": listing.Revision, "a chat read": chat.Revision,
+		"the newest messages": latest.Revision,
+		"an overview":         overview.Revision,
+	} {
+		if revision != 2 {
+			t.Errorf("%s gave revision %d, want 2", name, revision)
+		}
+	}
+
+	second := mustPostMessage(t, store, pond.Ref, "again")
+	got := changeIDs(readChanges(t, store, listing.Revision, 10))
+	if want := []string{second.Ref().String()}; !reflect.DeepEqual(got,
+		want) {
+		t.Fatalf("the changes after the reads are %v, want %v", got, want)
+	}
+}

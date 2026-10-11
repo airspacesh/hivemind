@@ -49,11 +49,13 @@ type Origin struct {
 }
 
 // Post is a post with its own fields. A deleted post has no subject,
-// body or metadata, and cannot be edited.
+// body or metadata, and cannot be edited. Revision is the revision of
+// the post's own latest change, which set Modified.
 type Post struct {
 	Ref      Ref               `json:"ref"`
 	Created  time.Time         `json:"created"`
 	Modified time.Time         `json:"modified"`
+	Revision int64             `json:"revision"`
 	Project  string            `json:"project"`
 	Subject  string            `json:"subject"`
 	Body     string            `json:"body,omitempty"`
@@ -121,12 +123,14 @@ type TreeResponse struct {
 // Message is one message in a post's chat, numbered from 1 within it in
 // the order they were posted. An edit overwrites Body, keeps the
 // message's place, and no earlier text is kept. A deleted message has
-// no body, and cannot be edited.
+// no body, and cannot be edited. Revision is the revision of the
+// message's latest change, which set Modified.
 type Message struct {
 	Post     Ref       `json:"post"`
 	Number   int64     `json:"number"`
 	Created  time.Time `json:"created"`
 	Modified time.Time `json:"modified"`
+	Revision int64     `json:"revision"`
 	Body     string    `json:"body"`
 	Origin   Origin    `json:"origin"`
 	Deleted  bool      `json:"deleted,omitempty"`
@@ -157,11 +161,14 @@ type DeleteRequest struct {
 // ChatPage holds messages from one chat, oldest first. Cursor is the
 // highest message number the server checked, so every message up to it
 // is in the page or did not match the request's filters. Remaining
-// counts the messages after Cursor.
+// counts the messages after Cursor. Revision is the latest revision
+// when the page was read, so the changes after it are the changes since
+// the read.
 type ChatPage struct {
 	Messages  []Message `json:"messages"`
 	Cursor    int64     `json:"cursor"`
 	Remaining int       `json:"remaining"`
+	Revision  int64     `json:"revision"`
 }
 
 // PostChat is the newest messages of one post in a chat overview,
@@ -173,9 +180,10 @@ type PostChat struct {
 
 // ChatOverview holds the newest messages across a workspace, grouped by
 // post. Posts come in order of their newest message, the most recent
-// last.
+// last. Revision is the latest revision when it was read.
 type ChatOverview struct {
-	Chats []PostChat `json:"chats"`
+	Chats    []PostChat `json:"chats"`
+	Revision int64      `json:"revision"`
 }
 
 // Change is a post added, edited or deleted, or a message posted,
@@ -254,10 +262,13 @@ type Match struct {
 }
 
 // MatchPage is a page of a listing, newest first. More says whether
-// older matches follow the page.
+// older matches follow the page. Revision is the latest revision when
+// the page was read, so the changes after it are the changes since the
+// read.
 type MatchPage struct {
-	Matches []Match `json:"matches"`
-	More    bool    `json:"more"`
+	Matches  []Match `json:"matches"`
+	More     bool    `json:"more"`
+	Revision int64   `json:"revision"`
 }
 
 // SearchFields name what a search condition can match. Each is a query

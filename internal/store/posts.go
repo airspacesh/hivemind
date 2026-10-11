@@ -33,7 +33,7 @@ func (s *Store) begin(
 }
 
 const postColumns = `e.workspace_id, e.id, e.created_utc,
-	e.modified_utc, e.project, e.subject, e.body, e.deleted,
+	e.modified_utc, e.revision, e.project, e.subject, e.body, e.deleted,
 	e.origin_user, e.origin_host, e.origin_dir, e.origin_claude_session`
 
 type rowScanner interface {
@@ -46,7 +46,7 @@ func (v view) scanPost(row rowScanner) (api.Post, error) {
 	var key Key
 	var created, modified string
 	err := row.Scan(&key.Workspace, &key.ID, &created, &modified,
-		&post.Project, &post.Subject, &post.Body, &post.Deleted,
+		&post.Revision, &post.Project, &post.Subject, &post.Body, &post.Deleted,
 		&post.Origin.User, &post.Origin.Host,
 		&post.Origin.Dir, &post.Origin.ClaudeSession)
 	if err != nil {

@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"maps"
 	"math"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/airspacesh/workstream/internal/api"
@@ -146,6 +148,15 @@ func waitCommand(t target, revision int64, filterArgs string) string {
 		api.FormatRevision(revision), t.workspace, filterArgs)
 }
 
+// printChangeCursor ends a read of a workspace with its cursor, the
+// revision it read at, as the wait that shows what changes after it.
+func printChangeCursor(
+	w io.Writer, t target, revision int64, filterArgs string,
+) {
+	fmt.Fprintf(w, "Cursor: %s (wait for more: %s)\n",
+		api.FormatRevision(revision), waitCommand(t, revision, filterArgs))
+}
+
 func cmdFirehose(c *client, args []string) error {
 	parsed, err := c.parseChangesArgs("firehose", args, forever, false)
 	if err != nil {
@@ -187,12 +198,11 @@ func cmdWait(c *client, args []string) error {
 			api.FormatRevision(parsed.after), parsed.timeout)
 	}
 	printChanges(page.Changes)
-	next := waitCommand(t, page.Cursor, parsed.filterArgs)
 	if page.More {
-		fmt.Printf("Next: %s (more changes to check)\n", next)
+		fmt.Printf("Next: %s (more changes to check)\n",
+			waitCommand(t, page.Cursor, parsed.filterArgs))
 		return nil
 	}
-	fmt.Printf("Cursor: %s (wait for more: %s)\n",
-		api.FormatRevision(page.Cursor), next)
+	printChangeCursor(os.Stdout, t, page.Cursor, parsed.filterArgs)
 	return nil
 }

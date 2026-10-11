@@ -14,8 +14,8 @@ import (
 var ErrMessageNotFound = errors.New("message not found")
 
 const messageColumns = `m.workspace_id, m.post_id, m.id, m.created_utc,
-	m.modified_utc, m.body, m.deleted, m.origin_user, m.origin_host,
-	m.origin_dir, m.origin_claude_session`
+	m.modified_utc, m.revision, m.body, m.deleted, m.origin_user,
+	m.origin_host, m.origin_dir, m.origin_claude_session`
 
 // scanMessage reads the messageColumns.
 func (s *Store) scanMessage(row rowScanner) (api.Message, error) {
@@ -23,7 +23,7 @@ func (s *Store) scanMessage(row rowScanner) (api.Message, error) {
 	var key Key
 	var created, modified string
 	err := row.Scan(&key.Workspace, &key.ID, &message.Number, &created,
-		&modified, &message.Body, &message.Deleted, &message.Origin.User,
+		&modified, &message.Revision, &message.Body, &message.Deleted, &message.Origin.User,
 		&message.Origin.Host, &message.Origin.Dir,
 		&message.Origin.ClaudeSession)
 	if err != nil {
@@ -233,10 +233,11 @@ func (s *Store) DeleteMessage(
 }
 
 // readChatPage reads the messages a query selects into a page, oldest
-// first. The query reads at most limit messages after since, so a full
-// page ends at its last message, and a page short of it has checked
-// every message after since, so its cursor passes them all. Remaining
-// counts the messages after the cursor.
+// first, with the latest revision the read saw. The query reads at most
+// limit messages after since, so a full page ends at its last message,
+// and a page short of it has checked every message after since, so its
+// cursor passes them all. Remaining counts the messages after the
+// cursor.
 func (s *Store) readChatPage(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -246,12 +247,16 @@ func (s *Store) readChatPage(
 	query string,
 	args ...any,
 ) (api.ChatPage, error) {
+	revision, err := revisionSeen(ctx, tx)
+	if err != nil {
+		return api.ChatPage{}, err
+	}
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return api.ChatPage{}, fmt.Errorf("reading chat: %w", err)
 	}
 	defer rows.Close()
-	page := api.ChatPage{Messages: []api.Message{}}
+	page := api.ChatPage{Messages: []api.Message{}, Revision: revision}
 	for rows.Next() {
 		message, err := s.scanMessage(rows)
 		if err != nil {
@@ -364,6 +369,10 @@ func (s *Store) Overview(
 		return api.ChatOverview{}, fmt.Errorf("reading chats: %w", err)
 	}
 	defer v.tx.Rollback()
+	overview := api.ChatOverview{Chats: []api.PostChat{}}
+	if overview.Revision, err = revisionSeen(ctx, v.tx); err != nil {
+		return api.ChatOverview{}, err
+	}
 
 	rows, err := v.tx.QueryContext(ctx, `
 		SELECT `+messageColumns+` FROM post_messages AS m
@@ -388,7 +397,6 @@ func (s *Store) Overview(
 
 	// Walking newest first meets each post at its newest message, so
 	// reversing the chats afterwards leaves the most recent last.
-	overview := api.ChatOverview{Chats: []api.PostChat{}}
 	chatOf := map[api.Ref]int{}
 	for _, message := range newestFirst {
 		if _, ok := chatOf[message.Post]; !ok {
