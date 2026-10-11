@@ -224,9 +224,9 @@ func (builder *whereBuilder) addFields(fields []fieldFilter) error {
 	return nil
 }
 
-// The filters split by what they can match. The text, origin and time
-// filters match a post, or a message on its own. The rest match only a
-// post, so a message meets them through the post it is in.
+// The filters split by what they can match. The content, origin and
+// time filters match a post, or a message on its own. The rest match
+// only a post, so a message meets them through the post it is in.
 
 // originFilters lists the origin filters, each on the column that
 // column gives for its field, such as origin_user.
@@ -287,8 +287,9 @@ func (builder *whereBuilder) addMessageFilters(filter Filter) error {
 }
 
 // buildMessageWhere builds the where clause a message m in the chat of
-// post e meets when it matches a filter. The message matches the text,
-// origin and time filters itself, and its post matches the rest.
+// post e meets when it matches a filter. The message matches the
+// content, origin and time filters itself, and its post matches the
+// rest.
 func buildMessageWhere(filter Filter) (whereBuilder, error) {
 	var builder whereBuilder
 	if err := builder.addPostOnly(filter); err != nil {

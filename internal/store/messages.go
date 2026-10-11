@@ -291,8 +291,8 @@ func (s *Store) readChatPage(
 
 // Messages returns up to limit messages of a post's chat from the bound
 // after on that match a filter, oldest first, leaving out those whose
-// origin has the key exclude, when there is one. The filter's text
-// matches each message.
+// origin has the key exclude, when there is one. A message matches as
+// buildMessageWhere has it.
 //
 // The page's cursor is the highest message number the read checked.
 // Every message up to it is in the page or did not match, so a read
