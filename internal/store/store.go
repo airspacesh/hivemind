@@ -112,6 +112,15 @@ CREATE TABLE entry_metadata (
 	FOREIGN KEY (workspace_id, entry_id) REFERENCES entries(workspace_id, id)
 ) WITHOUT ROWID`
 
+// createMetadataKeyIndex finds the entries that hold a metadata key, or
+// a key with a value, so a search by metadata need not read them all.
+// Only the search's lookup of candidates reads it. The listings'
+// metadata filters check each entry's own pairs, which SQLite reads
+// through the primary key instead.
+const createMetadataKeyIndex = `
+CREATE INDEX entry_metadata_key
+ON entry_metadata(workspace_id, key, value_lower)`
+
 // createActivityIndex reads a workspace's entries newest first by the
 // latest change to them or their chats, as a listing without chat ranks
 // them, with the time a span keeps to at hand.
@@ -337,8 +346,8 @@ var schemaSteps = []schemaStep{
 		statements: []string{
 			createWorkspaces, createRevisionCounter,
 			startRevisionCounter, createEntries, createMetadata,
-			createActivityIndex, createRevisionIndex,
-			createSubjectIndex, createProjectIndex,
+			createMetadataKeyIndex, createActivityIndex,
+			createRevisionIndex, createSubjectIndex, createProjectIndex,
 			createProjectCreatedIndex, createOriginUserIndex, createLinks,
 			createLinkTargetIndex, createOneParentIndex, createMessages,
 			createMessageOrderIndex, createMessagePostedIndex,
@@ -372,6 +381,8 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createMessageRevisionIndex)},
 			{"index", "entry_messages_workspace_order", "entry_messages",
 				normalizeSchemaSQL(createMessageOrderIndex)},
+			{"index", "entry_metadata_key", "entry_metadata",
+				normalizeSchemaSQL(createMetadataKeyIndex)},
 			{"table", "entries", "entries",
 				normalizeSchemaSQL(createEntries)},
 			{"table", "entry_links", "entry_links",

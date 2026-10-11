@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"path"
 	"reflect"
 	"slices"
 	"strings"
@@ -22,7 +23,7 @@ const activityExpr = `max(e.modified_utc, coalesce((
 
 // forestWriter makes random writes to two workspaces: entries with
 // random parents in the same workspace, supersessions across them,
-// origins, messages, and edits and deletes of both.
+// origins, metadata, messages, and edits and deletes of both.
 type forestWriter struct {
 	t           *testing.T
 	store       *Store
@@ -62,11 +63,21 @@ func (w *forestWriter) add() {
 	if w.writes%13 == 0 {
 		project = "c"
 	}
+	// Some entries hold jira, and a few jira-2 as well. The values are
+	// upper case, so the metadata filters match them regardless of case.
+	metadata := map[string]string{}
+	if w.writes%3 == 0 {
+		metadata["jira"] = fmt.Sprintf("PROJ-%d", w.writes%4)
+	}
+	if w.writes%9 == 0 {
+		metadata["jira-2"] = "PROJ-9"
+	}
 	entry := addTo(w.t, w.store, workspace, api.AddEntryRequest{
-		Project: project,
-		Subject: fmt.Sprintf("entry %d %s", w.writes, w.word()),
-		Links:   links,
-		Origin:  api.Origin{User: []string{"ines", "omar"}[w.random.Intn(2)]},
+		Project:  project,
+		Subject:  fmt.Sprintf("entry %d %s", w.writes, w.word()),
+		Metadata: metadata,
+		Links:    links,
+		Origin:   api.Origin{User: []string{"ines", "omar"}[w.random.Intn(2)]},
 	})
 	w.entries = append(w.entries, entry)
 	w.inWorkspace[workspace] = append(w.inWorkspace[workspace], entry.Ref)
@@ -90,9 +101,16 @@ func (w *forestWriter) write() {
 	switch choice := w.random.Intn(16); {
 	case choice < 3 && !w.deleted[entry.Ref.String()]:
 		subject := fmt.Sprintf("edited %d %s", w.writes, w.word())
+		edit := api.EditEntryRequest{Subject: &subject,
+			User: entry.Origin.User}
+		switch choice {
+		case 0:
+			edit.Metadata = map[string]string{"jira": ""}
+		case 1:
+			edit.Metadata = map[string]string{"jira": "PROJ-1"}
+		}
 		if _, err := w.store.Edit(ctx, everyAccess(w.store), key,
-			api.EditEntryRequest{Subject: &subject,
-				User: entry.Origin.User}); err != nil {
+			edit); err != nil {
 			w.t.Fatal(err)
 		}
 	case choice < 4:
@@ -200,6 +218,8 @@ type forestEntry struct {
 	project, text, user string
 	superseded          bool
 	parent              int64
+	// metadata holds the entry's values lowered, by key.
+	metadata map[string]string
 }
 
 type forestMessage struct {
@@ -239,7 +259,24 @@ func readForest(
 			&e.superseded, &e.parent); err != nil {
 			t.Fatal(err)
 		}
+		e.metadata = map[string]string{}
 		entries[e.id] = e
+	}
+	rows.Close()
+
+	rows, err = store.db.Query(`
+		SELECT entry_id, key, value_lower FROM entry_metadata
+		WHERE workspace_id = ?`, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id int64
+		var key, value string
+		if err := rows.Scan(&id, &key, &value); err != nil {
+			t.Fatal(err)
+		}
+		entries[id].metadata[key] = value
 	}
 	rows.Close()
 
@@ -265,9 +302,13 @@ func readForest(
 
 // listingCase is a listing the reference knows how to filter:
 // whole-value project and origin user patterns and a literal content
-// pattern, without wildcards.
+// pattern, without wildcards, and metadata patterns, whose only
+// wildcard is *. key holds a key, noKey does not, and metaKey and
+// metaValue hold a pair.
 type listingCase struct {
 	project, user, content string
+	key, noKey             string
+	metaKey, metaValue     string
 	span                   Span
 	revisions              RevisionSpan
 	under                  int64
@@ -286,6 +327,16 @@ func (c listingCase) filter(workspace int64) Filter {
 	}
 	if c.content != "" {
 		filter.Content = []FieldCond{{Value: c.content}}
+	}
+	if c.key != "" {
+		filter.Key = append(filter.Key, FieldCond{Value: c.key})
+	}
+	if c.noKey != "" {
+		filter.Key = append(filter.Key,
+			FieldCond{Negate: true, Value: c.noKey})
+	}
+	if c.metaKey != "" {
+		filter.Meta = []MetaCond{{Key: c.metaKey, Value: c.metaValue}}
 	}
 	if c.under != 0 {
 		filter.Under = &Key{workspace, c.under}
@@ -313,8 +364,21 @@ func referenceListing(
 		}
 		return c.under == 0
 	}
+	holds := func(e forestEntry, keyPattern, valuePattern string) bool {
+		for key, value := range e.metadata {
+			keyMatched, _ := path.Match(keyPattern, key)
+			valueMatched, _ := path.Match(valuePattern, value)
+			if keyMatched && valueMatched {
+				return true
+			}
+		}
+		return false
+	}
 	listed := func(e forestEntry) bool {
 		return (c.project == "" || e.project == c.project) &&
+			(c.key == "" || holds(e, c.key, "*")) &&
+			(c.noKey == "" || !holds(e, c.noKey, "*")) &&
+			(c.metaKey == "" || holds(e, c.metaKey, c.metaValue)) &&
 			(c.includeSuperseded || !e.superseded) && under(e.id)
 	}
 	matched := func(text, user string) bool {
@@ -499,6 +563,10 @@ func TestListingMatchesTheReference(t *testing.T) {
 			{}, {project: "a"}, {user: "ines"}, {content: "heron"},
 			{project: "b", user: "omar"}, {project: "c"},
 			{project: "c", content: "duck"}, {project: "nothing"},
+			{key: "jira"}, {key: "nothing"}, {key: "jira*"},
+			{noKey: "jira"}, {metaKey: "jira", metaValue: "proj-1"},
+			{metaKey: "jira*", metaValue: "proj-9"},
+			{project: "c", metaKey: "jira", metaValue: "proj-*"},
 		} {
 			for _, under := range append([]int64{0}, unders...) {
 				for _, span := range spans {

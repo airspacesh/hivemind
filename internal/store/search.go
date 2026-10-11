@@ -448,16 +448,16 @@ func (v view) findOriginCandidates(
 	return found, true, nil
 }
 
-// candidateReadCost is what reading a project's entry by key, and the
+// candidateReadCost is what reading a candidate entry by key, and the
 // messages in its chat, costs a listing, in entries read newest first.
 const candidateReadCost = 8
 
-// projectCandidateLimit bounds the entries a listing reads by key when
-// the project filters narrow it to those. A listing that reads entries
-// newest first reads about limit*total/n of a workspace's total to
-// find a page among n that match, if they are spread evenly, so it
+// lookupEntryLimit bounds the entries a listing reads by key when the
+// project or metadata filters narrow it to those. A listing that reads
+// entries newest first reads about limit*total/n of a workspace's total
+// to find a page among n that match, if they are spread evenly, so it
 // reads by key only while candidateReadCost*n costs less.
-func (v view) projectCandidateLimit(
+func (v view) lookupEntryLimit(
 	ctx context.Context, workspace int64, limit int,
 ) (int, error) {
 	// Entries are never removed and their ids count up from 1 in each
@@ -478,8 +478,7 @@ func (v view) projectCandidateLimit(
 // in the project indexes. The candidates come sorted. It reports false
 // when there are no project filters, when a lookup finds more than
 // limit rows, or when the projects hold too many entries to read them
-// sooner than a page found newest first, as projectCandidateLimit has
-// it.
+// sooner than a page found newest first, as lookupEntryLimit has it.
 func (v view) findProjectCandidates(
 	ctx context.Context, workspace int64, filter Filter, limit int,
 ) (candidateSet, bool, error) {
@@ -491,8 +490,7 @@ func (v view) findProjectCandidates(
 		filter.Project); err != nil {
 		return candidateSet{}, false, err
 	}
-	entryLimit, err := v.projectCandidateLimit(ctx, workspace,
-		filter.Limit)
+	entryLimit, err := v.lookupEntryLimit(ctx, workspace, filter.Limit)
 	if err != nil {
 		return candidateSet{}, false, err
 	}
@@ -528,10 +526,83 @@ func (v view) findProjectCandidates(
 	return found, true, nil
 }
 
+// findMetadataCandidates lists the entries of a workspace that hold the
+// pair the first metadata filter not negated asks for, or failing that,
+// the key the first key filter not negated asks for, and when the search
+// covers chat, the messages in their chats. It finds them in the
+// metadata key index. The candidates come sorted. It reports false when
+// there is no such filter, when a lookup finds more than limit rows, or
+// when the entries are too many to read them sooner than a page found
+// newest first, as lookupEntryLimit has it.
+func (v view) findMetadataCandidates(
+	ctx context.Context, workspace int64, filter Filter, limit int,
+) (candidateSet, bool, error) {
+	// A key pattern with no wildcard or class matches that one key, and
+	// = rather than GLOB lets SQLite seek to the value pattern's literal
+	// start within the key.
+	keyMatch := func(pattern string) (string, []any) {
+		pattern = lowerASCII(pattern)
+		if strings.ContainsAny(pattern, "*?[") {
+			return ` AND key GLOB ?`, []any{pattern}
+		}
+		return ` AND key = ?`, []any{pattern}
+	}
+	var match string
+	var args []any
+	pair := slices.IndexFunc(filter.Meta, func(condition MetaCond) bool {
+		return !condition.Negate
+	})
+	key := slices.IndexFunc(filter.Key, func(condition FieldCond) bool {
+		return !condition.Negate
+	})
+	switch {
+	case pair >= 0:
+		match, args = keyMatch(filter.Meta[pair].Key)
+		match += ` AND value_lower GLOB ?`
+		args = append(args, lowerASCII(filter.Meta[pair].Value))
+	case key >= 0:
+		match, args = keyMatch(filter.Key[key].Value)
+	default:
+		return candidateSet{}, false, nil
+	}
+	entryLimit, err := v.lookupEntryLimit(ctx, workspace, filter.Limit)
+	if err != nil {
+		return candidateSet{}, false, err
+	}
+
+	var found candidateSet
+	var ok bool
+	// A key pattern may match several keys of one entry.
+	found.entries, ok, err = v.readCandidates(ctx, `
+		SELECT DISTINCT entry_id FROM entry_metadata
+		WHERE workspace_id = ?`+match+` LIMIT ?`,
+		min(limit, entryLimit), append([]any{workspace}, args...)...)
+	if err != nil {
+		return candidateSet{}, false, fmt.Errorf(
+			"looking up metadata: %w", err)
+	}
+	if !ok {
+		return candidateSet{}, false, nil
+	}
+	if filter.IncludeChat {
+		found.messages, ok, err = v.readChatCandidates(ctx, workspace,
+			found.entries, limit)
+		if err != nil {
+			return candidateSet{}, false, err
+		}
+		if !ok {
+			return candidateSet{}, false, nil
+		}
+	}
+	slices.Sort(found.entries)
+	slices.Sort(found.messages)
+	return found, true, nil
+}
+
 // findIndexedCandidates lists the entries and messages of a workspace
 // a search may match, as the text and origin user indexes and the
-// project lookup find them. It reports false when none of them narrows
-// the search to at most limit rows of each.
+// project and metadata lookups find them. It reports false when none of
+// them narrows the search to at most limit rows of each.
 func (v view) findIndexedCandidates(
 	ctx context.Context, workspace int64, filter Filter, limit int,
 ) (candidateSet, bool, error) {
@@ -545,6 +616,7 @@ func (v view) findIndexedCandidates(
 		context.Context, int64, Filter, int,
 	) (candidateSet, bool, error){
 		v.findOriginCandidates, v.findProjectCandidates,
+		v.findMetadataCandidates,
 	} {
 		others, othersFound, err := find(ctx, workspace, filter, limit)
 		if err != nil {
