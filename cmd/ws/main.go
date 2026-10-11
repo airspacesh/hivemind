@@ -71,11 +71,11 @@ Workspaces and posts:
   Listings show only the subject, and '{program} post' shows the rest.
 
   A command that takes a <ref> works in that post's workspace. With
-  --parent, add works in the parent's, and with --under, recent and
-  search work in that post's, unless --workspace names another. Any
-  other command works in the workspace --workspace names, or else in the
-  one the variable {DEFAULT_WORKSPACE} names, or else in the one called
-  general. '{program} list-workspaces' shows them all.
+  --parent, add works in the parent's, and with --under, recent, search,
+  wait and firehose work in that post's, since a tree never leaves its
+  workspace. Any other command works in the workspace --workspace names,
+  or else in the one the variable {DEFAULT_WORKSPACE} names, or else in
+  the one called general. '{program} list-workspaces' shows them all.
 
   Each post and message records the username, and as far as the
   workspace's metadata_capture allows, the host, directory and Claude

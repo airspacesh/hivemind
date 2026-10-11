@@ -388,7 +388,8 @@ func TestAddTakesItsParentsWorkspace(t *testing.T) {
 }
 
 // A subtree is always in its root's workspace, so a search under a post
-// looks in that post's workspace unless --workspace names one.
+// looks in that post's workspace, and a --workspace naming another would
+// find nothing.
 func TestSearchUnderTakesItsPostsWorkspace(t *testing.T) {
 	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -405,6 +406,13 @@ func TestSearchUnderTakesItsPostsWorkspace(t *testing.T) {
 		got := ws(t, config, command, "--under", "p3")
 		if !got.ok {
 			t.Fatalf("%s --under p3: %+v", command, got)
+		}
+	}
+	for _, command := range []string{"search", "recent", "wait"} {
+		got := ws(t, config, command, "--under", "p3", "--workspace",
+			"general")
+		if got.ok || !strings.Contains(got.stderr, "workspace personal") {
+			t.Errorf("%s --under p3 --workspace general: %+v", command, got)
 		}
 	}
 }

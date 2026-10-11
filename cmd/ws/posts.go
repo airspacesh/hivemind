@@ -536,7 +536,8 @@ func cmdTree(c *client, args []string) error {
 }
 
 // addUnder adds the --under a command was given to its query, which
-// must name a post on the target's server.
+// must name a post in the target's workspace, since a subtree never
+// leaves its workspace.
 func (c *client) addUnder(t target, p *parsedArgs, query url.Values) error {
 	if !p.has("--under") {
 		return nil
@@ -549,10 +550,11 @@ func (c *client) addUnder(t target, p *parsedArgs, query url.Values) error {
 	if err != nil {
 		return err
 	}
-	if home.server != t.server {
-		return fmt.Errorf("%s is on %s, but workspace %s is on %s. "+
-			"Pass --workspace to name a workspace on %s", under,
-			home.server, t.workspace, t.server, home.server)
+	if home.server != t.server || home.workspace != t.workspace {
+		return fmt.Errorf("%s is in workspace %s on %s, not in %s on %s, "+
+			"so nothing in %s is under it. Leave out --workspace to work "+
+			"in %s", under, home.workspace, home.server, t.workspace,
+			t.server, t.workspace, home.workspace)
 	}
 	query.Set("under", under.String())
 	return nil
