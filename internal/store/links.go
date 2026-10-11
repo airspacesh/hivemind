@@ -61,25 +61,36 @@ func (v view) reaches(
 	return found, nil
 }
 
-// addLink links source to a post the request can read. A target it
-// cannot read is refused as if it were missing, so a link cannot probe
-// another workspace.
-func (v view) addLink(ctx context.Context, source Key, link api.Link) error {
+// linkTarget finds the post a link from source names, which must be a
+// post the request can read. A target it cannot read is refused as if
+// it were missing, so a link cannot probe another workspace.
+func (v view) linkTarget(
+	ctx context.Context, source Key, link api.Link,
+) (Key, error) {
 	target, err := v.store.Resolve(link.Ref)
 	if err != nil {
-		return err
+		return Key{}, err
 	}
 	if link.Name == api.ParentLink && target.Workspace != source.Workspace {
-		return fmt.Errorf("%w: %s is in another workspace than %s",
+		return Key{}, fmt.Errorf("%w: %s is in another workspace than %s",
 			ErrParentWorkspace, link.Ref, v.store.mustRef(source))
 	}
 	if !v.access.CanRead(target.Workspace) {
-		return fmt.Errorf("%w: %s", ErrLinkTarget, link.Ref)
+		return Key{}, fmt.Errorf("%w: %s", ErrLinkTarget, link.Ref)
 	}
 	err = v.checkPostExists(ctx, target)
 	if errors.Is(err, ErrPostNotFound) {
-		return fmt.Errorf("%w: %s", ErrLinkTarget, link.Ref)
+		return Key{}, fmt.Errorf("%w: %s", ErrLinkTarget, link.Ref)
 	}
+	if err != nil {
+		return Key{}, err
+	}
+	return target, nil
+}
+
+// addLink links source to the post a link names.
+func (v view) addLink(ctx context.Context, source Key, link api.Link) error {
+	target, err := v.linkTarget(ctx, source, link)
 	if err != nil {
 		return err
 	}

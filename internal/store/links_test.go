@@ -122,6 +122,26 @@ func TestParentAndSupersessionLoopsAreRefused(t *testing.T) {
 	}
 }
 
+// The id a new post will take names no post until the post is added, so
+// a link to it is refused as a link to a missing post, not stored as a
+// link to the new post itself.
+func TestNewPostCannotLinkToItsOwnID(t *testing.T) {
+	store := openTestStore(t)
+	next := api.Ref{Prefix: "e", ID: 1}
+	for _, name := range []string{"see", api.ParentLink,
+		api.SupersedesLink} {
+		_, err := store.Add(context.Background(), everyAccess(store),
+			workspaceID(t, store, "general"), api.AddPostRequest{
+				Subject: "self",
+				Links:   []api.Link{link(name, next)},
+			})
+		if !errors.Is(err, ErrLinkTarget) {
+			t.Fatalf("adding %s with %s %s = %v, want ErrLinkTarget",
+				next, name, next, err)
+		}
+	}
+}
+
 func TestOtherLinksMayLoop(t *testing.T) {
 	store := openTestStore(t)
 	a := mustAdd(t, store, "a", "", nil)

@@ -186,6 +186,13 @@ func (s *Store) Add(
 	).Scan(&key.ID); err != nil {
 		return api.Post{}, fmt.Errorf("numbering post: %w", err)
 	}
+	// The new post's own id names no post until the insert, so its
+	// links' targets are checked before it.
+	for _, link := range req.Links {
+		if _, err := v.linkTarget(ctx, key, link); err != nil {
+			return api.Post{}, err
+		}
+	}
 	revision, err := nextRevision(ctx, v.tx)
 	if err != nil {
 		return api.Post{}, err
