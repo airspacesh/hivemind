@@ -186,6 +186,8 @@ func TestFilteredChatCursorPassesWhatDoesNotMatch(t *testing.T) {
 		{0, quack, &OriginKey{User: testUser}, 10,
 			"e1-m2:quack cursor=5 remaining=0"},
 		{9, quack, nil, 10, " cursor=9 remaining=0"},
+		{0, Filter{OriginUser: []FieldCond{{Value: "heron"}}}, nil, 10,
+			"e1-m2:quack cursor=5 remaining=0"},
 	} {
 		page, err := store.Messages(context.Background(),
 			store.mustKey(entry.Ref), test.since, test.filter, test.exclude,

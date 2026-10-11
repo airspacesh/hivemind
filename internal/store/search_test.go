@@ -419,6 +419,104 @@ func TestSearchMatchesEachMessageOnItsOwn(t *testing.T) {
 	}
 }
 
+// A message matches the text and origin filters on its own, and the
+// other filters through its entry.
+func TestSearchMatchesMessagesByOrigin(t *testing.T) {
+	store := openTestStore(t)
+	add := func(user, project, subject string) api.Entry {
+		t.Helper()
+		return addTo(t, store, "default", api.AddEntryRequest{
+			Project: project, Subject: subject,
+			Origin: api.Origin{User: user},
+		})
+	}
+	design := add("ines", "build", "Hook design")
+	release := add("ken", "build", "Release notes")
+	cats := add("ines", "pets", "Cats")
+	garden := add("ken", "garden", "Garden")
+	postAs(t, store, "ken", release.Ref, "hook fails")
+	postAs(t, store, "ines", release.Ref, "hook fixed")
+	postAs(t, store, "ines", release.Ref, "lunch")
+	postAs(t, store, "ken", cats.Ref, "hook question")
+	postAs(t, store, "ines", garden.Ref, "hook in the garden")
+	hook := []FieldCond{{Value: "hook"}}
+	ines := []FieldCond{{Value: "ines"}}
+	notInes := []FieldCond{{Negate: true, Value: "ines"}}
+
+	shown := func(result api.SearchResult) map[string][]string {
+		bodies := map[string][]string{}
+		for _, entry := range result.Entries {
+			bodies[entry.Subject] = messageBodies(entry.MatchingMessages)
+		}
+		return bodies
+	}
+	tests := []struct {
+		name   string
+		filter Filter
+		want   []api.Ref
+		shown  map[string][]string
+	}{
+		{"text and origin match the same message",
+			Filter{Content: hook, OriginUser: ines},
+			[]api.Ref{garden.Ref, release.Ref, design.Ref},
+			map[string][]string{"Garden": {"hook in the garden"},
+				"Release notes": {"hook fixed"}, "Hook design": nil}},
+		{"an origin alone searches chat",
+			Filter{OriginUser: ines},
+			[]api.Ref{garden.Ref, release.Ref, cats.Ref, design.Ref},
+			map[string][]string{"Garden": {"hook in the garden"},
+				"Release notes": {"hook fixed", "lunch"}, "Cats": nil,
+				"Hook design": nil}},
+		{"the other filters apply to a message's entry",
+			Filter{OriginUser: ines, Project: []FieldCond{{Value: "build"}}},
+			[]api.Ref{release.Ref, design.Ref},
+			map[string][]string{"Release notes": {"hook fixed", "lunch"},
+				"Hook design": nil}},
+		{"an excluded origin excludes messages too",
+			Filter{Content: hook, OriginUser: notInes},
+			[]api.Ref{cats.Ref, release.Ref},
+			map[string][]string{"Cats": {"hook question"},
+				"Release notes": {"hook fails"}}},
+		{"an excluded origin alone does not search chat",
+			Filter{OriginUser: notInes},
+			[]api.Ref{garden.Ref, release.Ref},
+			map[string][]string{"Garden": nil, "Release notes": nil}},
+		{"entries only",
+			Filter{OriginUser: ines, EntriesOnly: true},
+			[]api.Ref{cats.Ref, design.Ref},
+			map[string][]string{"Cats": nil, "Hook design": nil}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := runSearch(t, store, test.filter)
+			assertEntryRefs(t, result.Entries, test.want...)
+			if got := shown(result); !reflect.DeepEqual(got, test.shown) {
+				t.Fatalf("matching messages = %q, want %q", got, test.shown)
+			}
+		})
+	}
+}
+
+// The text indexes find an old entry by its own text, and its messages
+// then match by origin.
+func TestSearchMatchesMessagesByOriginInEntriesTheIndexFinds(t *testing.T) {
+	store := openTestStore(t)
+	heron := mustAdd(t, store, "Heron at dawn", "", nil)
+	postAs(t, store, "ines", heron.Ref, "seen twice")
+	postAs(t, store, "ken", heron.Ref, "seen once")
+	addFiller(t, store)
+
+	result := runSearch(t, store, Filter{
+		Subject:    []FieldCond{{Value: "heron"}},
+		OriginUser: []FieldCond{{Value: "ines"}},
+	})
+	assertEntryRefs(t, result.Entries, heron.Ref)
+	got := messageBodies(result.Entries[0].MatchingMessages)
+	if !reflect.DeepEqual(got, []string{"seen twice"}) {
+		t.Fatalf("matching messages = %q, want ines's alone", got)
+	}
+}
+
 func messageRefs(messages []api.Message) []string {
 	var refs []string
 	for _, message := range messages {

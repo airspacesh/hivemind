@@ -60,6 +60,15 @@ var changesQueryParameters = map[string]bool{
 var messageConditionParameters = map[string]bool{
 	"content":    true,
 	"no-content": true,
+
+	"origin-user":              true,
+	"no-origin-user":           true,
+	"origin-host":              true,
+	"no-origin-host":           true,
+	"origin-dir":               true,
+	"no-origin-dir":            true,
+	"origin-claude-session":    true,
+	"no-origin-claude-session": true,
 }
 
 // chatQueryParameters are the parameters of a chat read, besides its

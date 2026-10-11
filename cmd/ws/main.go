@@ -138,18 +138,24 @@ Search filters (recent, search, wait and firehose):
   duck does not match duck-pond. An empty pattern matches only an
   empty value. Prefix a filter with no- to exclude, as in --no-project.
   Filters AND together.
-  '{program} search' and '{program} recent --flat' also match <text> and
-  --content against each message in an entry's chat, while the other
-  filters still apply to the entry. An entry ranks by its newest match.
-  A page shows the 30 most recently sent matching messages beneath their
-  entries, and counts each entry's other matching messages.
+  '{program} search' and '{program} recent --flat' also search each
+  message in an entry's chat when they require text or an origin. A
+  message matches when it meets the text and origin filters itself,
+  excluding ones included, and its entry meets the others. An entry
+  matches when it meets every filter itself. So 'search hook
+  --origin-user ines --project build' finds the messages ines sent
+  that mention hook in the chats of build entries, and the build
+  entries by ines that mention hook. Excluding alone does not search
+  chat. An entry ranks by its newest match. A page shows the 30 most
+  recently sent matching messages beneath their entries, and counts
+  each entry's other matching messages.
   --limit <n>, -n <n>    entries to show (default 20)
   --offset <n>           skip the first n matches
   --order-by-modified    newest first by modification time (default)
   --order-by-creation    newest first by creation time (with --flat)
   --id-only              print one entry id per line
   --include-superseded   include superseded entries
-  --entries-only         leave chats out of a search for text
+  --entries-only         leave chats out of a search
 
 Chat:
   Every entry has a chat. A message's id is the entry id, -m, and a
@@ -168,9 +174,10 @@ Chat:
   time, and says how to read the next page.
   '{program} chat wait' returns as soon as a message arrives after
   --since that matches its filters and is not yours, and prints only
-  the messages that match, then the cursor. --content and --no-content
-  match each message's text, as in a search. The cursor passes every
-  message the wait checked, matching or not, so wait on from it.
+  the messages that match, then the cursor. --content and the origin
+  filters, and their no- forms, match each message itself, as in a
+  search. The cursor passes every message the wait checked, matching
+  or not, so wait on from it.
   A message is yours when it came from your user in your current Claude
   Code session. Outside a session, or when the workspace does not
   capture the session, it is yours when it came from your user outside
@@ -193,13 +200,13 @@ Changes:
   '{program} wait' returns as soon as a change after --since matches its
   filters and is not yours, and prints only the changes that match,
   then the cursor. The search filters and --under match an entry's
-  change against the entry, and a message's change against its entry,
-  except that --content matches the message's own text. A change is
-  yours as in chat wait, by the origin of the entry or message. An edit
-  keeps the origin, so it counts as a change by the session that added
-  the entry or sent the message. The cursor passes every change the
-  wait checked, matching or not, so wait on from it. It polls as chat
-  wait does.
+  change against the entry, and a message's change as in a search, so
+  the text and origin filters match the message itself and the others
+  its entry. A change is yours as in chat wait, by the origin of the
+  entry or message. An edit keeps the origin, so it counts as a change
+  by the session that added the entry or sent the message. The cursor
+  passes every change the wait checked, matching or not, so wait on
+  from it. It polls as chat wait does.
   '{program} firehose' prints every change that matches its filters as
   it arrives, each batch followed by its cursor, until interrupted or
   --timeout passes. It shows your own changes unless --exclude-mine

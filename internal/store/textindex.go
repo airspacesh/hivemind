@@ -87,8 +87,8 @@ func (q *indexQuery) add(conditions []FieldCond) {
 // when the search covers chat, a message in whose chat, holds the
 // literal text the search requires, by looking it up in the text
 // indexes. It reports false when the search names no text the indexes
-// can look up, for the entries or the messages, or when an index finds
-// more than limit rows.
+// can look up for the entries, or when an index finds more than limit
+// rows.
 func (v view) findTextCandidates(
 	ctx context.Context,
 	workspace int64,
@@ -107,8 +107,13 @@ func (v view) findTextCandidates(
 		return entries, ok, err
 	}
 
+	// A matching message's entry holds the subject and body text, so
+	// with no text for the messages, the entries found are enough.
 	var messageQuery indexQuery
 	messageQuery.add(filter.Content)
+	if len(messageQuery) == 0 {
+		return entries, true, nil
+	}
 	chats, ok, err := v.lookUpText(ctx, `
 		SELECT m.entry_id FROM message_text
 		JOIN entry_messages AS m

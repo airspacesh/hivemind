@@ -344,14 +344,15 @@ func cmdChatWait(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
 		strs:   []string{"--since", "--timeout"},
 		bools:  mineFlags,
-		repeat: filterFlags("content"),
+		repeat: filterFlags(messageFields...),
 	})
 	if err != nil {
 		return err
 	}
 	if len(p.pos) != 1 {
 		return usageError("chat wait <ref> --since <n> [--timeout <d>] " +
-			"[--content <pattern>]... [--exclude-mine|--include-mine]")
+			"[--content <pattern>]... [--origin-user <pattern>]... " +
+			"[--exclude-mine|--include-mine]")
 	}
 	ref, err := api.ParseRef(p.pos[0])
 	if err != nil {

@@ -443,6 +443,20 @@ check_equal "anyone can chat on another user's entry" "Sent [$heron-m1]." \
     "$(ws chat send "$heron" "Please fix the subject")"
 post_as_heron "entries/$heron/messages" \
     '{"body":"Fixed soon","origin":{"user":"heron"}}'
+check "an origin filter finds that user's messages" "  [$heron-m2]" \
+    "$(ws search --origin-user heron)"
+check_equal "a message meets the text and origin filters itself" "" \
+    "$(ws search Please --origin-user heron --id-only)"
+heron_changes="$(ws wait --since 0 --origin-user heron --include-mine \
+    --timeout 1s)"
+check "a wait's origin filter matches a message's own origin" \
+    "[$heron-m2]" "$heron_changes"
+check_equal "a wait's origin filter leaves out others' messages" "" \
+    "$(echo "$heron_changes" | grep -F "[$heron-m1]" || true)"
+check_equal "a chat wait's origin filter matches each message" \
+    "[$heron-m2]" \
+    "$(ws chat wait "$heron" --since 0 --origin-user heron --include-mine \
+        --timeout 1s | grep -o "^\[$heron-m[0-9]*\]")"
 check "an edit of another user's message is refused" \
     "$heron-m2 was posted by heron, so only heron can edit it" \
     "$(ws chat edit "$heron-m2" "Taken" 2>&1 || true)"

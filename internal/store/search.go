@@ -45,8 +45,8 @@ type Filter struct {
 	OriginClaudeSession []FieldCond
 
 	View View
-	// EntriesOnly keeps a flat search for text to entries, leaving out
-	// the messages in their chats.
+	// EntriesOnly keeps a flat search to entries, leaving out the
+	// messages in their chats.
 	EntriesOnly bool
 	// Under limits the search to an entry and its descendants, when set.
 	Under             *Key
@@ -188,55 +188,97 @@ func matchAnywhere(conditions []FieldCond) []FieldCond {
 	return widened
 }
 
-func buildWhere(filter Filter) (whereBuilder, error) {
-	var builder whereBuilder
-	fields := []struct {
-		name       string
-		column     string
-		conditions []FieldCond
-	}{
-		{"subject", "e.subject_lower", matchAnywhere(filter.Subject)},
-		{"body", "e.body_lower", matchAnywhere(filter.Body)},
-		{"project", "e.project_lower", filter.Project},
-		{"origin-user", "e.origin_user_lower", filter.OriginUser},
-		{"origin-host", "e.origin_host_lower", filter.OriginHost},
-		{"origin-dir", "e.origin_dir_lower", filter.OriginDir},
-		{"origin-claude-session", "e.origin_claude_session_lower", filter.OriginClaudeSession},
-	}
+// fieldFilter is a filter on one column: its name in errors, the
+// column, and its conditions.
+type fieldFilter struct {
+	name       string
+	column     string
+	conditions []FieldCond
+}
+
+func (builder *whereBuilder) addFields(fields []fieldFilter) error {
 	for _, field := range fields {
 		if err := builder.addField(
 			field.name, field.column, field.conditions,
 		); err != nil {
-			return whereBuilder{}, err
+			return err
 		}
 	}
+	return nil
+}
+
+// The filters split by what they can match. The text and origin
+// filters match an entry, or a message on its own. The rest match only
+// an entry, so a message meets them through the entry it is in.
+
+// originFilters lists the origin filters, each on the column that
+// column gives for its field, such as origin_user.
+func originFilters(
+	filter Filter, column func(field string) string,
+) []fieldFilter {
+	return []fieldFilter{
+		{"origin-user", column("origin_user"), filter.OriginUser},
+		{"origin-host", column("origin_host"), filter.OriginHost},
+		{"origin-dir", column("origin_dir"), filter.OriginDir},
+		{"origin-claude-session", column("origin_claude_session"),
+			filter.OriginClaudeSession},
+	}
+}
+
+// addEntryOnly adds the filters only an entry e can match.
+func (builder *whereBuilder) addEntryOnly(filter Filter) error {
+	if err := builder.addFields([]fieldFilter{
+		{"subject", "e.subject_lower", matchAnywhere(filter.Subject)},
+		{"body", "e.body_lower", matchAnywhere(filter.Body)},
+		{"project", "e.project_lower", filter.Project},
+	}); err != nil {
+		return err
+	}
 	if err := builder.addKeys(filter.Key); err != nil {
+		return err
+	}
+	return builder.addMetadata(filter.Meta)
+}
+
+// buildWhere builds the clause an entry e meets when it matches every
+// filter itself.
+func buildWhere(filter Filter) (whereBuilder, error) {
+	var builder whereBuilder
+	if err := builder.addEntryOnly(filter); err != nil {
 		return whereBuilder{}, err
 	}
 	if err := builder.addContent(matchAnywhere(filter.Content)); err != nil {
 		return whereBuilder{}, err
 	}
-	if err := builder.addMetadata(filter.Meta); err != nil {
+	if err := builder.addFields(originFilters(filter,
+		func(field string) string { return "e." + field + "_lower" },
+	)); err != nil {
 		return whereBuilder{}, err
 	}
 	return builder, nil
 }
 
+// addMessageFilters adds the filters a message m matches on its own.
+func (builder *whereBuilder) addMessageFilters(filter Filter) error {
+	return builder.addFields(append([]fieldFilter{
+		{"content", "lower(m.body)", matchAnywhere(filter.Content)},
+	}, originFilters(filter,
+		func(field string) string { return "lower(m." + field + ")" },
+	)...))
+}
+
 // buildMessageWhere builds the where clause a message m in the chat of
-// entry e meets when it matches a filter. The filter's text matches the
-// message, and the rest of the filter matches its entry.
+// entry e meets when it matches a filter. The message matches the text
+// and origin filters itself, and its entry matches the rest.
 func buildMessageWhere(filter Filter) (whereBuilder, error) {
-	entryFilter := filter
-	entryFilter.Content = nil
-	where, err := buildWhere(entryFilter)
-	if err != nil {
+	var builder whereBuilder
+	if err := builder.addEntryOnly(filter); err != nil {
 		return whereBuilder{}, err
 	}
-	if err := where.addField("content", "lower(m.body)",
-		matchAnywhere(filter.Content)); err != nil {
+	if err := builder.addMessageFilters(filter); err != nil {
 		return whereBuilder{}, err
 	}
-	return where, nil
+	return builder, nil
 }
 
 func (builder whereBuilder) sql() string {
@@ -377,15 +419,21 @@ const (
 )
 
 // searchesChat reports whether a flat search matches messages as well
-// as entries, which it does when it requires some text, unless it
-// keeps to entries.
+// as entries, which it does when it requires some text or origin,
+// unless it keeps to entries. Excluding alone does not search chat, or
+// nearly every message would match.
 func searchesChat(filter Filter) bool {
 	if filter.EntriesOnly {
 		return false
 	}
-	for _, condition := range filter.Content {
-		if !condition.Negate {
-			return true
+	for _, conditions := range [][]FieldCond{
+		filter.Content, filter.OriginUser, filter.OriginHost,
+		filter.OriginDir, filter.OriginClaudeSession,
+	} {
+		for _, condition := range conditions {
+			if !condition.Negate {
+				return true
+			}
 		}
 	}
 	return false
@@ -413,10 +461,10 @@ type matchScope struct {
 
 // matchQuery selects a flat search's matches as entry ids, each with
 // the time it ranks by, newest first. A match is an entry the search
-// matches, or when it searches chat, a message the search's text
-// matches in the chat of an entry the rest of the search matches.
-// Unless it keeps to candidates, it walks the entries and messages
-// newest first, so a reader can stop once it has a page.
+// matches, or when it searches chat, a message the search matches, as
+// buildMessageWhere has it. Unless it keeps to candidates, it walks the
+// entries and messages newest first, so a reader can stop once it has
+// a page.
 func matchQuery(
 	workspace int64,
 	filter Filter,
@@ -559,22 +607,22 @@ func (v view) rankMatches(
 }
 
 // showMatchingMessages gives the entries of a page of a search the
-// messages in their chats that the search's text matches, the latest
-// posted first until the page's budget is spent, and counts each
-// entry's matches left out.
+// messages in their chats that the search matches, the latest posted
+// first until the page's budget is spent, and counts each entry's
+// matches left out. The entries of the page meet the filters only an
+// entry matches, so the messages need only meet the others.
 func (v view) showMatchingMessages(
 	ctx context.Context,
 	workspace int64,
 	page []api.MatchedEntry,
-	content []FieldCond,
+	filter Filter,
 ) error {
 	ids := make([]int64, len(page))
 	for i, entry := range page {
 		ids[i] = entry.Ref.ID
 	}
 	where := whereBuilder{args: []any{idsJSON(ids)}}
-	if err := where.addField("content", "lower(m.body)",
-		matchAnywhere(content)); err != nil {
+	if err := where.addMessageFilters(filter); err != nil {
 		return err
 	}
 	where.clauses = append(where.clauses, `m.workspace_id = ?`,
@@ -721,7 +769,7 @@ func (v view) searchFlat(
 		return api.SearchResult{}, err
 	}
 	if searchesChat(filter) {
-		err := v.showMatchingMessages(ctx, workspace, listed, filter.Content)
+		err := v.showMatchingMessages(ctx, workspace, listed, filter)
 		if err != nil {
 			return api.SearchResult{}, err
 		}

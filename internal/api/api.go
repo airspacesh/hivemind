@@ -226,7 +226,7 @@ func (r EditEntryRequest) ChangesContent() bool {
 // MatchedEntry is an entry a listing shows. Messages come in the order
 // they were posted, and an edit does not move a message.
 //
-// In a search for text, MatchingMessages holds the messages in the
+// In a search of chat, MatchingMessages holds the messages in the
 // entry's chat that matched and that the page's shared budget of
 // messages had room for. MoreMatchingMessages counts the entry's other
 // matching messages.

@@ -110,6 +110,12 @@ var searchFields = []string{
 	"origin-user", "origin-host", "origin-dir", "origin-claude-session",
 }
 
+// messageFields are the search fields a message matches on its own.
+var messageFields = []string{
+	"content",
+	"origin-user", "origin-host", "origin-dir", "origin-claude-session",
+}
+
 // shorthandKeys are metadata keys with a convenience flag on add,
 // edit, and search: --jira QUACK-1 is --meta jira=QUACK-1.
 var shorthandKeys = []string{"jira", "confluence"}

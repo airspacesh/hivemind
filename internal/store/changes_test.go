@@ -339,6 +339,13 @@ func TestFilteredChangesShowEachMatchOnceAtAnyLimitAndSpan(t *testing.T) {
 		{"text, which a message matches by its own", Filter{
 			Content: []FieldCond{{Value: "QUACK"}}}, nil,
 			[]string{"e1-m1", "e2-m1"}},
+		{"an origin, which a message matches by its own", Filter{
+			OriginUser: []FieldCond{{Value: "heron"}}}, nil,
+			[]string{"e2-m1", "e3"}},
+		{"text and origin, which must match the same message", Filter{
+			Content:    []FieldCond{{Value: "QUACK"}},
+			OriginUser: []FieldCond{{Value: testUser}}}, nil,
+			[]string{"e1-m1"}},
 		{"the lead session's", Filter{},
 			&OriginKey{User: testUser, ClaudeSession: "lead"},
 			[]string{"e2", "e2-m1", "e1-m2", "e3"}},
