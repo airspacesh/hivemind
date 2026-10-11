@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -886,5 +887,79 @@ func TestForumNamesItselfAndReadsOnlyItsConfig(t *testing.T) {
 	if !strings.Contains(help, "FORUM_DEFAULT_WORKSPACE") ||
 		!strings.Contains(help, "~/.config/forum/config.yml") {
 		t.Errorf("forum help misses its settings:\n%s", help)
+	}
+}
+
+// A wait sends the key of its own changes, the session it would record
+// now, which is none when the workspace does not capture it. The
+// command it suggests next filters the same way.
+func TestWaitsExcludeTheirOwnSession(t *testing.T) {
+	var mu sync.Mutex
+	var queries []url.Values
+	server := newFakeServer(t, hosting(func(w http.ResponseWriter,
+		r *http.Request) {
+		mu.Lock()
+		queries = append(queries, r.URL.Query())
+		mu.Unlock()
+		if strings.HasSuffix(r.URL.Path, "/messages") {
+			reply(w, http.StatusOK, api.ChatPage{Messages: []api.Message{},
+				Cursor: 7})
+			return
+		}
+		reply(w, http.StatusOK, api.ChangesPage{Changes: []api.Change{},
+			Cursor: 9})
+	}, "default=e"))
+	config := func(capture string) string {
+		return writeConfig(t, "workspaces:\n  default:\n    server: "+
+			server.URL+"\n    metadata_capture: "+capture+"\n", 0o600)
+	}
+	tests := []struct {
+		name, capture string
+		args          []string
+		session       []string
+		next          string
+	}{
+		{"wait", "all", []string{"wait", "--since", "3", "--project",
+			"duck pond"}, []string{"lead"},
+			"Cursor: 9 (wait for more: ws wait --since 9 --workspace " +
+				"default --project 'duck pond')"},
+		{"wait without the session", "none", []string{"wait", "--since",
+			"3"}, []string{""}, "--since 9 --workspace default)"},
+		{"wait including mine", "all", []string{"wait", "--since", "3",
+			"--include-mine"}, nil,
+			"--since 9 --workspace default --include-mine)"},
+		{"chat wait", "all", []string{"chat", "wait", "e1", "--since", "3",
+			"--content", "quack"}, []string{"lead"},
+			"Cursor: 7 (wait for more: ws chat wait e1 --since 7 " +
+				"--content quack)"},
+		{"chat wait without the session", "none", []string{"chat", "wait",
+			"e1", "--since", "3"}, []string{""}, "--since 7)"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mu.Lock()
+			queries = nil
+			mu.Unlock()
+			got := runBinary(t, wsBinary, []string{
+				"WORKSTREAM_CONFIG=" + config(test.capture),
+				"CLAUDE_CODE_SESSION_ID=lead"},
+				append(test.args, "--timeout", "1ms")...)
+			if !got.ok || !strings.Contains(got.stdout, test.next) {
+				t.Fatalf("got %+v, want %q", got, test.next)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			for _, query := range queries {
+				if query.Get("since") == "" {
+					continue
+				}
+				if !slices.Equal(query["exclude-claude-session"],
+					test.session) || query.Has("exclude-user") !=
+					(test.session != nil) {
+					t.Fatalf("sent %v, want the session %q", query,
+						test.session)
+				}
+			}
+		})
 	}
 }

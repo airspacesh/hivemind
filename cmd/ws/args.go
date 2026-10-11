@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"maps"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -112,20 +114,81 @@ var searchFields = []string{
 // edit, and search: --jira QUACK-1 is --meta jira=QUACK-1.
 var shorthandKeys = []string{"jira", "confluence"}
 
+// filterFlags names the flags of filters, each with its no- form.
+func filterFlags(filters ...string) []string {
+	var flags []string
+	for _, filter := range filters {
+		flags = append(flags, "--"+filter, "--no-"+filter)
+	}
+	return flags
+}
+
+// searchFilterFlags are the flags of every search filter, the
+// metadata shorthands included.
+func searchFilterFlags() []string {
+	return filterFlags(append(slices.Clone(searchFields),
+		shorthandKeys...)...)
+}
+
 func searchFlagSpec() flagSpec {
-	spec := flagSpec{
+	return flagSpec{
 		strs: []string{"--limit", "--offset", "--under", "--workspace"},
 		bools: []string{"--order-by-creation", "--order-by-modified",
 			"--id-only", "--include-superseded", "--flat", "--entries-only"},
-		alias: map[string]string{"-n": "--limit"},
+		repeat: searchFilterFlags(),
+		alias:  map[string]string{"-n": "--limit"},
 	}
-	for _, field := range searchFields {
-		spec.repeat = append(spec.repeat, "--"+field, "--no-"+field)
+}
+
+// mineFlags choose whether a wait or firehose leaves out your own
+// changes.
+var mineFlags = []string{"--exclude-mine", "--include-mine"}
+
+// excludesMine reads whether a command leaves out your own changes,
+// given what it does by default.
+func excludesMine(p *parsedArgs, byDefault bool) (bool, error) {
+	switch {
+	case p.has("--exclude-mine") && p.has("--include-mine"):
+		return false, fmt.Errorf("give one of --exclude-mine and " +
+			"--include-mine")
+	case p.has("--exclude-mine"):
+		return true, nil
+	case p.has("--include-mine"):
+		return false, nil
+	default:
+		return byDefault, nil
 	}
-	for _, key := range shorthandKeys {
-		spec.repeat = append(spec.repeat, "--"+key, "--no-"+key)
+}
+
+var shellSafe = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
+
+// shellQuote quotes text for a POSIX shell, unless it needs none.
+func shellQuote(text string) string {
+	if shellSafe.MatchString(text) {
+		return text
 	}
-	return spec
+	return "'" + strings.ReplaceAll(text, "'", `'\''`) + "'"
+}
+
+// filterArgs repeats the filters a command was given, each after a
+// space and quoted for the shell, so a command it suggests filters the
+// same way.
+func filterArgs(p *parsedArgs) string {
+	var text strings.Builder
+	for _, flag := range slices.Sorted(maps.Keys(p.lists)) {
+		for _, value := range p.lists[flag] {
+			text.WriteString(" " + flag + " " + shellQuote(value))
+		}
+	}
+	if p.has("--under") {
+		text.WriteString(" --under " + shellQuote(p.strs["--under"]))
+	}
+	for _, flag := range mineFlags {
+		if p.has(flag) {
+			text.WriteString(" " + flag)
+		}
+	}
+	return text.String()
 }
 
 // shorthandFor reports whether a flag is a metadata-key shorthand

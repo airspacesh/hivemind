@@ -32,18 +32,24 @@ var (
 
 // polls answers each poll in turn with the next outcome, an error or a
 // page, and then with empty pages.
-func polls(outcomes ...any) func() (api.ChatPage, bool, error) {
-	return func() (api.ChatPage, bool, error) {
+func polls(outcomes ...any) func() (api.ChatPage, pollOutcome, error) {
+	return func() (api.ChatPage, pollOutcome, error) {
 		if len(outcomes) == 0 {
-			return api.ChatPage{Cursor: 3}, false, nil
+			return api.ChatPage{Cursor: 3}, nothingYet, nil
 		}
 		next := outcomes[0]
 		outcomes = outcomes[1:]
-		if err, ok := next.(error); ok {
-			return api.ChatPage{}, false, err
+		switch next := next.(type) {
+		case error:
+			return api.ChatPage{}, nothingYet, next
+		case pollOutcome:
+			return api.ChatPage{Cursor: 3}, next, nil
 		}
 		page := next.(api.ChatPage)
-		return page, len(page.Messages) > 0, nil
+		if len(page.Messages) > 0 {
+			return page, found, nil
+		}
+		return page, nothingYet, nil
 	}
 }
 
@@ -74,6 +80,20 @@ func TestWaitReturnsAsSoonAsMessagesArrive(t *testing.T) {
 		time.Minute, clk)
 	if err != nil || page.Cursor != 4 || len(clk.sleeps) != 2 {
 		t.Fatalf("got %+v, %v after %v", page, err, clk.sleeps)
+	}
+}
+
+// A poll that left changes unchecked polls again at once, and a poll
+// that found nothing still sleeps.
+func TestWaitPollsAgainAtOnceWhileMoreIsToCheck(t *testing.T) {
+	clk := &fakeClock{}
+	page, err := waitFor(polls(moreToCheck, moreToCheck, nothingYet,
+		moreToCheck, newMessages), time.Minute, clk)
+	if err != nil || page.Cursor != 4 {
+		t.Fatalf("got %+v, %v", page, err)
+	}
+	if got, want := fmt.Sprint(clk.sleeps), seconds(1); got != want {
+		t.Fatalf("slept %s, want %s", got, want)
 	}
 }
 

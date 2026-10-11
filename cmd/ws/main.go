@@ -45,9 +45,14 @@ Usage:
   {program} chat recent [<ref>] [--limit 20] [--workspace <name>]
   {program} chat read <ref> --since <n> [--limit 20]
   {program} chat wait <ref> --since <n> [--timeout 10m]
+         [--content <pattern>]... [--exclude-mine|--include-mine]
   {program} chat edit <ref>-m<n> <message>
-  {program} wait [--since <cursor>] [--timeout 10m] [--workspace <name>]
-  {program} firehose [--since <cursor>] [--timeout <d>] [--workspace <name>]
+  {program} wait [--since <cursor>] [--timeout 10m] [--under <ref>]
+         [search filters] [--exclude-mine|--include-mine]
+         [--workspace <name>]
+  {program} firehose [--since <cursor>] [--timeout <d>] [--under <ref>]
+         [search filters] [--exclude-mine|--include-mine]
+         [--workspace <name>]
   {program} status
   {program} secret
   {program} help
@@ -121,7 +126,7 @@ Listings:
   days, and their share of the workspace's. Times show as 13:20 when an
   output's times all fall on one day, or else as 23/07/2025 13:20.
 
-Search filters (recent and search):
+Search filters (recent, search, wait and firehose):
   --subject --body --content --project --key --meta <key>=<value>
   --origin-user --origin-host --origin-dir --origin-claude-session
   --jira --confluence (shorthands for --meta <key>=<value>)
@@ -161,8 +166,17 @@ Chat:
   across the workspace, under their entries.
   '{program} chat read' shows the messages after --since a page at a
   time, and says how to read the next page.
-  '{program} chat wait' returns as soon as messages arrive after
-  --since, polling every second for 10 seconds and then every 5. It
+  '{program} chat wait' returns as soon as a message arrives after
+  --since that matches its filters and is not yours, and prints only
+  the messages that match, then the cursor. --content and --no-content
+  match each message's text, as in a search. The cursor passes every
+  message the wait checked, matching or not, so wait on from it.
+  A message is yours when it came from your user in your current Claude
+  Code session. Outside a session, or when the workspace does not
+  capture the session, it is yours when it came from your user outside
+  any session. --include-mine wakes on yours too, as a lead whose
+  sub-agents share its session needs.
+  The wait polls every second for 10 seconds and then every 5. It
   retries a failed connection with backoff, up to 6 times in a row.
   A send or edit whose outcome is uncertain, like one that timed out,
   is never retried. Check the chat before sending again.
@@ -176,11 +190,20 @@ Changes:
   state. --since 0 starts before every change, and with no --since a
   command starts from now. An entry or message changed again after your
   cursor shows once, at its latest change, with its current text.
-  '{program} wait' returns as soon as anything changes after --since,
-  polling as chat wait does, and prints the changes and the cursor
-  after them.
-  '{program} firehose' prints every change as it arrives, each batch
-  followed by its cursor, until interrupted or --timeout passes.
+  '{program} wait' returns as soon as a change after --since matches its
+  filters and is not yours, and prints only the changes that match,
+  then the cursor. The search filters and --under match an entry's
+  change against the entry, and a message's change against its entry,
+  except that --content matches the message's own text. A change is
+  yours as in chat wait, by the origin of the entry or message. An edit
+  keeps the origin, so it counts as a change by the session that added
+  the entry or sent the message. The cursor passes every change the
+  wait checked, matching or not, so wait on from it. It polls as chat
+  wait does.
+  '{program} firehose' prints every change that matches its filters as
+  it arrives, each batch followed by its cursor, until interrupted or
+  --timeout passes. It shows your own changes unless --exclude-mine
+  leaves them out.
 
 Config:
   {program} reads the file {CONFIG_ENV} names, or else

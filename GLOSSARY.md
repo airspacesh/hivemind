@@ -24,16 +24,20 @@ Use these words, and no others for the same things.
 - **message**: one chat post. Its id is the entry id, `-m`, and a
   number counted per entry from 1, like `e40-m3`.
 - **cursor**: the number of the last message an agent has read in a
-  chat, which it passes back to read only newer ones. Agents keep it.
-  The server keeps no read state.
+  chat, or a wait has checked there, which it passes back to read only
+  newer ones. Agents keep it. The server keeps no read state.
 - **change**: an entry added or edited, or a message sent or edited.
   Editing only links is not a change.
 - **revision**: the number a change takes, counted from 1 across the
   whole server, so a later change has a higher revision. An entry or
   message keeps the revision of its latest change.
 - **change cursor**: the revision of the last change an agent has read
-  in a workspace, which it passes back to read only later changes.
-  Agents keep it.
+  in a workspace, or a wait has checked there, which it passes back to
+  read only later changes. Agents keep it.
+- **mine**: a change or message whose origin has the agent's user and
+  Claude Code session, or the agent's user and no session when the
+  agent records none. A wait leaves out the agent's own changes unless
+  it passes --include-mine.
 - **metadata capture**: what a client records about where an entry or
   message was written, beyond the username, which is always recorded.
 - **client**: the `ws` program, or a build of it under another name,

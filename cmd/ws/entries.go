@@ -48,6 +48,20 @@ func captureOrigin(capture metadataCapture) (api.Origin, error) {
 	return origin, nil
 }
 
+// excludeMine asks the server to leave out the changes this client
+// writes, whose origin has the user and Claude Code session it records
+// now. With no session recorded, that is only what this user wrote
+// outside a session.
+func excludeMine(query url.Values, capture metadataCapture) error {
+	origin, err := captureOrigin(capture)
+	if err != nil {
+		return err
+	}
+	query.Set("exclude-user", origin.User)
+	query.Set("exclude-claude-session", origin.ClaudeSession)
+	return nil
+}
+
 // uncertainWrite reports a failed write. One that may have taken
 // effect says how to check, since it is never repeated.
 func uncertainWrite(err error, outcome, check string) error {
@@ -493,6 +507,29 @@ func cmdTree(c *client, args []string) error {
 	return nil
 }
 
+// addUnder adds the --under a command was given to its query, which
+// must name an entry on the target's server.
+func (c *client) addUnder(t target, p *parsedArgs, query url.Values) error {
+	if !p.has("--under") {
+		return nil
+	}
+	under, err := api.ParseRef(p.strs["--under"])
+	if err != nil {
+		return err
+	}
+	home, err := c.resolve(under)
+	if err != nil {
+		return err
+	}
+	if home.server != t.server {
+		return fmt.Errorf("%s is on %s, but workspace %s is on %s. "+
+			"Pass --workspace to name a workspace on %s", under,
+			home.server, t.workspace, t.server, home.server)
+	}
+	query.Set("under", under.String())
+	return nil
+}
+
 // searchQuery turns the filter flags into the server's query.
 func searchQuery(p *parsedArgs) (url.Values, error) {
 	query := url.Values{}
@@ -589,21 +626,8 @@ func cmdSearch(c *client, command string, args []string) error {
 	if err != nil {
 		return err
 	}
-	if p.has("--under") {
-		under, err := api.ParseRef(p.strs["--under"])
-		if err != nil {
-			return err
-		}
-		home, err := c.resolve(under)
-		if err != nil {
-			return err
-		}
-		if home.server != t.server {
-			return fmt.Errorf("%s is on %s, but workspace %s is on %s. "+
-				"Pass --workspace to search a workspace on %s", under,
-				home.server, t.workspace, t.server, home.server)
-		}
-		query.Set("under", under.String())
+	if err := c.addUnder(t, p, query); err != nil {
+		return err
 	}
 	result, err := c.search(t, query)
 	if err != nil {

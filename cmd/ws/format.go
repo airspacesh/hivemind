@@ -340,8 +340,8 @@ func printMessage(m api.Message, indent, layout string) {
 }
 
 // printCursorLine ends a chat output with the cursor to read on from,
-// as the command that uses it.
-func printCursorLine(entry api.Ref, page api.ChatPage) {
+// as the command that uses it. A suggested wait repeats filterArgs.
+func printCursorLine(entry api.Ref, page api.ChatPage, filterArgs string) {
 	if page.Remaining > 0 {
 		noun := "messages"
 		if page.Remaining == 1 {
@@ -351,13 +351,15 @@ func printCursorLine(entry api.Ref, page api.ChatPage) {
 			programName, entry, page.Cursor, page.Remaining, noun)
 		return
 	}
-	fmt.Printf("Cursor: %d (wait for more: %s chat wait %s --since %d)\n",
-		page.Cursor, programName, entry, page.Cursor)
+	fmt.Printf("Cursor: %d (wait for more: %s chat wait %s --since %d%s)\n",
+		page.Cursor, programName, entry, page.Cursor, filterArgs)
 }
 
 // printChatPage prints one chat's messages oldest first, then the
 // cursor line.
-func printChatPage(entry api.Ref, page api.ChatPage, empty string) {
+func printChatPage(
+	entry api.Ref, page api.ChatPage, empty string, filterArgs string,
+) {
 	if len(page.Messages) == 0 {
 		fmt.Println(empty)
 	}
@@ -365,7 +367,7 @@ func printChatPage(entry api.Ref, page api.ChatPage, empty string) {
 	for _, m := range page.Messages {
 		printMessage(m, "", layout)
 	}
-	printCursorLine(entry, page)
+	printCursorLine(entry, page, filterArgs)
 }
 
 // printChatHeader names the entry a run of chat messages belongs to.

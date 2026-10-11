@@ -6,13 +6,15 @@ set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Start from a clean environment, so no live config, workspace,
-# timeout or secret reaches the scratch servers or clients.
+# timeout, secret or Claude Code session reaches the scratch servers or
+# clients.
 for name in $(compgen -e); do
     if [[ "$name" == WORKSTREAM_* || "$name" == FORUM_* ||
         "$name" == WORK_STREAM_* ]]; then
         unset "$name"
     fi
 done
+unset CLAUDE_CODE_SESSION_ID
 test_dir="$(mktemp -d)"
 server_pids=()
 test_secret="quack-test-secret"
@@ -103,6 +105,10 @@ workspaces:
 EOF
 chmod 600 "$ws_config"
 ws() { WORKSTREAM_CONFIG="$ws_config" "$repo/bin/ws" "$@"; }
+# Two Claude Code sessions of the user running ws, whose waits each
+# leave out their own changes.
+lead() { CLAUDE_CODE_SESSION_ID=lead ws "$@"; }
+peer() { CLAUDE_CODE_SESSION_ID=peer ws "$@"; }
 forum() { "$test_dir/bin/forum" "$@"; }
 
 failures=0
@@ -380,7 +386,7 @@ Cursor: 3 (wait for more: ws chat wait $race --since 3)" \
     "$(ws chat send "$race" "My own" --since 1 |
         sed 's/^\(\[[a-z0-9-]*\]\).*/\1/')"
 check "a wait from a send's cursor does not return your own message" \
-    "No messages after 3 within 1s." \
+    "No matching messages after 3 within 1s." \
     "$(ws chat wait "$race" --since 3 --timeout 1s)"
 check "a message may start with a dash beside --since" \
     ": -1 to that" "$(ws chat send --since 3 "$race" "-1 to that")"
@@ -399,12 +405,12 @@ Cursor: 26 (wait for more: ws chat wait $race --since 26)" \
     "$(echo "$sent" | tail -2)"
 check_equal "a send that left messages out shows 20 of them" 20 \
     "$(echo "$sent" | grep -c '^\[')"
-(sleep 1.5 && ws chat send "$chat" "Woken" >/dev/null) &
+(sleep 1.5 && peer chat send "$chat" "Woken" >/dev/null) &
 sender_pid=$!
 check "a wait returns when a message arrives" "[$chat-m4]" \
     "$(ws chat wait "$chat" --since 3 --timeout 20s)"
 wait "$sender_pid"
-check "a wait ends at its timeout" "No messages after 4 within 1s." \
+check "a wait ends at its timeout" "No matching messages after 4 within 1s." \
     "$(ws chat wait "$chat" --since 4 --timeout 1s)"
 check "an entry shows its chat" "Chat: 4 messages, newest $chat-m4" \
     "$(ws entry "$chat")"
@@ -446,17 +452,19 @@ check_equal "your own entry can still be withdrawn" "Edited entry [$reply]." \
     "$(ws edit "$reply" --subject "Retracted" --no-recent)"
 
 # Changes.
-private_changes="$(ws wait --since 0 --workspace personal --timeout 1s)"
+private_changes="$(ws wait --since 0 --workspace personal --include-mine \
+    --timeout 1s)"
 check "wait lists a workspace's changes from the start" "[p2-m1]" \
     "$private_changes"
-check "wait names the workspace to wait on in" "--workspace personal" \
+check "wait names the workspace to wait on in" \
+    "--workspace personal --include-mine" \
     "$private_changes"
 private_cursor="$(echo "$private_changes" |
     sed -n 's/^Cursor: \([0-9]*\) .*/\1/p')"
 check "a wait from the last cursor finds nothing new" \
-    "No changes after $private_cursor" \
+    "No matching changes after $private_cursor" \
     "$(ws wait --since "$private_cursor" --workspace personal --timeout 1s)"
-(sleep 1.5 && ws chat send "$chat" "Changed" >/dev/null) &
+(sleep 1.5 && peer chat send "$chat" "Changed" >/dev/null) &
 sender_pid=$!
 check "a wait from now returns when anything changes" "[$chat-m5]" \
     "$(ws wait --timeout 20s)"
@@ -481,6 +489,67 @@ check "a firehose prints messages as they arrive" "[$chat-m6]" \
     "$firehose_output"
 check "a firehose prints entries as they arrive" "Hosed entry" \
     "$firehose_output"
+
+# A wait leaves out the changes of its own session, and wakes for
+# another session of the same user. Its cursor passes what it left out.
+cursor_of() { sed -n 's/^Cursor: \([0-9]*\) .*/\1/p'; }
+start="$(lead wait --timeout 1ms | cursor_of)"
+own="$(lead add "Own changes" --project own --no-recent | added)"
+lead chat send "$own" "Lead message" >/dev/null
+mine="$(lead wait --since "$start" --timeout 1s)"
+check "a wait sleeps through your own session's changes" \
+    "No matching changes after $start within 1s." "$mine"
+mine_cursor="$(echo "$mine" | cursor_of)"
+check "a wait's cursor passes the changes it left out" \
+    "No matching changes after $mine_cursor" \
+    "$(lead wait --since "$mine_cursor" --include-mine --timeout 1s)"
+others="$(peer wait --since "$start" --timeout 1s)"
+check "another session of your user sees your entries" "Own changes" \
+    "$others"
+check "another session of your user sees your messages" "[$own-m1]" \
+    "$others"
+check "--include-mine shows your own changes" "[$own-m1]" \
+    "$(lead wait --since "$start" --include-mine --timeout 1s)"
+ws chat send "$own" "Bare message" >/dev/null
+check "outside a session, your sessionless changes are yours" \
+    "No matching changes after $mine_cursor" \
+    "$(ws wait --since "$mine_cursor" --timeout 1s)"
+check "a session wakes for your sessionless changes" "[$own-m2]" \
+    "$(lead wait --since "$mine_cursor" --timeout 1s)"
+filtered="$(peer wait --since "$start" --project own --content 'lead MESSAGE' \
+    --timeout 1s)"
+check "a wait's filters match a message by its own text" "[$own-m1]" \
+    "$filtered"
+# An entry's own change lists it with its time, and a message's change
+# names it above the message without one.
+own_entry_line="^\[$own\] [0-9]"
+check_equal "a wait's filters leave out what does not match" "" \
+    "$(echo "$filtered" | grep -e "$own_entry_line" -e "\[$own-m2\]" ||
+        true)"
+check "a suggested wait repeats the filters" \
+    "--content 'lead MESSAGE' --project own)" "$filtered"
+check_equal "a firehose with --exclude-mine leaves out your own" "" \
+    "$(lead firehose --since "$start" --exclude-mine --timeout 1s |
+        grep -e "$own_entry_line" -e "\[$own-m1\]" || true)"
+check "a firehose with filters shows what matches" "[$own-m2]" \
+    "$(ws firehose --since "$start" --content bare --timeout 1s)"
+lonely="$(lead chat wait "$own" --since 0 --timeout 1s)"
+check_equal "a chat wait shows only messages that are not yours" \
+    "[$own-m2]
+Cursor: 2 (wait for more: ws chat wait $own --since 2)" \
+    "$(echo "$lonely" | sed 's/^\(\[[a-z0-9-]*\]\).*/\1/')"
+(sleep 1.5 && peer chat send "$own" "Answered" >/dev/null) &
+sender_pid=$!
+lead chat send "$own" "Asked again" >/dev/null
+answered="$(lead chat wait "$own" --since 2 --timeout 20s)"
+wait "$sender_pid"
+check "a chat wait sleeps through your message to the reply" "[$own-m4]" \
+    "$answered"
+check_equal "a chat wait prints none of your own messages" "" \
+    "$(echo "$answered" | grep -F "[$own-m3]" || true)"
+check "a chat wait with --include-mine shows your own messages" \
+    "[$own-m3]" \
+    "$(lead chat wait "$own" --since 2 --include-mine --timeout 1s)"
 
 # The server log keeps no client text, and records each issued id.
 ws add "Subject OLDSUBJECTMARK" --body "Body OLDBODYMARK" \

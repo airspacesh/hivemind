@@ -53,23 +53,38 @@ type systemClock struct{}
 func (systemClock) Now() time.Time        { return time.Now() }
 func (systemClock) Sleep(d time.Duration) { time.Sleep(d) }
 
+// pollOutcome says what a poll of a wait found.
+type pollOutcome int
+
+const (
+	// nothingYet sends the wait to sleep before it polls again.
+	nothingYet pollOutcome = iota
+	// moreToCheck polls again at once, since the server stopped
+	// checking short of the latest change.
+	moreToCheck
+	// found ends the wait.
+	found
+)
+
 // waitFor polls until a poll finds what it looks for, or the timeout
 // passes, when it returns the last poll's answer. A failed connection
 // is retried with backoff, and too many failures in a row end the
 // wait.
 func waitFor[T any](
-	poll func() (T, bool, error), timeout time.Duration, clk clock,
+	poll func() (T, pollOutcome, error), timeout time.Duration, clk clock,
 ) (T, error) {
 	start := clk.Now()
 	failures := 0
 	var none T
 	for {
-		answer, found, err := poll()
+		answer, outcome, err := poll()
 		elapsed := clk.Now().Sub(start)
 		var delay time.Duration
 		switch {
-		case err == nil && found:
+		case err == nil && outcome == found:
 			return answer, nil
+		case err == nil && outcome == moreToCheck:
+			failures = 0
 		case err == nil:
 			failures = 0
 			delay = pollInterval(elapsed)
@@ -91,7 +106,9 @@ func waitFor[T any](
 		if remaining <= 0 {
 			return answer, nil
 		}
-		clk.Sleep(min(delay, remaining))
+		if delay > 0 {
+			clk.Sleep(min(delay, remaining))
+		}
 	}
 }
 
@@ -172,7 +189,7 @@ func cmdChatSend(c *client, args []string) error {
 	page.Messages = slices.DeleteFunc(page.Messages, func(m api.Message) bool {
 		return m.Number <= since
 	})
-	printChatPage(ref, page, fmt.Sprintf("No messages after %d.", since))
+	printChatPage(ref, page, fmt.Sprintf("No messages after %d.", since), "")
 	return nil
 }
 
@@ -248,7 +265,7 @@ func cmdChatRecent(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	printChatPage(ref, page, fmt.Sprintf("%s has no messages yet.", ref))
+	printChatPage(ref, page, fmt.Sprintf("%s has no messages yet.", ref), "")
 	return nil
 }
 
@@ -319,17 +336,22 @@ func cmdChatRead(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	printChatPage(ref, page, fmt.Sprintf("No messages after %d.", since))
+	printChatPage(ref, page, fmt.Sprintf("No messages after %d.", since), "")
 	return nil
 }
 
 func cmdChatWait(c *client, args []string) error {
-	p, err := parseArgs(args, flagSpec{strs: []string{"--since", "--timeout"}})
+	p, err := parseArgs(args, flagSpec{
+		strs:   []string{"--since", "--timeout"},
+		bools:  mineFlags,
+		repeat: filterFlags("content"),
+	})
 	if err != nil {
 		return err
 	}
 	if len(p.pos) != 1 {
-		return usageError("chat wait <ref> --since <n> [--timeout <d>]")
+		return usageError("chat wait <ref> --since <n> [--timeout <d>] " +
+			"[--content <pattern>]... [--exclude-mine|--include-mine]")
 	}
 	ref, err := api.ParseRef(p.pos[0])
 	if err != nil {
@@ -343,22 +365,43 @@ func cmdChatWait(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
+	exclude, err := excludesMine(p, true)
+	if err != nil {
+		return err
+	}
+	query, err := searchQuery(p)
+	if err != nil {
+		return err
+	}
 
 	t, err := c.resolve(ref)
 	if err != nil {
 		return err
 	}
-	query := url.Values{"since": {fmt.Sprint(since)}}
-	poll := func() (api.ChatPage, bool, error) {
+	if exclude {
+		if err := excludeMine(query, t.capture); err != nil {
+			return err
+		}
+	}
+	cursor := since
+	poll := func() (api.ChatPage, pollOutcome, error) {
+		query.Set("since", fmt.Sprint(cursor))
 		page, err := c.chatPage(t, ref, query)
-		return page, len(page.Messages) > 0, err
+		if err != nil {
+			return page, nothingYet, err
+		}
+		cursor = page.Cursor
+		if len(page.Messages) > 0 {
+			return page, found, nil
+		}
+		return page, nothingYet, nil
 	}
 	page, err := waitFor(poll, timeout, systemClock{})
 	if err != nil {
 		return err
 	}
-	printChatPage(ref, page, fmt.Sprintf("No messages after %d within %s.",
-		since, timeout))
+	printChatPage(ref, page, fmt.Sprintf("No matching messages after %d "+
+		"within %s.", since, timeout), filterArgs(p))
 	return nil
 }
 

@@ -10,18 +10,23 @@ import (
 
 // changePolls answers each poll in turn with the next outcome, an
 // error or a number of changes, and then with no changes.
-func changePolls(outcomes ...any) func() (api.ChangesPage, bool, error) {
-	return func() (api.ChangesPage, bool, error) {
+func changePolls(
+	outcomes ...any,
+) func() (api.ChangesPage, pollOutcome, error) {
+	return func() (api.ChangesPage, pollOutcome, error) {
 		if len(outcomes) == 0 {
-			return api.ChangesPage{}, false, nil
+			return api.ChangesPage{}, nothingYet, nil
 		}
 		next := outcomes[0]
 		outcomes = outcomes[1:]
 		if err, ok := next.(error); ok {
-			return api.ChangesPage{}, false, err
+			return api.ChangesPage{}, nothingYet, err
 		}
 		page := api.ChangesPage{Changes: make([]api.Change, next.(int))}
-		return page, len(page.Changes) > 0, nil
+		if len(page.Changes) > 0 {
+			return page, found, nil
+		}
+		return page, nothingYet, nil
 	}
 }
 
@@ -36,7 +41,7 @@ func followed(
 	show := func(page api.ChangesPage) {
 		shown = append(shown, len(page.Changes))
 	}
-	if err := follow(changePolls(outcomes...), show, timeout,
+	if _, err := follow(changePolls(outcomes...), show, timeout,
 		clk); err != nil {
 		t.Fatal(err)
 	}
