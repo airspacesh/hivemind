@@ -214,11 +214,12 @@ Chat:
   no- forms, match each message itself, as in a search. The cursor
   passes every message the wait checked, matching or not, so wait on
   from it.
-  A message is yours when it came from your user in your current Claude
-  Code session. Outside a session, or when the workspace does not
-  capture the session, it is yours when it came from your user outside
-  any session. --include-mine wakes on yours too, as a lead whose
-  sub-agents share its session needs.
+  A message is yours when both its user and its Claude Code session are
+  yours, so a message from another session of your user wakes a wait.
+  Outside a session, or when the workspace does not capture the session,
+  it is yours when it came from your user outside any session.
+  --include-mine wakes on yours too, as a lead whose sub-agents share
+  its session needs.
   The wait polls every second for 10 seconds and then every 5. It
   retries a failed connection with backoff, up to 6 times in a row.
   A send or edit whose outcome is uncertain, like one that timed out,
