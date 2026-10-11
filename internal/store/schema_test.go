@@ -49,6 +49,24 @@ func TestOpenCreatesAndReopensCurrentVersion(t *testing.T) {
 	}
 }
 
+func TestOpenMapsTheDatabaseOnEveryConnection(t *testing.T) {
+	store := openTestStore(t)
+	for _, pool := range []struct {
+		name string
+		db   *sql.DB
+	}{{"write", store.db}, {"read", store.reads}} {
+		var size int64
+		if err := pool.db.QueryRow(`PRAGMA mmap_size`).Scan(&size); err != nil {
+			t.Fatalf("reading mmap_size of a %s connection: %v",
+				pool.name, err)
+		}
+		if size != mmapSizeBytes {
+			t.Fatalf("%s connection mmap_size = %d, want %d",
+				pool.name, size, mmapSizeBytes)
+		}
+	}
+}
+
 func TestOpenEscapesSQLitePath(t *testing.T) {
 	ctx := context.Background()
 	dir := filepath.Join(t.TempDir(), "duck?pond")

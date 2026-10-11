@@ -527,6 +527,14 @@ func enableWAL(
 	}
 }
 
+// mmapSizeBytes is SQLITE_MAX_MMAP_SIZE in modernc's build of SQLite,
+// the most of the database file a connection can map. SQLite lowers a
+// larger setting to it. Connections read mapped pages straight from the
+// OS page cache, which they all share, instead of copying each page
+// into a page cache of their own. A disk error on a mapped page raises
+// SIGBUS, which crashes the server instead of failing one request.
+const mmapSizeBytes = 2147418112
+
 // sqliteDSN names the database at path for the driver. A readOnly
 // connection refuses every write, through query_only.
 func sqliteDSN(
@@ -551,6 +559,7 @@ func sqliteDSN(
 	// not left behind in the database file's free pages.
 	query.Add("_pragma", "secure_delete(1)")
 	query.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", msecs))
+	query.Add("_pragma", fmt.Sprintf("mmap_size(%d)", mmapSizeBytes))
 	if readOnly {
 		query.Add("_pragma", "query_only(1)")
 	}
