@@ -1115,6 +1115,40 @@ func TestChatWaitReadsOnWithItsFilters(t *testing.T) {
 	}
 }
 
+// A change shows at the time it was made, so an edited or deleted
+// message shows when it was edited or deleted, as a post does.
+func TestChangesShowEachAtItsLatestChange(t *testing.T) {
+	at := func(minute int) time.Time {
+		return time.Date(2026, 10, 9, 5, minute, 0, 0, time.UTC)
+	}
+	pond := api.Ref{Prefix: "e", ID: 1}
+	duck := api.Origin{User: "duck"}
+	post := api.ListedPost{Post: api.Post{Ref: pond, Created: at(10),
+		Modified: at(30), Subject: "Pond", Origin: duck}}
+	server := newFakeServer(t, hosting(func(w http.ResponseWriter,
+		r *http.Request) {
+		reply(w, http.StatusOK, api.ChangesPage{Changes: []api.Change{
+			{Post: post},
+			{Post: post, Message: &api.Message{Post: pond, Number: 2,
+				Created: at(20), Modified: at(41), Body: "quack",
+				Origin: duck}},
+			{Post: post, Message: &api.Message{Post: pond, Number: 3,
+				Created: at(22), Modified: at(45), Deleted: true,
+				Origin: duck}},
+		}, Cursor: 9})
+	}, "general=e"))
+	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
+		server.URL+"\n", 0o600)
+	got := ws(t, config, "wait", "--after", "@3")
+	want := "[e1] 05:30 duck: Pond\n" +
+		"[e1-m2] 05:41 duck (edited): quack\n" +
+		"[e1-m3] 05:45 duck (deleted)\n"
+	if !got.ok || !strings.HasPrefix(got.stdout, want) {
+		t.Fatalf("wait =\n%s\nwant it to begin\n%s (%+v)", got.stdout,
+			want, got)
+	}
+}
+
 // A date, or a date and time, reads in local time, a span counts back
 // from now, and @ names a revision.
 func TestBoundFlagsReadLocalDatesSpansAndRevisions(t *testing.T) {

@@ -166,7 +166,7 @@ func printMatches(matches []api.Match) {
 	layout := timeLayout(times)
 	for _, m := range matches {
 		if m.Message != nil {
-			printMessage(*m.Message, m.Ancestors, "", layout)
+			printMessage(*m.Message, m.Ancestors, m.At, "", layout)
 		} else {
 			printPostLine(m.Post, m.Ancestors, m.At, layout,
 				newMessagesLabel(m.NewMessages))
@@ -325,13 +325,14 @@ func messageTimes(messages []api.Message) []time.Time {
 	return times
 }
 
-// printMessage prints a message on one line, with any further lines of
-// its text indented beneath. The path, when given, is to the message's
-// post. A deleted message shows no text.
+// printMessage prints a message on one line, with a time, its author,
+// and any further lines of its text indented beneath. The path, when
+// given, is to the message's post. A deleted message shows no text.
 func printMessage(
-	m api.Message, ancestors []api.PostRef, indent, layout string,
+	m api.Message, ancestors []api.PostRef, at time.Time,
+	indent, layout string,
 ) {
-	head := indent + lineHead(m.Ref(), m.Created, layout, m.Origin.User,
+	head := indent + lineHead(m.Ref(), at, layout, m.Origin.User,
 		ancestors)
 	if m.Deleted {
 		fmt.Println(head + " (deleted)")
@@ -400,7 +401,7 @@ func printChatMessages(page api.ChatPage, empty string) {
 	}
 	layout := timeLayout(messageTimes(page.Messages))
 	for _, m := range page.Messages {
-		printMessage(m, nil, "", layout)
+		printMessage(m, nil, m.Created, "", layout)
 	}
 }
 
@@ -432,7 +433,7 @@ func printOverview(overview api.ChatOverview, workspace string) {
 		printChatHeader(chat.Post)
 		printEarlier("  ", chat.Post.Ref, 0, chat.Messages)
 		for _, m := range chat.Messages {
-			printMessage(m, nil, "  ", layout)
+			printMessage(m, nil, m.Created, "  ", layout)
 		}
 	}
 }
@@ -489,12 +490,12 @@ func printProjects(result api.ProjectsResponse) {
 }
 
 // printChanges prints changes oldest first, a line each, as a listing
-// shows them.
+// shows them, each at the time of its latest change.
 func printChanges(changes []api.Change) {
 	var times []time.Time
 	for _, change := range changes {
 		if change.Message != nil {
-			times = append(times, change.Message.Created)
+			times = append(times, change.Message.Modified)
 		} else {
 			times = append(times, change.Post.Modified)
 		}
@@ -503,7 +504,8 @@ func printChanges(changes []api.Change) {
 	for _, change := range changes {
 		post := change.Post
 		if change.Message != nil {
-			printMessage(*change.Message, post.Ancestors, "", layout)
+			printMessage(*change.Message, post.Ancestors,
+				change.Message.Modified, "", layout)
 		} else {
 			printPostLine(post.Post, post.Ancestors, post.Modified, layout, "")
 		}
