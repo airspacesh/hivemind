@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airspacesh/workstream/internal/api"
 )
@@ -586,5 +587,84 @@ func TestSearchSharesOneMessageBudgetAcrossThePage(t *testing.T) {
 	}
 	if more := result.Entries[0].MoreMatchingMessages; more != 2 {
 		t.Fatalf("busy entry leaves out %d matches, want 2", more)
+	}
+}
+
+// A time filter keeps to the entries and messages last changed within
+// a span, from its start up to but not including its end.
+func TestSearchKeepsToASpan(t *testing.T) {
+	store := openTestStore(t)
+	day := func(month time.Month, day int) time.Time {
+		return time.Date(2026, month, day, 0, 0, 0, 0, time.UTC)
+	}
+	setChanged := func(ref api.Ref, message int64, at time.Time) {
+		t.Helper()
+		key := store.mustKey(ref)
+		query := `UPDATE entries SET created_utc = ?1, modified_utc = ?1,
+			activity_utc = ?1 WHERE workspace_id = ?2 AND id = ?3`
+		if message != 0 {
+			query = `UPDATE entry_messages SET created_utc = ?1,
+				modified_utc = ?1 WHERE workspace_id = ?2 AND entry_id = ?3
+				AND id = ?4`
+		}
+		if _, err := store.db.Exec(query, formatTime(at), key.Workspace,
+			key.ID, message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := mustAdd(t, store, "Old", "", nil)
+	setChanged(old.Ref, 0, day(1, 1))
+	mid := mustAdd(t, store, "Mid", "", nil)
+	setChanged(mid.Ref, 0, day(2, 1))
+	setChanged(mid.Ref, postAs(t, store, "ines", mid.Ref, "late").Number,
+		day(3, 1))
+	setChanged(mid.Ref, postAs(t, store, "ken", mid.Ref, "early").Number,
+		day(1, 15))
+	recent := mustAdd(t, store, "Recent", "", nil)
+	setChanged(recent.Ref, 0, day(4, 1))
+
+	shown := func(result api.SearchResult) map[string][]string {
+		bodies := map[string][]string{}
+		for _, entry := range result.Entries {
+			bodies[entry.Subject] = messageBodies(entry.MatchingMessages)
+		}
+		return bodies
+	}
+	tests := []struct {
+		name   string
+		filter Filter
+		want   []api.Ref
+		shown  map[string][]string
+	}{
+		{"after",
+			Filter{Changed: Span{After: day(2, 15)}},
+			[]api.Ref{recent.Ref, mid.Ref},
+			map[string][]string{"Recent": nil, "Mid": {"late"}}},
+		{"before leaves out its own instant",
+			Filter{Changed: Span{Before: day(2, 1)}},
+			[]api.Ref{mid.Ref, old.Ref},
+			map[string][]string{"Mid": {"early"}, "Old": nil}},
+		{"after takes in its own instant",
+			Filter{Changed: Span{After: day(2, 1), Before: day(2, 2)}},
+			[]api.Ref{mid.Ref},
+			map[string][]string{"Mid": nil}},
+		{"with an origin",
+			Filter{Changed: Span{After: day(1, 10)},
+				OriginUser: []FieldCond{{Value: "ken"}}},
+			[]api.Ref{mid.Ref},
+			map[string][]string{"Mid": {"early"}}},
+		{"entries only",
+			Filter{Changed: Span{After: day(2, 15)}, EntriesOnly: true},
+			[]api.Ref{recent.Ref},
+			map[string][]string{"Recent": nil}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := runSearch(t, store, test.filter)
+			assertEntryRefs(t, result.Entries, test.want...)
+			if got := shown(result); !reflect.DeepEqual(got, test.shown) {
+				t.Fatalf("matching messages = %q, want %q", got, test.shown)
+			}
+		})
 	}
 }

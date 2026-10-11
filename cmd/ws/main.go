@@ -138,17 +138,26 @@ Search filters (recent, search, wait and firehose):
   duck does not match duck-pond. An empty pattern matches only an
   empty value. Prefix a filter with no- to exclude, as in --no-project.
   Filters AND together.
+  In recent and search, --after <time> keeps to what last changed at
+  or after a time, and --before <time> to what last changed before it.
+  A time is a date like 2026-10-09 or a date and time like
+  2026-10-09T14:30, both in local time, or a span back from now like
+  2d, 6h or 90m. In '{program} recent' without --flat, a top-level
+  entry shows when anything in its tree changed in that time, and
+  ranks by the latest such change.
   '{program} search' and '{program} recent --flat' also search each
-  message in an entry's chat when they require text or an origin. A
-  message matches when it meets the text and origin filters itself,
-  excluding ones included, and its entry meets the others. An entry
-  matches when it meets every filter itself. So 'search hook
-  --origin-user ines --project build' finds the messages ines sent
-  that mention hook in the chats of build entries, and the build
-  entries by ines that mention hook. Excluding alone does not search
-  chat. An entry ranks by its newest match. A page shows the 30 most
-  recently sent matching messages beneath their entries, and counts
-  each entry's other matching messages.
+  message in an entry's chat when they require text, an origin or a
+  time. A message matches when it meets the text, origin and time
+  filters itself, excluding ones included, and its entry meets the
+  others. An entry matches when it meets every filter itself. So
+  'search hook --origin-user ines --project build' finds the messages
+  ines sent that mention hook in the chats of build entries, and the
+  build entries by ines that mention hook, and 'search --origin-user
+  ines --after 2d' lists what ines posted or edited in the last 2 days.
+  Excluding alone does not search chat. An entry ranks by its newest
+  match. A page shows the 30 most recently sent matching messages
+  beneath their entries, and counts each entry's other matching
+  messages.
   --limit <n>, -n <n>    entries to show (default 20)
   --offset <n>           skip the first n matches
   --order-by-modified    newest first by modification time (default)

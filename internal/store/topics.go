@@ -170,20 +170,44 @@ func (v view) currentUnder(
 }
 
 // rankTopics orders top-level entries of a workspace by the latest
-// activity in their trees, then by id, the newest first.
+// change in their trees within a span, then by id, the newest first,
+// and leaves out those with no change in it. An entry's activity is the
+// latest change to it or its chat, so unless the span ends before the
+// latest changes, the entries alone rank the trees.
 func (v view) rankTopics(
-	ctx context.Context, workspace int64, ids []int64,
+	ctx context.Context, workspace int64, ids []int64, span Span,
 ) ([]int64, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	rows, err := v.tx.QueryContext(ctx, `
-		WITH RECURSIVE `+treeCTE("tree")+`
+	query := `
+		WITH RECURSIVE ` + treeCTE("tree") + `
 		SELECT tree.root_id FROM tree JOIN entries AS e
 			ON e.workspace_id = tree.workspace_id AND e.id = tree.entry_id
 		GROUP BY tree.root_id
-		ORDER BY max(e.activity_utc) DESC, tree.root_id DESC`,
-		workspace, idsJSON(ids))
+		HAVING max(e.activity_utc) >= ?
+		ORDER BY max(e.activity_utc) DESC, tree.root_id DESC`
+	args := []any{workspace, idsJSON(ids), formatTime(span.After)}
+	if !span.Before.IsZero() {
+		query = `
+		WITH RECURSIVE ` + treeCTE("tree") + `,
+		changes(root_id, at) AS (
+			SELECT tree.root_id, e.modified_utc FROM tree JOIN entries AS e
+				ON e.workspace_id = tree.workspace_id
+				AND e.id = tree.entry_id
+			UNION ALL
+			SELECT tree.root_id, m.modified_utc FROM tree
+				CROSS JOIN entry_messages AS m
+				INDEXED BY sqlite_autoindex_entry_messages_1
+				ON m.workspace_id = tree.workspace_id
+				AND m.entry_id = tree.entry_id
+		)
+		SELECT root_id FROM changes WHERE at >= ? AND at < ?
+		GROUP BY root_id
+		ORDER BY max(at) DESC, root_id DESC`
+		args = append(args, formatTime(span.Before))
+	}
+	rows, err := v.tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ranking top-level entries: %w", err)
 	}
@@ -435,12 +459,13 @@ func (w *topicWalk) rank(
 }
 
 // walkTopics ranks the first count top-level entries the view shows,
-// by reading changes newest first. It reports false when it would
-// read more than maxRows rows.
+// by reading changes within a span newest first. It reports false when
+// it would read more than maxRows rows.
 func (v view) walkTopics(
 	ctx context.Context,
 	workspace int64,
 	count int,
+	span Span,
 	maxRows int,
 	shownOf func(ctx context.Context, ids []int64) ([]int64, error),
 ) ([]int64, bool, error) {
@@ -459,13 +484,20 @@ func (v view) walkTopics(
 	if err != nil {
 		return nil, false, err
 	}
+	if span.After.After(floor) {
+		floor = span.After
+	}
+	to := ""
+	if !span.Before.IsZero() && !span.Before.After(newest) {
+		to = formatTime(span.Before)
+		newest = span.Before
+	}
 	w := topicWalk{
 		view: v, workspace: workspace, shownOf: shownOf,
 		topOf: map[int64]int64{}, considered: map[int64]bool{},
 		rowsLeft: maxRows,
 	}
 
-	to := ""
 	window := firstActivityWindow
 	from := newest.Add(-window)
 	for {
@@ -473,7 +505,7 @@ func (v view) walkTopics(
 			from = floor
 		}
 		changes, err := v.changesBetween(ctx, workspace,
-			from.Format(timeLayout), to, w.rowsLeft+1)
+			formatTime(from), to, w.rowsLeft+1)
 		if err != nil {
 			return nil, false, err
 		}
@@ -488,7 +520,7 @@ func (v view) walkTopics(
 			return w.ranked, true, nil
 		}
 
-		to = from.Format(timeLayout)
+		to = formatTime(from)
 		if len(changes) < activityBatch {
 			window *= 2
 		}
@@ -570,8 +602,8 @@ func (v view) searchTopics(
 		return v.shownOf(ctx, workspace, ids, from, where,
 			filter.IncludeSuperseded)
 	}
-	ranked, walked, err := v.walkTopics(ctx, workspace, count, maxRows,
-		shownOf)
+	ranked, walked, err := v.walkTopics(ctx, workspace, count,
+		filter.Changed, maxRows, shownOf)
 	if err != nil {
 		return api.SearchResult{}, err
 	}
@@ -581,7 +613,9 @@ func (v view) searchTopics(
 		if err != nil {
 			return api.SearchResult{}, err
 		}
-		if ranked, err = v.rankTopics(ctx, workspace, candidates); err != nil {
+		ranked, err = v.rankTopics(ctx, workspace, candidates,
+			filter.Changed)
+		if err != nil {
 			return api.SearchResult{}, err
 		}
 	}

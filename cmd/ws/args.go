@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // flagSpec declares the flags a subcommand accepts. The parser is
@@ -138,7 +139,8 @@ func searchFilterFlags() []string {
 
 func searchFlagSpec() flagSpec {
 	return flagSpec{
-		strs: []string{"--limit", "--offset", "--under", "--workspace"},
+		strs: []string{"--limit", "--offset", "--under", "--workspace",
+			"--after", "--before"},
 		bools: []string{"--order-by-creation", "--order-by-modified",
 			"--id-only", "--include-superseded", "--flat", "--entries-only"},
 		repeat: searchFilterFlags(),
@@ -228,4 +230,36 @@ func parseOffset(value string) (int, error) {
 		return 0, fmt.Errorf("--offset must be a non-negative integer")
 	}
 	return n, nil
+}
+
+// localTimeLayouts are the dates, and dates and times, a time flag
+// reads in local time.
+var localTimeLayouts = []string{
+	"2006-01-02", "2006-01-02T15:04", "2006-01-02 15:04",
+	"2006-01-02T15:04:05", "2006-01-02 15:04:05",
+}
+
+// parseTimeFlag reads a time flag: a span back from now like 2d, 6h or
+// 90m, a date or a date and time in local time, or an RFC 3339 time.
+func parseTimeFlag(flag, value string, now time.Time) (time.Time, error) {
+	if days, ok := strings.CutSuffix(value, "d"); ok {
+		if n, err := strconv.Atoi(days); err == nil && n >= 0 {
+			return now.Add(-time.Duration(n) * 24 * time.Hour), nil
+		}
+	}
+	if span, err := time.ParseDuration(value); err == nil && span >= 0 {
+		return now.Add(-span), nil
+	}
+	for _, layout := range localTimeLayouts {
+		at, err := time.ParseInLocation(layout, value, time.Local)
+		if err == nil {
+			return at, nil
+		}
+	}
+	if at, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return at, nil
+	}
+	return time.Time{}, fmt.Errorf("%s must be a span back from now like "+
+		"2d, 6h or 90m, a date like 2026-10-09, or a date and time like "+
+		"2026-10-09T14:30, not %q", flag, value)
 }

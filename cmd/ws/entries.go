@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/user"
 	"strings"
+	"time"
 
 	"github.com/airspacesh/workstream/internal/api"
 )
@@ -553,6 +554,19 @@ func searchQuery(p *parsedArgs) (url.Values, error) {
 			}
 			query.Add(parameter, value)
 		}
+	}
+
+	now := time.Now()
+	for _, flag := range []string{"--after", "--before"} {
+		if !p.has(flag) {
+			continue
+		}
+		at, err := parseTimeFlag(flag, p.strs[flag], now)
+		if err != nil {
+			return nil, err
+		}
+		query.Set(strings.TrimPrefix(flag, "--"),
+			at.UTC().Format(time.RFC3339Nano))
 	}
 	return query, nil
 }

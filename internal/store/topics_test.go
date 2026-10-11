@@ -18,25 +18,45 @@ const activityExpr = `max(e.modified_utc, coalesce((
 	SELECT max(m.modified_utc) FROM entry_messages AS m
 	WHERE m.workspace_id = e.workspace_id AND m.entry_id = e.id), ''))`
 
+// spanActivityExpr is when entry e last changed within the span from
+// ?1 to ?2, which is the latest of its own change and the changes in
+// its chat that fall within it, or empty when none do.
+const spanActivityExpr = `max(
+	coalesce(CASE WHEN e.modified_utc >= ?1 AND e.modified_utc < ?2
+		THEN e.modified_utc END, ''),
+	coalesce((
+		SELECT max(m.modified_utc) FROM entry_messages AS m
+		WHERE m.workspace_id = e.workspace_id AND m.entry_id = e.id
+			AND m.modified_utc >= ?1 AND m.modified_utc < ?2), ''))`
+
 // referenceTopics is the topics view as one query that works out the
-// activity of every tree in the workspace. It is too slow for a large
-// workspace, and serves here as the definition the view must match.
+// activity of every tree in the workspace within a span. It is too slow
+// for a large workspace, and serves here as the definition the view
+// must match.
 func referenceTopics(
 	t *testing.T,
 	store *Store,
 	workspace int64,
 	project string,
 	includeSuperseded bool,
+	span Span,
 ) []int64 {
 	t.Helper()
 	visible := `(NOT ` + supersededClause + ` OR roots.current_under)`
 	if includeSuperseded {
 		visible = `1`
 	}
+	after, before := "", "~"
+	if !span.After.IsZero() {
+		after = formatTime(span.After)
+	}
+	if !span.Before.IsZero() {
+		before = formatTime(span.Before)
+	}
 	rows, err := store.db.Query(`
 		WITH RECURSIVE tree(workspace_id, entry_id, root_id) AS (
 			SELECT e.workspace_id, e.id, e.id FROM entries AS e
-			WHERE e.workspace_id = ? AND `+topLevelClause+`
+			WHERE e.workspace_id = ?3 AND `+topLevelClause+`
 			UNION ALL
 			SELECT l.source_workspace_id, l.source_id, tree.root_id
 			FROM entry_links AS l JOIN tree
@@ -45,8 +65,8 @@ func referenceTopics(
 			WHERE l.name = 'parent'
 		),
 		roots(id, activity_utc, current_under) AS (
-			SELECT tree.root_id, max(`+activityExpr+`),
-				coalesce(max(NOT (e.workspace_id = ? AND e.id = tree.root_id)
+			SELECT tree.root_id, max(`+spanActivityExpr+`),
+				coalesce(max(NOT (e.workspace_id = ?3 AND e.id = tree.root_id)
 					AND NOT `+supersededClause+`), 0)
 			FROM tree JOIN entries AS e
 				ON e.workspace_id = tree.workspace_id
@@ -54,10 +74,10 @@ func referenceTopics(
 			GROUP BY tree.root_id
 		)
 		SELECT e.id FROM entries AS e JOIN roots ON roots.id = e.id
-		WHERE e.workspace_id = ? AND `+visible+`
-			AND (? = '' OR e.project = ?)
+		WHERE e.workspace_id = ?3 AND `+visible+`
+			AND (?4 = '' OR e.project = ?4) AND roots.activity_utc != ''
 		ORDER BY roots.activity_utc DESC, e.id DESC`,
-		workspace, workspace, workspace, project, project)
+		after, before, workspace, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +198,9 @@ func topicsPage(
 		t.Fatal(err)
 	}
 	defer v.tx.Rollback()
-	where, err := buildWhere(filter)
+	entryFilter := filter
+	entryFilter.Changed = Span{}
+	where, err := buildWhere(entryFilter)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,6 +213,16 @@ func topicsPage(
 }
 
 func TestTopicsMatchTheReference(t *testing.T) {
+	day := func(month time.Month, day int) time.Time {
+		return time.Date(2026, month, day, 0, 0, 0, 0, time.UTC)
+	}
+	spans := []Span{
+		{},
+		{After: day(7, 1)},
+		{Before: day(4, 1)},
+		{After: day(3, 1), Before: day(9, 1)},
+		{After: day(5, 1), Before: day(5, 1)},
+	}
 	for seed := int64(1); seed <= 6; seed++ {
 		store := openTestStore(t)
 		random := rand.New(rand.NewSource(seed))
@@ -199,17 +231,22 @@ func TestTopicsMatchTheReference(t *testing.T) {
 
 		for _, project := range []string{"", "a"} {
 			for _, include := range []bool{false, true} {
-				want := referenceTopics(t, store, defaultID, project,
-					include)
-				filter := Filter{View: ViewTopics,
-					IncludeSuperseded: include}
-				if project != "" {
-					filter.Project = []FieldCond{{Value: project}}
+				for _, span := range spans {
+					want := referenceTopics(t, store, defaultID, project,
+						include, span)
+					filter := Filter{View: ViewTopics,
+						IncludeSuperseded: include, Changed: span}
+					if project != "" {
+						filter.Project = []FieldCond{{Value: project}}
+					}
+					label := fmt.Sprintf("seed %d, project %q, include "+
+						"superseded %v, span %v", seed, project, include,
+						span)
+					checkTopicPages(t, store, defaultID, filter, want,
+						label)
+					checkWalkMatchesRanking(t, store, defaultID, filter,
+						label)
 				}
-				label := fmt.Sprintf("seed %d, project %q, include "+
-					"superseded %v", seed, project, include)
-				checkTopicPages(t, store, defaultID, filter, want, label)
-				checkWalkMatchesRanking(t, store, defaultID, filter, label)
 			}
 		}
 	}
@@ -267,7 +304,9 @@ func checkWalkMatchesRanking(
 		t.Fatal(err)
 	}
 	defer v.tx.Rollback()
-	where, err := buildWhere(filter)
+	entryFilter := filter
+	entryFilter.Changed = Span{}
+	where, err := buildWhere(entryFilter)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +317,7 @@ func checkWalkMatchesRanking(
 	if err != nil {
 		t.Fatal(err)
 	}
-	ranked, err := v.rankTopics(ctx, workspace, candidates)
+	ranked, err := v.rankTopics(ctx, workspace, candidates, filter.Changed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +326,8 @@ func checkWalkMatchesRanking(
 			filter.IncludeSuperseded)
 	}
 	for _, count := range []int{1, 5, len(candidates)} {
-		walked, ok, err := v.walkTopics(ctx, workspace, count, 1<<30, shownOf)
+		walked, ok, err := v.walkTopics(ctx, workspace, count,
+			filter.Changed, 1<<30, shownOf)
 		if err != nil || !ok {
 			t.Fatalf("%s: walking %d: ok %v, %v", label, count, ok, err)
 		}
@@ -382,7 +422,7 @@ func TestTopicsWalkPastABusyTree(t *testing.T) {
 		return v.shownOf(ctx, workspace, ids, `entries AS e`, where, false)
 	}
 	ranked, ok, err := v.walkTopics(ctx, workspace, filter.Limit+1,
-		topicWalkRows(filter), shownOf)
+		Span{}, topicWalkRows(filter), shownOf)
 	if err != nil {
 		t.Fatal(err)
 	}

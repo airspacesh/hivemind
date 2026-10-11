@@ -963,3 +963,31 @@ func TestWaitsExcludeTheirOwnSession(t *testing.T) {
 		})
 	}
 }
+
+// A date, or a date and time, reads in local time, and a span counts
+// back from now.
+func TestTimeFlagsReadLocalDatesAndSpansBack(t *testing.T) {
+	now := time.Date(2026, 10, 11, 9, 30, 0, 0, time.UTC)
+	for value, want := range map[string]time.Time{
+		"2d":         now.Add(-48 * time.Hour),
+		"6h":         now.Add(-6 * time.Hour),
+		"90m":        now.Add(-90 * time.Minute),
+		"2026-10-09": time.Date(2026, 10, 9, 0, 0, 0, 0, time.Local),
+		"2026-10-09T14:30": time.Date(2026, 10, 9, 14, 30, 0, 0,
+			time.Local),
+		"2026-10-09 14:30:05": time.Date(2026, 10, 9, 14, 30, 5, 0,
+			time.Local),
+		"2026-10-09T04:00:00+10:00": time.Date(2026, 10, 8, 18, 0, 0, 0,
+			time.UTC),
+	} {
+		got, err := parseTimeFlag("--after", value, now)
+		if err != nil || !got.Equal(want) {
+			t.Errorf("%q = %v, %v, want %v", value, got, err, want)
+		}
+	}
+	for _, value := range []string{"-2h", "2", "yesterday", "2026-13-01"} {
+		if _, err := parseTimeFlag("--after", value, now); err == nil {
+			t.Errorf("%q was accepted", value)
+		}
+	}
+}

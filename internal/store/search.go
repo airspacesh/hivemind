@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/airspacesh/workstream/internal/api"
@@ -43,6 +44,8 @@ type Filter struct {
 	OriginHost          []FieldCond
 	OriginDir           []FieldCond
 	OriginClaudeSession []FieldCond
+	// Changed keeps to the entries and messages last changed in a span.
+	Changed Span
 
 	View View
 	// EntriesOnly keeps a flat search to entries, leaving out the
@@ -68,9 +71,32 @@ const (
 	ViewTopics
 )
 
+// Span is the times from After, inclusive, to Before, exclusive. A
+// zero bound leaves that side open.
+type Span struct {
+	After  time.Time
+	Before time.Time
+}
+
+func (span Span) bounded() bool {
+	return !span.After.IsZero() || !span.Before.IsZero()
+}
+
 type whereBuilder struct {
 	clauses []string
 	args    []any
+}
+
+// addSpan keeps a time column within a span.
+func (builder *whereBuilder) addSpan(column string, span Span) {
+	if !span.After.IsZero() {
+		builder.clauses = append(builder.clauses, column+` >= ?`)
+		builder.args = append(builder.args, formatTime(span.After))
+	}
+	if !span.Before.IsZero() {
+		builder.clauses = append(builder.clauses, column+` < ?`)
+		builder.args = append(builder.args, formatTime(span.Before))
+	}
 }
 
 func conditionCount(filter Filter) int {
@@ -207,7 +233,7 @@ func (builder *whereBuilder) addFields(fields []fieldFilter) error {
 	return nil
 }
 
-// The filters split by what they can match. The text and origin
+// The filters split by what they can match. The text, origin and time
 // filters match an entry, or a message on its own. The rest match only
 // an entry, so a message meets them through the entry it is in.
 
@@ -255,21 +281,26 @@ func buildWhere(filter Filter) (whereBuilder, error) {
 	)); err != nil {
 		return whereBuilder{}, err
 	}
+	builder.addSpan("e.modified_utc", filter.Changed)
 	return builder, nil
 }
 
 // addMessageFilters adds the filters a message m matches on its own.
 func (builder *whereBuilder) addMessageFilters(filter Filter) error {
-	return builder.addFields(append([]fieldFilter{
+	if err := builder.addFields(append([]fieldFilter{
 		{"content", "lower(m.body)", matchAnywhere(filter.Content)},
 	}, originFilters(filter,
 		func(field string) string { return "lower(m." + field + ")" },
-	)...))
+	)...)); err != nil {
+		return err
+	}
+	builder.addSpan("m.modified_utc", filter.Changed)
+	return nil
 }
 
 // buildMessageWhere builds the where clause a message m in the chat of
-// entry e meets when it matches a filter. The message matches the text
-// and origin filters itself, and its entry matches the rest.
+// entry e meets when it matches a filter. The message matches the text,
+// origin and time filters itself, and its entry matches the rest.
 func buildMessageWhere(filter Filter) (whereBuilder, error) {
 	var builder whereBuilder
 	if err := builder.addEntryOnly(filter); err != nil {
@@ -369,7 +400,13 @@ func (s *Store) Search(
 			ErrInvalidFilter,
 		)
 	}
-	where, err := buildWhere(filter)
+	entryFilter := filter
+	if filter.View == ViewTopics {
+		// The topics view keeps to the changes in each tree within the
+		// span, rather than to top-level entries changed within it.
+		entryFilter.Changed = Span{}
+	}
+	where, err := buildWhere(entryFilter)
 	if err != nil {
 		return api.SearchResult{}, err
 	}
@@ -419,12 +456,15 @@ const (
 )
 
 // searchesChat reports whether a flat search matches messages as well
-// as entries, which it does when it requires some text or origin,
+// as entries, which it does when it requires some text, origin or time,
 // unless it keeps to entries. Excluding alone does not search chat, or
 // nearly every message would match.
 func searchesChat(filter Filter) bool {
 	if filter.EntriesOnly {
 		return false
+	}
+	if filter.Changed.bounded() {
+		return true
 	}
 	for _, conditions := range [][]FieldCond{
 		filter.Content, filter.OriginUser, filter.OriginHost,
@@ -459,6 +499,13 @@ type matchScope struct {
 	candidates []int64
 }
 
+// eachChat joins the entries read first to the messages m in their
+// chats. A time filter on the messages would lead SQLite to read every
+// message in the span for each entry instead, so INDEXED BY holds it to
+// the index of each entry's chat.
+const eachChat = `CROSS JOIN entry_messages AS m
+	INDEXED BY sqlite_autoindex_entry_messages_1`
+
 // matchQuery selects a flat search's matches as entry ids, each with
 // the time it ranks by, newest first. A match is an entry the search
 // matches, or when it searches chat, a message the search matches, as
@@ -473,14 +520,15 @@ func matchQuery(
 	where whereBuilder,
 	scope matchScope,
 ) (string, []any, error) {
-	entryKey, messageKey, join := `e.modified_utc`, `m.modified_utc`, `JOIN`
+	entryKey, messageKey := `e.modified_utc`, `m.modified_utc`
+	chat := `JOIN entry_messages AS m`
 	if filter.OrderByCreation {
 		// A message then ranks by its entry's creation, so the walk
 		// reads the entries newest first and each one's chat within.
 		// CROSS JOIN keeps SQLite from reading every message and
 		// sorting them instead.
 		entryKey, messageKey = `e.created_utc`, `e.created_utc`
-		join = `CROSS JOIN`
+		chat = eachChat
 	}
 	if scope.indexed {
 		// Reading the candidates first, and each one's chat within,
@@ -488,7 +536,7 @@ func matchQuery(
 		from = `json_each(?) AS candidate CROSS JOIN ` + from
 		fromArgs = append([]any{idsJSON(scope.candidates)}, fromArgs...)
 		where.clauses = append(where.clauses, `e.id = candidate.value`)
-		join = `CROSS JOIN`
+		chat = eachChat
 	}
 	if scope.since != "" {
 		where.clauses = append(where.clauses, entryKey+` >= ?`)
@@ -516,7 +564,7 @@ func matchQuery(
 		messageWhere.args = append(messageWhere.args, scope.since)
 	}
 	query += ` UNION ALL SELECT e.id, ` + messageKey + ` AS at FROM ` +
-		from + ` ` + join + ` entry_messages AS m
+		from + ` ` + chat + `
 			ON m.workspace_id = e.workspace_id AND m.entry_id = e.id` +
 		messageWhere.sql() + ` ORDER BY at DESC`
 	args = append(append(args, fromArgs...), messageWhere.args...)
@@ -524,22 +572,30 @@ func matchQuery(
 }
 
 // walkStart is the time of the n-th newest change a flat search ranks
-// matches by, or empty when there are fewer.
+// matches by, within the span the search keeps to, or empty when there
+// are fewer.
 func (v view) walkStart(
 	ctx context.Context, workspace int64, filter Filter, n int,
 ) (string, error) {
-	changes := `SELECT modified_utc AS at FROM entries
-		WHERE workspace_id = ?1`
+	bound := whereBuilder{
+		clauses: []string{`workspace_id = ?`}, args: []any{workspace},
+	}
+	column := `modified_utc`
 	if filter.OrderByCreation {
-		changes = `SELECT created_utc AS at FROM entries
-			WHERE workspace_id = ?1`
-	} else if searchesChat(filter) {
-		changes += ` UNION ALL SELECT modified_utc FROM entry_messages
-			WHERE workspace_id = ?1`
+		column = `created_utc`
+	} else {
+		bound.addSpan(`modified_utc`, filter.Changed)
+	}
+	changes := `SELECT ` + column + ` AS at FROM entries` + bound.sql()
+	args := bound.args
+	if !filter.OrderByCreation && searchesChat(filter) {
+		changes += ` UNION ALL SELECT modified_utc FROM entry_messages` +
+			bound.sql()
+		args = append(slices.Clone(args), bound.args...)
 	}
 	var start string
 	err := v.tx.QueryRowContext(ctx, changes+` ORDER BY at DESC
-		LIMIT 1 OFFSET ?2`, workspace, n-1).Scan(&start)
+		LIMIT 1 OFFSET ?`, append(args, n-1)...).Scan(&start)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -630,7 +686,7 @@ func (v view) showMatchingMessages(
 	where.args = append(where.args, workspace)
 	rows, err := v.tx.QueryContext(ctx, `
 		SELECT m.entry_id, m.post_order
-		FROM json_each(?) AS page CROSS JOIN entry_messages AS m`+
+		FROM json_each(?) AS page `+eachChat+
 		where.sql()+`
 		ORDER BY m.post_order DESC`, where.args...)
 	if err != nil {

@@ -43,6 +43,8 @@ var singleQueryParameters = map[string]bool{
 	"entries-only":       true,
 	"view":               true,
 	"under":              true,
+	"after":              true,
+	"before":             true,
 }
 
 // changesQueryParameters are the parameters of the changes feed,
@@ -248,6 +250,15 @@ func searchFilter(query url.Values) (store.Filter, error) {
 	if err != nil {
 		return store.Filter{}, err
 	}
+	after, err := queryTime(query, "after")
+	if err != nil {
+		return store.Filter{}, err
+	}
+	before, err := queryTime(query, "before")
+	if err != nil {
+		return store.Filter{}, err
+	}
+	filter.Changed = store.Span{After: after, Before: before}
 	filter.IncludeSuperseded = includeSuperseded
 	filter.EntriesOnly = entriesOnly
 	filter.Limit = int(limit)

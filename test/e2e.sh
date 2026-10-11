@@ -457,6 +457,16 @@ check_equal "a chat wait's origin filter matches each message" \
     "[$heron-m2]" \
     "$(ws chat wait "$heron" --since 0 --origin-user heron --include-mine \
         --timeout 1s | grep -o "^\[$heron-m[0-9]*\]")"
+check "a span back from now keeps recent messages" "  [$heron-m2]" \
+    "$(ws search --origin-user heron --after 1h)"
+check_equal "a date leaves out what changed after it" "No matching entries." \
+    "$(ws search --origin-user heron --before 2000-01-01)"
+check "recent keeps to trees changed in the span" "Heron topic" \
+    "$(ws recent --project owners --after 10m)"
+check_equal "recent leaves out trees with no change in the span" \
+    "No matching entries." "$(ws recent --project owners --before 2000-01-01)"
+check "a time flag names the forms it takes" "like 2d, 6h or 90m" \
+    "$(ws search --after yesterday 2>&1 || true)"
 check "an edit of another user's message is refused" \
     "$heron-m2 was posted by heron, so only heron can edit it" \
     "$(ws chat edit "$heron-m2" "Taken" 2>&1 || true)"
