@@ -116,13 +116,13 @@ func lineHead(
 // printPostLine prints a post on one line, with a time, its author, the
 // path to it, and a suffix such as a count.
 func printPostLine(
-	e api.Post, ancestors []api.PostRef, at time.Time, layout string,
+	post api.Post, ancestors []api.PostRef, at time.Time, layout string,
 	suffix string,
 ) {
 	fmt.Printf("%s: %s%s%s\n",
-		lineHead(e.Ref, at, layout, e.Origin.User, ancestors),
-		subjectLine(e.Subject, e.Deleted), supersededLabel(e.SupersededBy),
-		suffix)
+		lineHead(post.Ref, at, layout, post.Origin.User, ancestors),
+		subjectLine(post.Subject, post.Deleted),
+		supersededLabel(post.SupersededBy), suffix)
 }
 
 func newMessagesLabel(count int) string {
@@ -214,51 +214,51 @@ func printBacklinks(backlinks []api.Link) {
 }
 
 func printPostDetail(d api.PostDetail) {
-	e := d.Post
-	fmt.Printf("[%s] %s\n", e.Ref, subjectLine(e.Subject, e.Deleted))
-	if len(e.SupersededBy) > 0 {
-		fmt.Println("Superseded by " + joinRefs(e.SupersededBy))
+	post := d.Post
+	fmt.Printf("[%s] %s\n", post.Ref, subjectLine(post.Subject, post.Deleted))
+	if len(post.SupersededBy) > 0 {
+		fmt.Println("Superseded by " + joinRefs(post.SupersededBy))
 	}
 	fmt.Println()
-	fmt.Println("Project: " + e.Project)
-	fmt.Println("Created: " + localTimeDetail(e.Created))
-	if e.Deleted {
-		fmt.Println("Deleted: " + localTimeDetail(e.Modified))
+	fmt.Println("Project: " + post.Project)
+	fmt.Println("Created: " + localTimeDetail(post.Created))
+	if post.Deleted {
+		fmt.Println("Deleted: " + localTimeDetail(post.Modified))
 	} else {
-		fmt.Println("Modified: " + localTimeDetail(e.Modified))
+		fmt.Println("Modified: " + localTimeDetail(post.Modified))
 	}
-	if !d.Activity.Equal(e.Modified) {
+	if !d.Activity.Equal(post.Modified) {
 		fmt.Println("Subtree activity: " + localTimeDetail(d.Activity))
 	}
-	printOrigin(e.Origin)
+	printOrigin(post.Origin)
 	if len(d.Ancestors) > 0 {
 		fmt.Println("Path: " + formatPath(d.Ancestors))
 	}
-	if len(e.Metadata) > 0 {
+	if len(post.Metadata) > 0 {
 		fmt.Println("Metadata:")
-		for _, key := range sortedMetaKeys(e.Metadata) {
-			fmt.Printf("  %s: %s\n", key, e.Metadata[key])
+		for _, key := range sortedMetaKeys(post.Metadata) {
+			fmt.Printf("  %s: %s\n", key, post.Metadata[key])
 		}
 	}
-	if len(e.Links) > 0 {
+	if len(post.Links) > 0 {
 		fmt.Println("Links:")
-		for _, link := range e.Links {
+		for _, link := range post.Links {
 			fmt.Printf("  %s %s\n", link.Name, link.Ref)
 		}
 	}
 	printBacklinks(d.Backlinks)
 	if d.Children > 0 {
 		fmt.Printf("Children: %d (see '%s tree %s')\n", d.Children,
-			programName, e.Ref)
+			programName, post.Ref)
 	}
 	if d.Messages > 0 {
-		newest := api.MessageRef{Post: e.Ref, Number: d.LastMessage}
+		newest := api.MessageRef{Post: post.Ref, Number: d.LastMessage}
 		fmt.Printf("Chat: %d messages, newest %s (see '%s chat recent %s')\n",
-			d.Messages, newest, programName, e.Ref)
+			d.Messages, newest, programName, post.Ref)
 	}
-	if e.Body != "" {
+	if post.Body != "" {
 		fmt.Println()
-		fmt.Println(e.Body)
+		fmt.Println(post.Body)
 	}
 }
 
@@ -271,37 +271,38 @@ func printTree(tree api.TreeResponse, root api.Ref) {
 	}
 	children := map[api.Ref][]api.TreePost{}
 	var times []time.Time
-	for _, e := range tree.Posts {
-		times = append(times, e.Modified)
-		for _, link := range e.Links {
+	for _, post := range tree.Posts {
+		times = append(times, post.Modified)
+		for _, link := range post.Links {
 			if link.Name == api.ParentLink {
-				children[link.Ref] = append(children[link.Ref], e)
+				children[link.Ref] = append(children[link.Ref], post)
 			}
 		}
 	}
 	layout := timeLayout(times)
 
-	var printFrom func(e api.TreePost, depth int)
-	printFrom = func(e api.TreePost, depth int) {
+	var printFrom func(post api.TreePost, depth int)
+	printFrom = func(post api.TreePost, depth int) {
 		indent := strings.Repeat("  ", depth)
-		fmt.Printf("%s[%s] %s: %s%s\n", indent, e.Ref,
-			e.Modified.Local().Format(layout),
-			subjectLine(e.Subject, e.Deleted), supersededLabel(e.SupersededBy))
-		if e.MoreBelow > 0 {
-			fmt.Printf("%s  ... %d more below %s\n", indent, e.MoreBelow,
-				e.Ref)
+		fmt.Printf("%s[%s] %s: %s%s\n", indent, post.Ref,
+			post.Modified.Local().Format(layout),
+			subjectLine(post.Subject, post.Deleted),
+			supersededLabel(post.SupersededBy))
+		if post.MoreBelow > 0 {
+			fmt.Printf("%s  ... %d more below %s\n", indent, post.MoreBelow,
+				post.Ref)
 		}
-		for _, child := range children[e.Ref] {
+		for _, child := range children[post.Ref] {
 			printFrom(child, depth+1)
 		}
-		if e.MoreUnder > 0 {
-			fmt.Printf("%s  ... %d more under %s\n", indent, e.MoreUnder,
-				e.Ref)
+		if post.MoreUnder > 0 {
+			fmt.Printf("%s  ... %d more under %s\n", indent, post.MoreUnder,
+				post.Ref)
 		}
 	}
-	for _, e := range tree.Posts {
-		if e.Ref == root {
-			printFrom(e, 0)
+	for _, post := range tree.Posts {
+		if post.Ref == root {
+			printFrom(post, 0)
 		}
 	}
 }
@@ -474,11 +475,11 @@ func printChanges(changes []api.Change) {
 	}
 	layout := timeLayout(times)
 	for _, change := range changes {
-		e := change.Post
+		post := change.Post
 		if change.Message != nil {
-			printMessage(*change.Message, e.Ancestors, "", layout)
+			printMessage(*change.Message, post.Ancestors, "", layout)
 		} else {
-			printPostLine(e.Post, e.Ancestors, e.Modified, layout, "")
+			printPostLine(post.Post, post.Ancestors, post.Modified, layout, "")
 		}
 	}
 }
