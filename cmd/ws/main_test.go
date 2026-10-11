@@ -606,6 +606,17 @@ func TestListingShowsAMatchALine(t *testing.T) {
 		t.Fatalf("recent sent %v and search %v, want chat in search only",
 			sent[0], sent[1])
 	}
+
+	for command, header := range map[string]string{
+		"recent": "Newest 1 post:\n",
+		"search": "Newest 1 post or message:\n",
+	} {
+		got = ws(t, config, command, "-n", "1", "--id-only")
+		if got.stderr != header {
+			t.Errorf("%s -n 1 said %q on stderr, want %q", command,
+				got.stderr, header)
+		}
+	}
 }
 
 // shellWords splits a command as a POSIX shell would, for the words

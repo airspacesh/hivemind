@@ -590,10 +590,18 @@ func searchQuery(p *parsedArgs) (url.Values, error) {
 // listingHeader says what a listing ran, like Newest 20 posts matching
 // --project launcher:
 func listingHeader(p *parsedArgs, limit int, includeChat bool) string {
-	text := fmt.Sprintf("Newest %d posts", limit)
-	if includeChat {
-		text += " and messages"
+	var noun string
+	switch {
+	case limit == 1 && includeChat:
+		noun = "post or message"
+	case limit == 1:
+		noun = "post"
+	case includeChat:
+		noun = "posts and messages"
+	default:
+		noun = "posts"
 	}
+	text := fmt.Sprintf("Newest %d %s", limit, noun)
 	if p.has("--under") {
 		text += " under " + p.strs["--under"]
 	}
