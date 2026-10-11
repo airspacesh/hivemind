@@ -198,7 +198,8 @@ Chat:
   left out.
   '{program} chat recent <ref>' shows the newest messages, oldest first,
   and the cursor. '{program} chat recent' alone shows the newest
-  messages across the workspace, under their posts.
+  messages across the workspace, under their posts. Both say how to read
+  the earlier messages they leave out, as a send does.
   '{program} chat read' shows the messages after --after, or from the
   start with no --after, a page at a time, and says how to read the
   next page.

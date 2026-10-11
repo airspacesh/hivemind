@@ -397,6 +397,9 @@ check "a read refuses a message of another chat" \
 check_equal "chat recent shows the newest, oldest first" "[$chat-m2]
 [$chat-m3]" "$(ws chat recent "$chat" --limit 2 |
     sed -n 's/^\(\[[a-z0-9-]*\]\).*/\1/p')"
+check_equal "chat recent says how to read what it left out" \
+    "... 1 earlier (ws chat read $chat --after $chat-m0)" \
+    "$(ws chat recent "$chat" --limit 2 | head -1)"
 ws chat edit "$chat-m1" "First, edited" >/dev/null
 check "an edit stays in place" "[$chat-m1]" \
     "$(ws chat read "$chat" --after "$chat-m0" --limit 1)"

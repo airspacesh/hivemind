@@ -418,7 +418,7 @@ func TestSearchUnderTakesItsPostsWorkspace(t *testing.T) {
 }
 
 // The chat overview marks how many older messages a post has before the
-// ones it shows.
+// ones it shows, and how to read them.
 func TestOverviewMarksEarlierMessages(t *testing.T) {
 	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
 	message := func(number int64) api.Message {
@@ -436,7 +436,8 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
 	got := ws(t, config, "chat", "recent")
-	want := "[e1] Why?\n  ... 6 earlier\n" +
+	want := "[e1] Why?\n" +
+		"  ... 6 earlier (ws chat read e1 --after e1-m0)\n" +
 		"  [e1-m7] 05:20 duck: quack\n  [e1-m8] 05:20 duck: quack\n"
 	if !got.ok || got.stdout != want {
 		t.Fatalf("overview =\n%s\nwant\n%s (%+v)", got.stdout, want, got)

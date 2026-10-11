@@ -239,14 +239,8 @@ func cmdChatSend(c *client, args []string) error {
 	if err != nil {
 		return fmt.Errorf("reading the chat after the send: %w", err)
 	}
-	// Message numbers count from 1 in each post and none are removed,
-	// so the first number shown says how many after start are left out.
+	printEarlier("", ref, start, page.Messages)
 	cursor := api.MessageRef{Post: ref, Number: start}
-	earlier := page.Messages[0].Number - 1 - start
-	if earlier > 0 {
-		fmt.Printf("... %d earlier (%s chat read %s --after %s)\n",
-			earlier, programName, ref, cursor)
-	}
 	page.Messages = slices.DeleteFunc(page.Messages, func(m api.Message) bool {
 		return m.Number <= start
 	})
@@ -353,6 +347,7 @@ func cmdChatRecent(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
+	printEarlier("", ref, 0, page.Messages)
 	printChatPage(ref, page, fmt.Sprintf("%s has no messages yet.", ref))
 	return nil
 }

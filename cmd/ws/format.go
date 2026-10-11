@@ -373,6 +373,25 @@ func printCursorLine(post api.Ref, page api.ChatPage) {
 		chatWaitCommand(cursor, ""))
 }
 
+// printEarlier marks how many messages after the number start a chat
+// output leaves out before the first it shows, with the read that shows
+// them. Message numbers count from 1 in each post and none are removed,
+// so the first number shown says how many come before it.
+func printEarlier(
+	indent string, post api.Ref, start int64, messages []api.Message,
+) {
+	if len(messages) == 0 {
+		return
+	}
+	earlier := messages[0].Number - 1 - start
+	if earlier <= 0 {
+		return
+	}
+	cursor := api.MessageRef{Post: post, Number: start}
+	fmt.Printf("%s... %d earlier (%s chat read %s --after %s)\n", indent,
+		earlier, programName, post, cursor)
+}
+
 // printChatMessages prints one chat's messages oldest first, or empty
 // when there are none.
 func printChatMessages(page api.ChatPage, empty string) {
@@ -411,12 +430,7 @@ func printOverview(overview api.ChatOverview, workspace string) {
 	layout := timeLayout(times)
 	for _, chat := range overview.Chats {
 		printChatHeader(chat.Post)
-		// Message numbers count from 1 in each post, and the overview
-		// shows each post's newest messages, so the first number shown
-		// says how many come before it.
-		if earlier := chat.Messages[0].Number - 1; earlier > 0 {
-			fmt.Printf("  ... %d earlier\n", earlier)
-		}
+		printEarlier("  ", chat.Post.Ref, 0, chat.Messages)
 		for _, m := range chat.Messages {
 			printMessage(m, nil, "  ", layout)
 		}
