@@ -260,7 +260,6 @@ func (v view) supersedersOf(
 	return refs, nil
 }
 
-
 // postRef describes a post by its ref, and by its subject, whether it
 // is deleted, and its superseders when the request can read it.
 func (v view) postRef(ctx context.Context, key Key) (api.PostRef, error) {
