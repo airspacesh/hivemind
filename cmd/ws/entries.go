@@ -94,31 +94,31 @@ func workspacePath(t target, rest string) string {
 	return "/api/workspaces/" + url.PathEscape(t.workspace) + rest
 }
 
-func (c *client) search(t target, query url.Values) (api.SearchResult, error) {
-	var result api.SearchResult
+func (c *client) search(t target, query url.Values) (api.MatchPage, error) {
+	var page api.MatchPage
 	err := c.do(t, "GET", workspacePath(t, "/entries?"+query.Encode()), nil,
-		&result)
-	return result, err
+		&page)
+	return page, err
 }
 
 const recentAfterChangeCount = 5
 
 // printRecentAfterChange lists the most recently changed entries in a
 // workspace other than the one just changed. That entry is dropped
-// after the fetch rather than skipped by offset, because another
+// after the fetch rather than skipped in the query, because another
 // agent's write can land in between and take the top slot.
 func (c *client) printRecentAfterChange(t target, changed api.Ref) error {
 	query := url.Values{}
 	query.Set("limit", fmt.Sprint(recentAfterChangeCount+1))
-	result, err := c.search(t, query)
+	page, err := c.search(t, query)
 	if err != nil {
 		return err
 	}
 
-	var others []api.ListedEntry
-	for _, e := range result.Entries {
-		if e.Ref != changed && len(others) < recentAfterChangeCount {
-			others = append(others, e.ListedEntry)
+	var others []api.Match
+	for _, m := range page.Matches {
+		if m.Entry.Ref != changed && len(others) < recentAfterChangeCount {
+			others = append(others, m)
 		}
 	}
 	if len(others) == 0 {
@@ -126,7 +126,7 @@ func (c *client) printRecentAfterChange(t target, changed api.Ref) error {
 	}
 	fmt.Println()
 	fmt.Println("Other recent entries:")
-	printEntryLines(others, byModified)
+	printMatches(others)
 	return nil
 }
 
@@ -588,36 +588,102 @@ func searchQuery(p *parsedArgs) (url.Values, error) {
 		if !p.has(flag) {
 			continue
 		}
-		at, err := parseTimeFlag(flag, p.strs[flag], now)
+		bound, err := parseBoundFlag(flag, p.strs[flag], now)
 		if err != nil {
 			return nil, err
 		}
-		query.Set(strings.TrimPrefix(flag, "--"),
-			at.UTC().Format(time.RFC3339Nano))
+		query.Set(strings.TrimPrefix(flag, "--"), bound.String())
 	}
 	return query, nil
 }
 
-func cmdSearch(c *client, command string, args []string) error {
+// listingHeader says what a listing ran, like Newest 20 entries
+// matching --project launcher:
+func listingHeader(p *parsedArgs, limit int, includeChat bool) string {
+	text := fmt.Sprintf("Newest %d entries", limit)
+	if includeChat {
+		text += " and messages"
+	}
+	if p.has("--under") {
+		text += " under " + p.strs["--under"]
+	}
+	for _, flag := range []string{"--after", "--before"} {
+		if p.has(flag) {
+			text += " " + strings.TrimPrefix(flag, "--") + " " + p.strs[flag]
+		}
+	}
+	matching := conditionArgs(p)
+	for _, arg := range p.pos {
+		matching = " " + shellQuote(arg) + matching
+	}
+	if matching != "" {
+		text += " matching" + matching
+	}
+	if p.bools["--include-superseded"] {
+		text += ", superseded included"
+	}
+	return text + ":"
+}
+
+// olderCommand is the command that lists the matches before a revision,
+// with the text, flags and bounds a listing was given.
+func olderCommand(
+	command string, t target, p *parsedArgs, query url.Values,
+	before int64,
+) string {
+	text := programName + " " + command
+	for _, arg := range p.pos {
+		text += " " + shellQuote(arg)
+	}
+	text += " --before " + api.Bound{Revision: before}.String() +
+		" --workspace " + shellQuote(t.workspace)
+	if after := query.Get("after"); after != "" {
+		text += " --after " + after
+	}
+	if p.has("--limit") {
+		text += " --limit " + shellQuote(p.strs["--limit"])
+	}
+	for _, flag := range []string{"--include-chat", "--include-superseded",
+		"--entries-only"} {
+		if p.bools[flag] {
+			text += " " + flag
+		}
+	}
+	return text + filterArgs(p)
+}
+
+// cmdListing lists the newest matches, for recent or search. Search
+// takes a <text> and includes chat unless --entries-only. Recent leaves
+// chat out unless --include-chat.
+func cmdListing(c *client, command string, args []string) error {
 	p, err := parseArgs(args, searchFlagSpec())
 	if err != nil {
 		return err
 	}
-	if len(p.pos) > 1 {
-		return fmt.Errorf("give at most one <text> (got %d)", len(p.pos))
+	var includeChat bool
+	switch command {
+	case "search":
+		if len(p.pos) > 1 {
+			return fmt.Errorf("give at most one <text> (got %d)",
+				len(p.pos))
+		}
+		if p.has("--include-chat") {
+			return fmt.Errorf("search includes chat unless " +
+				"--entries-only. --include-chat is for recent")
+		}
+		includeChat = !p.bools["--entries-only"]
+	case "recent":
+		if len(p.pos) != 0 {
+			return fmt.Errorf("recent takes no <text>. Use '%s search "+
+				"<text>'", programName)
+		}
+		if p.has("--entries-only") {
+			return fmt.Errorf("recent leaves chat out unless " +
+				"--include-chat. --entries-only is for search")
+		}
+		includeChat = p.bools["--include-chat"]
 	}
-	if command == "recent" && len(p.pos) == 1 {
-		return fmt.Errorf("recent takes no <text>. Use '%s search <text>'",
-			programName)
-	}
-	if command == "search" && p.has("--flat") {
-		return fmt.Errorf("search always lists every level. --flat is for "+
-			"'%s recent'", programName)
-	}
-	if p.has("--order-by-creation") && p.has("--order-by-modified") {
-		return fmt.Errorf("give one of --order-by-creation and " +
-			"--order-by-modified")
-	}
+
 	query, err := searchQuery(p)
 	if err != nil {
 		return err
@@ -631,36 +697,12 @@ func cmdSearch(c *client, command string, args []string) error {
 			return err
 		}
 	}
-	offset := 0
-	if p.has("--offset") {
-		if offset, err = parseOffset(p.strs["--offset"]); err != nil {
-			return err
-		}
-	}
 	query.Set("limit", fmt.Sprint(limit))
-	query.Set("offset", fmt.Sprint(offset))
 	if p.bools["--include-superseded"] {
 		query.Set("include-superseded", "true")
 	}
-	if p.bools["--entries-only"] {
-		query.Set("entries-only", "true")
-	}
-	order := byModified
-	if p.bools["--order-by-creation"] {
-		query.Set("order-by", "created")
-		order = byCreation
-	}
-	if command == "recent" && !p.has("--flat") {
-		if order == byCreation {
-			return fmt.Errorf("--order-by-creation needs --flat, since " +
-				"top-level entries are ordered by activity")
-		}
-		if p.bools["--entries-only"] {
-			return fmt.Errorf("--entries-only needs --flat, since " +
-				"top-level entries are listed without their chats")
-		}
-		query.Set("view", "topics")
-		order = byActivity
+	if includeChat {
+		query.Set("include-chat", "true")
 	}
 
 	t, err := c.targetBeside(p, "--under")
@@ -670,11 +712,24 @@ func cmdSearch(c *client, command string, args []string) error {
 	if err := c.addUnder(t, p, query); err != nil {
 		return err
 	}
-	result, err := c.search(t, query)
+	page, err := c.search(t, query)
 	if err != nil {
 		return err
 	}
-	printSearchResult(result, offset, limit, order, p.bools["--id-only"])
+	fmt.Fprintln(os.Stderr, listingHeader(p, limit, includeChat))
+	if p.bools["--id-only"] {
+		printMatchRefs(page)
+		return nil
+	}
+	if len(page.Matches) == 0 {
+		fmt.Println("No matches.")
+	}
+	printMatches(page.Matches)
+	if page.More {
+		oldest := page.Matches[len(page.Matches)-1].Revision
+		fmt.Printf("--- more older matches: %s ---\n",
+			olderCommand(command, t, p, query, oldest))
+	}
 	return nil
 }
 

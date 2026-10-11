@@ -62,8 +62,10 @@ INSERT INTO revision_counter (only_row, revision) VALUES (1, 0)`
 // without regard to ASCII case. activity_utc is the latest change to
 // the entry or its chat. Every write to either sets it, so listings
 // read it rather than the chat. revision is the revision of the
-// entry's own latest change, which also set modified_utc. deleted is 1
-// once a delete has cleared the subject and body, and 0 before.
+// entry's own latest change, which also set modified_utc, and
+// activity_revision the revision of the change that set activity_utc.
+// deleted is 1 once a delete has cleared the subject and body, and 0
+// before.
 const createEntries = `
 CREATE TABLE entries (
 	workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
@@ -72,6 +74,7 @@ CREATE TABLE entries (
 	modified_utc TEXT NOT NULL,
 	activity_utc TEXT NOT NULL,
 	revision INTEGER NOT NULL,
+	activity_revision INTEGER NOT NULL,
 	project TEXT NOT NULL,
 	project_lower TEXT COLLATE BINARY
 		GENERATED ALWAYS AS (lower(project)) STORED,
@@ -109,13 +112,12 @@ CREATE TABLE entry_metadata (
 	FOREIGN KEY (workspace_id, entry_id) REFERENCES entries(workspace_id, id)
 ) WITHOUT ROWID`
 
-const createCreatedIndex = `
-CREATE INDEX entries_created_order
-ON entries(workspace_id, created_utc DESC, id DESC)`
-
-const createModifiedIndex = `
-CREATE INDEX entries_modified_order
-ON entries(workspace_id, modified_utc DESC, id DESC)`
+// createActivityIndex reads a workspace's entries newest first by the
+// latest change to them or their chats, as a listing without chat ranks
+// them, with the time a span keeps to at hand.
+const createActivityIndex = `
+CREATE INDEX entries_activity_order
+ON entries(workspace_id, activity_revision, activity_utc)`
 
 // createRevisionIndex reads a workspace's entries changed after a
 // revision, in revision order.
@@ -182,8 +184,9 @@ ON entry_links(source_workspace_id, source_id) WHERE name = 'parent'`
 // the server in the order it was posted, so the chat overview orders
 // by it rather than by a clock. An edit overwrites the body, so no
 // earlier text is kept. revision is the revision of the post or of the
-// latest edit. deleted is 1 once a delete has cleared the body, and 0
-// before. origin_user has a lowered twin for
+// latest edit, and posted_revision the revision of the post, which
+// edits leave alone. deleted is 1 once a delete has cleared the body,
+// and 0 before. origin_user has a lowered twin for
 // createMessageOriginUserIndex to hold.
 const createMessages = `
 CREATE TABLE entry_messages (
@@ -194,6 +197,7 @@ CREATE TABLE entry_messages (
 	created_utc TEXT NOT NULL,
 	modified_utc TEXT NOT NULL,
 	revision INTEGER NOT NULL,
+	posted_revision INTEGER NOT NULL,
 	body TEXT NOT NULL,
 	deleted INTEGER NOT NULL DEFAULT 0,
 	origin_user TEXT NOT NULL DEFAULT '',
@@ -210,11 +214,12 @@ const createMessageOrderIndex = `
 CREATE INDEX entry_messages_workspace_order
 ON entry_messages(workspace_id, post_order)`
 
-// createMessageModifiedIndex finds the latest chat activity, which the
-// topics view reads newest first.
-const createMessageModifiedIndex = `
-CREATE INDEX entry_messages_modified
-ON entry_messages(workspace_id, modified_utc)`
+// createMessagePostedIndex reads a workspace's messages newest first
+// by when they were posted, as a listing with chat ranks them, with the
+// time a span keeps to at hand.
+const createMessagePostedIndex = `
+CREATE INDEX entry_messages_posted
+ON entry_messages(workspace_id, posted_revision, created_utc)`
 
 const createMessageRevisionIndex = `
 CREATE INDEX entry_messages_revision
@@ -331,21 +336,19 @@ var schemaSteps = []schemaStep{
 		statements: []string{
 			createWorkspaces, createRevisionCounter,
 			startRevisionCounter, createEntries, createMetadata,
-			createCreatedIndex, createModifiedIndex, createRevisionIndex,
+			createActivityIndex, createRevisionIndex,
 			createSubjectIndex, createProjectIndex,
 			createProjectCreatedIndex, createOriginUserIndex, createLinks,
 			createLinkTargetIndex, createOneParentIndex, createMessages,
-			createMessageOrderIndex, createMessageModifiedIndex,
+			createMessageOrderIndex, createMessagePostedIndex,
 			createMessageRevisionIndex, createMessageOriginUserIndex,
 			createEntryText, secureEntryText, createEntryTextInsert,
 			createEntryTextUpdate, createMessageText, secureMessageText,
 			createMessageTextInsert, createMessageTextUpdate,
 		},
 		objects: slices.Concat([]schemaObject{
-			{"index", "entries_created_order", "entries",
-				normalizeSchemaSQL(createCreatedIndex)},
-			{"index", "entries_modified_order", "entries",
-				normalizeSchemaSQL(createModifiedIndex)},
+			{"index", "entries_activity_order", "entries",
+				normalizeSchemaSQL(createActivityIndex)},
 			{"index", "entries_origin_user", "entries",
 				normalizeSchemaSQL(createOriginUserIndex)},
 			{"index", "entries_revision", "entries",
@@ -360,8 +363,8 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createOneParentIndex)},
 			{"index", "entry_links_target", "entry_links",
 				normalizeSchemaSQL(createLinkTargetIndex)},
-			{"index", "entry_messages_modified", "entry_messages",
-				normalizeSchemaSQL(createMessageModifiedIndex)},
+			{"index", "entry_messages_posted", "entry_messages",
+				normalizeSchemaSQL(createMessagePostedIndex)},
 			{"index", "entry_messages_origin_user", "entry_messages",
 				normalizeSchemaSQL(createMessageOriginUserIndex)},
 			{"index", "entry_messages_revision", "entry_messages",

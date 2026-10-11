@@ -236,31 +236,28 @@ func (r EditEntryRequest) ChangesContent() bool {
 		len(r.Metadata) > 0
 }
 
-// MatchedEntry is an entry a listing shows. Messages come in the order
-// they were posted, and an edit does not move a message.
-//
-// In a search of chat, MatchingMessages holds the messages in the
-// entry's chat that matched and that the page's shared budget of
-// messages had room for. MoreMatchingMessages counts the entry's other
-// matching messages.
-//
-// In the topics view, TreeMessages holds the newest messages anywhere
-// in the entry's tree, and EarlierTreeMessages counts the tree's other
-// messages.
-type MatchedEntry struct {
-	ListedEntry
-	MatchingMessages     []Message `json:"matching_messages,omitempty"`
-	MoreMatchingMessages int       `json:"more_matching_messages,omitempty"`
-	TreeMessages         []Message `json:"tree_messages,omitempty"`
-	EarlierTreeMessages  int       `json:"earlier_tree_messages,omitempty"`
+// Match is a match on a page of a listing. It is an entry, or a
+// message in the entry's chat when Message is set. Ancestors runs from
+// the root down to the entry's parent. Revision and At are the revision
+// and time of the change the match ranks by. That is the message's
+// post, or the entry's own latest change in a listing with chat, or
+// else the latest change to the entry or its chat. NewMessages counts,
+// in a listing without chat, the messages posted in the entry's chat
+// at or after the revision of the page's oldest match.
+type Match struct {
+	Entry       Entry      `json:"entry"`
+	Ancestors   []EntryRef `json:"ancestors,omitempty"`
+	Message     *Message   `json:"message,omitempty"`
+	Revision    int64      `json:"revision"`
+	At          time.Time  `json:"at"`
+	NewMessages int        `json:"new_messages,omitempty"`
 }
 
-// SearchResult is a page of a listing. More says whether entries
-// follow the page. Listings do not count their matches, since a count
-// takes time in proportion to the workspace.
-type SearchResult struct {
-	Entries []MatchedEntry `json:"entries"`
-	More    bool           `json:"more"`
+// MatchPage is a page of a listing, newest first. More says whether
+// older matches follow the page.
+type MatchPage struct {
+	Matches []Match `json:"matches"`
+	More    bool    `json:"more"`
 }
 
 // ErrorCode says what kind of failure an error response reports, so a

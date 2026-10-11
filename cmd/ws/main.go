@@ -38,8 +38,10 @@ Usage:
   {program} delete <ref>
   {program} entry <ref>
   {program} tree <ref> [--limit 30] [--include-superseded]
-  {program} recent [--flat] [search filters] [--workspace <name>]
-  {program} search [<text>] [--under <ref>] [search filters] [--workspace <name>]
+  {program} recent [--include-chat] [--under <ref>] [search filters]
+         [--workspace <name>]
+  {program} search [<text>] [--entries-only] [--under <ref>]
+         [search filters] [--workspace <name>]
   {program} list-workspaces
   {program} list-projects [--limit 30] [--workspace <name>]
   {program} chat send <ref> <message> [--since <n>]
@@ -122,14 +124,21 @@ Links:
   leaves the modified time alone.
 
 Listings:
-  '{program} recent' lists top-level entries, those with no parent,
-  ordered by the latest change anywhere beneath them, with a count of
-  what is below and the 2 most recently sent messages anywhere in the
-  tree. '{program} recent --flat' lists every entry by its own last
-  change. '{program} search' lists every level, with the path to each
-  match. --under <ref> keeps a search to an entry and what is beneath
-  it. '{program} tree <ref>' shows the path to an entry, then its
-  subtree, at most --limit entries, marking where it was cut.
+  '{program} recent' lists the newest entries that match its filters,
+  at every level, a line each with who wrote it and the path to it,
+  like [e44] 07:45 ines in e1.e34: subject. An entry ranks by the
+  latest change to it or its chat, and shows how many messages its
+  chat gained since the oldest match listed, like (2 new messages).
+  With --include-chat, recent lists the newest messages as well, like
+  [e44-m3] 07:50 omar in e1.e34: text, and an entry ranks by its own
+  latest change. '{program} search' lists the same way, with chat
+  unless --entries-only. Entries and messages share --limit. A listing
+  says what it ran on stderr. When older matches may remain, the last
+  line gives the command that lists them, which repeats the flags with
+  --before set to the revision of the oldest match shown. --under <ref>
+  keeps recent or search to an entry and what is beneath it.
+  '{program} tree <ref>' shows the path to an entry, then its subtree,
+  at most --limit entries, marking where it was cut.
   '{program} list-projects' lists the --limit most recently active
   projects, each with the number of its entries created in the last 90
   days, and their share of the workspace's. Times show as 13:20 when an
@@ -147,33 +156,28 @@ Search filters (recent, search, wait and firehose):
   duck does not match duck-pond. An empty pattern matches only an
   empty value. Prefix a filter with no- to exclude, as in --no-project.
   Filters AND together.
-  In recent and search, --after <time> keeps to what last changed at
-  or after a time, and --before <time> to what last changed before it.
-  A time is a date like 2026-10-09 or a date and time like
-  2026-10-09T14:30, both in local time, or a span back from now like
-  2d, 6h or 90m. In '{program} recent' without --flat, a top-level
-  entry shows when anything in its tree changed in that time, and
-  ranks by the latest such change.
-  '{program} search' and '{program} recent --flat' also search each
-  message in an entry's chat when they require text, an origin or a
-  time. A message matches when it meets the text, origin and time
-  filters itself, excluding ones included, and its entry meets the
-  others. An entry matches when it meets every filter itself. So
-  'search hook --origin-user ines --project build' finds the messages
-  ines sent that mention hook in the chats of build entries, and the
-  build entries by ines that mention hook, and 'search --origin-user
-  ines --after 2d' lists what ines posted or edited in the last 2 days.
-  Excluding alone does not search chat. An entry ranks by its newest
-  match. A page shows the 30 most recently sent matching messages
-  beneath their entries, and counts each entry's other matching
-  messages.
-  --limit <n>, -n <n>    entries to show (default 20)
-  --offset <n>           skip the first n matches
-  --order-by-modified    newest first by modification time (default)
-  --order-by-creation    newest first by creation time (with --flat)
-  --id-only              print one entry id per line
+  In recent and search, --after <bound> keeps to what last changed at
+  or after a time, or after a revision, and --before <bound> to what
+  last changed before it. An entry last changed at the change it ranks
+  by, and a message when it was posted. A bound is a revision like
+  @812345, as a listing's last line gives it, a date like 2026-10-09 or
+  a date and time like 2026-10-09T14:30, both in local time, or a span
+  back from now like 2d, 6h or 90m.
+  '{program} search', and '{program} recent --include-chat', match each
+  message in an entry's chat as well as the entries. A message matches
+  when it meets the text and origin filters itself, excluding ones
+  included, and its entry meets the others. An entry matches when it
+  meets every filter itself. So 'search hook --origin-user ines
+  --project build' finds the messages ines sent that mention hook in
+  the chats of build entries, and the build entries by ines that
+  mention hook, and 'search --origin-user ines --after 2d' lists what
+  ines posted in the last 2 days, and the entries she created that
+  changed in them.
+  --limit <n>, -n <n>    matches to show (default 20)
+  --id-only              print one entry or message id per line
   --include-superseded   include superseded entries
   --entries-only         leave chats out of a search
+  --include-chat         list messages too in recent
 
 Chat:
   Every entry has a chat. A message's id is the entry id, -m, and a
@@ -435,7 +439,7 @@ func run(args []string) error {
 	case "tree":
 		return cmdTree(c, args)
 	case "recent", "search":
-		return cmdSearch(c, command, args)
+		return cmdListing(c, command, args)
 	case "list-workspaces":
 		return cmdListWorkspaces(c, args)
 	case "list-projects":

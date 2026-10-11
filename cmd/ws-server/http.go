@@ -469,17 +469,16 @@ func queryFlag(query url.Values, key string) (bool, error) {
 	return true, nil
 }
 
-// queryTime reads a time in RFC 3339, or the zero time when the
-// parameter is absent.
-func queryTime(query url.Values, key string) (time.Time, error) {
+// queryBound reads a bound as api.ParseBound does, or the zero bound
+// when the parameter is absent.
+func queryBound(query url.Values, key string) (api.Bound, error) {
 	values := query[key]
 	if len(values) == 0 {
-		return time.Time{}, nil
+		return api.Bound{}, nil
 	}
-	value, err := time.Parse(time.RFC3339Nano, values[0])
+	bound, err := api.ParseBound(values[0])
 	if err != nil {
-		return time.Time{}, fmt.Errorf(
-			"%s must be an RFC 3339 time, like 2026-10-09T04:00:00Z", key)
+		return api.Bound{}, fmt.Errorf("%s: %w", key, err)
 	}
-	return value, nil
+	return bound, nil
 }

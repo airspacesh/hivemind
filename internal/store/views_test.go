@@ -11,12 +11,6 @@ import (
 	"github.com/airspacesh/workstream/internal/api"
 )
 
-func topics(t *testing.T, store *Store, filter Filter) api.SearchResult {
-	t.Helper()
-	filter.View = ViewTopics
-	return runSearch(t, store, filter)
-}
-
 func addChild(
 	t *testing.T, store *Store, subject string, parent api.Ref,
 ) api.Entry {
@@ -56,157 +50,30 @@ func treeText(tree api.TreeResponse) string {
 	return strings.Join(lines, ", ")
 }
 
-func TestTopicsFollowActivityAnywhereInTheTree(t *testing.T) {
-	ctx := context.Background()
+func TestEntriesShowThePathAndTheSubtreeFacts(t *testing.T) {
 	store := openTestStore(t)
 	older := mustAdd(t, store, "older topic", "", nil)
 	newer := mustAdd(t, store, "newer topic", "", nil)
-
-	result := topics(t, store, Filter{})
-	if refs := entryRefsOf(result.Entries); !reflect.DeepEqual(
-		refs, refStrings(newer.Ref, older.Ref)) {
-		t.Fatalf("topics before any child = %v", refs)
-	}
-
 	child := addChild(t, store, "child", older.Ref)
 	grandchild := addChild(t, store, "grandchild", child.Ref)
-	result = topics(t, store, Filter{})
-	if refs := entryRefsOf(result.Entries); !reflect.DeepEqual(
-		refs, refStrings(older.Ref, newer.Ref)) {
-		t.Fatalf("topics after a grandchild = %v, want the older first", refs)
+
+	listing := runSearch(t, store, Filter{})
+	if refs := matchRefs(listing); !reflect.DeepEqual(refs,
+		refStrings(grandchild.Ref, child.Ref, newer.Ref, older.Ref)) {
+		t.Fatalf("listing = %v", refs)
 	}
-	top := result.Entries[0]
+	path := listing.Matches[0].Ancestors
+	if len(path) != 2 || path[0].Ref != older.Ref ||
+		path[1].Ref != child.Ref {
+		t.Fatalf("grandchild's path = %+v, want root then child", path)
+	}
+	top := mustGet(t, store, older.Ref)
 	if !top.Modified.Equal(older.Modified) {
 		t.Fatal("a descendant changed its root's modified time")
 	}
 	if !top.Activity.Equal(grandchild.Modified) || top.Descendants != 2 {
 		t.Fatalf("root activity %v and descendants %d, want %v and 2",
 			top.Activity, top.Descendants, grandchild.Modified)
-	}
-
-	flat := runSearch(t, store, Filter{})
-	if refs := entryRefsOf(flat.Entries); !reflect.DeepEqual(refs,
-		refStrings(grandchild.Ref, child.Ref, newer.Ref, older.Ref)) {
-		t.Fatalf("flat listing = %v", refs)
-	}
-	path := flat.Entries[0].Ancestors
-	if len(path) != 2 || path[0].Ref != older.Ref ||
-		path[1].Ref != child.Ref {
-		t.Fatalf("grandchild's path = %+v, want root then child", path)
-	}
-
-	subject := "newer topic, edited"
-	if _, err := store.Edit(ctx, everyAccess(store),
-		store.mustKey(newer.Ref),
-		api.EditEntryRequest{Subject: &subject, User: testUser}); err != nil {
-		t.Fatal(err)
-	}
-	if refs := entryRefsOf(topics(t, store, Filter{}).Entries); refs[0] !=
-		newer.Ref.String() {
-		t.Fatalf("an edited root did not rise: %v", refs)
-	}
-	mustPost(t, store, grandchild.Ref, "a reply")
-	if refs := entryRefsOf(topics(t, store, Filter{}).Entries); refs[0] !=
-		older.Ref.String() {
-		t.Fatalf("a chat post did not lift its root: %v", refs)
-	}
-}
-
-// Under each top-level entry, the topics view shows the newest
-// messages anywhere in its tree, superseded entries included, and
-// counts the rest.
-func TestTopicsShowTheNewestMessagesInEachTree(t *testing.T) {
-	store := openTestStore(t)
-	root := mustAdd(t, store, "pond", "", nil)
-	child := addChild(t, store, "child", root.Ref)
-	grandchild := addChild(t, store, "grandchild", child.Ref)
-	replaced := addChild(t, store, "replaced", root.Ref)
-	successor := addChild(t, store, "successor", root.Ref)
-	if err := addLinks(t, store, successor.Ref,
-		link(api.SupersedesLink, replaced.Ref)); err != nil {
-		t.Fatal(err)
-	}
-	silent := mustAdd(t, store, "silent", "", nil)
-	other := mustAdd(t, store, "other", "", nil)
-	mustPost(t, store, root.Ref, "first")
-	mustPost(t, store, child.Ref, "second")
-	newest := []api.Message{
-		mustPost(t, store, grandchild.Ref, "third"),
-		mustPost(t, store, replaced.Ref, "fourth"),
-	}
-	elsewhere := mustPost(t, store, other.Ref, "elsewhere")
-
-	result := topics(t, store, Filter{})
-	assertEntryRefs(t, result.Entries, other.Ref, root.Ref, silent.Ref)
-	if got, want := messageRefs(result.Entries[1].TreeMessages),
-		messageRefs(newest); !reflect.DeepEqual(got, want) {
-		t.Fatalf("tree messages = %v, want %v", got, want)
-	}
-	if got := result.Entries[1].EarlierTreeMessages; got != 2 {
-		t.Fatalf("earlier tree messages = %d, want 2", got)
-	}
-	if got, want := messageRefs(result.Entries[0].TreeMessages),
-		messageRefs([]api.Message{elsewhere}); !reflect.DeepEqual(
-		got, want) || result.Entries[0].EarlierTreeMessages != 0 {
-		t.Fatalf("other's tree messages = %v and %d earlier, want %v",
-			got, result.Entries[0].EarlierTreeMessages, want)
-	}
-	if got := result.Entries[2].TreeMessages; len(got) != 0 {
-		t.Fatalf("a tree with no chat shows %v", got)
-	}
-
-	// An edit keeps the message in its place, so an old message edited
-	// does not become one of the newest.
-	if _, _, err := store.EditMessage(context.Background(),
-		store.mustKey(root.Ref), 1, ownEdit("first, edited")); err != nil {
-		t.Fatal(err)
-	}
-	treeMessages := map[api.Ref][]api.Message{}
-	for _, entry := range topics(t, store, Filter{}).Entries {
-		treeMessages[entry.Ref] = entry.TreeMessages
-	}
-	if got, want := messageRefs(treeMessages[root.Ref]),
-		messageRefs(newest); !reflect.DeepEqual(got, want) {
-		t.Fatalf("tree messages after an edit = %v, want %v", got, want)
-	}
-
-	for _, entry := range runSearch(t, store, Filter{}).Entries {
-		if len(entry.TreeMessages) != 0 {
-			t.Fatalf("the flat listing shows %s's tree messages", entry.Ref)
-		}
-	}
-}
-
-func TestTopicsKeepASupersededRootOnlyAsContext(t *testing.T) {
-	store := openTestStore(t)
-	withChild := mustAdd(t, store, "replaced topic", "", nil)
-	child := addChild(t, store, "useful child", withChild.Ref)
-	alone := mustAdd(t, store, "replaced and alone", "", nil)
-	successor := mustAdd(t, store, "successor", "", nil)
-	for _, old := range []api.Ref{withChild.Ref, alone.Ref} {
-		if err := addLinks(t, store, successor.Ref,
-			link(api.SupersedesLink, old)); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	result := topics(t, store, Filter{})
-	if refs := entryRefsOf(result.Entries); !reflect.DeepEqual(
-		refs, refStrings(successor.Ref, withChild.Ref)) {
-		t.Fatalf("topics = %v, want the successor and the context root",
-			refs)
-	}
-	if !reflect.DeepEqual(result.Entries[1].SupersededBy,
-		[]api.Ref{successor.Ref}) {
-		t.Fatal("the context root is not labelled as superseded")
-	}
-	if all := topics(t, store, Filter{IncludeSuperseded: true}); len(
-		all.Entries) != 3 {
-		t.Fatalf("topics with superseded = %d, want 3", len(all.Entries))
-	}
-	if got := treeText(readTree(t, store, withChild.Ref, false, 30)); got !=
-		"replaced topic, "+child.Subject {
-		t.Fatalf("tree = %q", got)
 	}
 }
 
@@ -279,7 +146,7 @@ func TestTreeFillsLevelByLevelAndSaysWhereItCut(t *testing.T) {
 	}
 }
 
-func TestSearchUnderASubtreeAndFiltersOnRoots(t *testing.T) {
+func TestSearchUnderASubtree(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	root := addTo(t, store, "general", api.AddEntryRequest{
@@ -287,22 +154,15 @@ func TestSearchUnderASubtreeAndFiltersOnRoots(t *testing.T) {
 	child := addTo(t, store, "general", api.AddEntryRequest{
 		Subject: "duck child", Project: "lake",
 		Links: []api.Link{link(api.ParentLink, root.Ref)}})
-	other := addTo(t, store, "general", api.AddEntryRequest{
+	addTo(t, store, "general", api.AddEntryRequest{
 		Subject: "duck elsewhere", Project: "lake"})
 
 	under := store.mustKey(root.Ref)
 	result := runSearch(t, store, Filter{Under: &under,
 		Content: []FieldCond{{Value: "duck"}}})
-	if refs := entryRefsOf(result.Entries); !reflect.DeepEqual(
+	if refs := matchRefs(result); !reflect.DeepEqual(
 		refs, refStrings(child.Ref, root.Ref)) {
 		t.Fatalf("search under the root = %v", refs)
-	}
-
-	lakeTopics := topics(t, store, Filter{
-		Project: []FieldCond{{Value: "lake"}}})
-	if refs := entryRefsOf(lakeTopics.Entries); !reflect.DeepEqual(
-		refs, refStrings(other.Ref)) {
-		t.Fatalf("lake topics = %v, want only the lake root", refs)
 	}
 
 	missing := Key{Workspace: under.Workspace, ID: 99}
@@ -310,11 +170,6 @@ func TestSearchUnderASubtreeAndFiltersOnRoots(t *testing.T) {
 		Filter{Limit: 20, Under: &missing})
 	if !errors.Is(err, ErrEntryNotFound) {
 		t.Fatalf("search under a missing entry = %v", err)
-	}
-	_, err = store.Search(ctx, everyAccess(store), under.Workspace,
-		Filter{Limit: 20, View: ViewTopics, OrderByCreation: true})
-	if !errors.Is(err, ErrInvalidFilter) {
-		t.Fatalf("topics by creation = %v, want ErrInvalidFilter", err)
 	}
 }
 
@@ -333,10 +188,5 @@ func TestCountsLeaveOutSupersededEntries(t *testing.T) {
 	if detail.Children != 1 || detail.Descendants != 1 {
 		t.Fatalf("children %d, descendants %d, want 1 and 1",
 			detail.Children, detail.Descendants)
-	}
-	listed := topics(t, store, Filter{Limit: 20})
-	if len(listed.Entries) != 1 || listed.Entries[0].Descendants != 1 {
-		t.Fatalf("topics = %+v, want the question with 1 below",
-			listed.Entries)
 	}
 }

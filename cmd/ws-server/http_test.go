@@ -301,12 +301,13 @@ func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
 		paths = append(paths, "/api/entries/"+entry,
 			"/api/entries/"+entry+"/tree?include-superseded=true",
 			"/api/entries/"+entry+"/messages",
-			"/api/workspaces/general/entries?include-superseded=true&under="+
-				entry)
+			"/api/workspaces/general/entries?include-superseded=true&"+
+				"include-chat=true&under="+entry)
 	}
 	paths = append(paths,
 		"/api/workspaces/general/entries?include-superseded=true",
-		"/api/workspaces/general/entries?view=topics&include-superseded=true",
+		"/api/workspaces/general/entries?include-superseded=true&"+
+			"include-chat=true",
 		"/api/workspaces/general/projects",
 		"/api/workspaces/general/messages")
 	for _, path := range paths {

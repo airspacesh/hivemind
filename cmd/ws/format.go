@@ -54,28 +54,6 @@ func subjectLine(subject string, deleted bool) string {
 	return oneLine(subject)
 }
 
-// listOrder is the time a listing is ordered by.
-type listOrder int
-
-const (
-	byModified listOrder = iota
-	byCreation
-	// byActivity orders by the latest change in each entry's subtree.
-	byActivity
-)
-
-// listTime is the time a listing shows: the one it is ordered by.
-func listTime(e api.ListedEntry, order listOrder) time.Time {
-	switch order {
-	case byCreation:
-		return e.Created
-	case byActivity:
-		return e.Activity
-	default:
-		return e.Modified
-	}
-}
-
 func joinRefs(refs []api.Ref) string {
 	names := make([]string, len(refs))
 	for i, ref := range refs {
@@ -121,70 +99,68 @@ func placeLabel(ancestors []api.EntryRef) string {
 	return " in " + strings.Join(ids, ".")
 }
 
-func printEntryLine(e api.ListedEntry, order listOrder, layout string) {
-	below := ""
-	if order == byActivity && e.Descendants > 0 {
-		below = fmt.Sprintf(" (+%d below)", e.Descendants)
+// lineHead starts the line of an entry or message with its ref, a time,
+// who wrote it, and the path to the entry, like [e44] 07:45 ines in
+// e1.e34.
+func lineHead(
+	ref fmt.Stringer, at time.Time, layout, user string,
+	ancestors []api.EntryRef,
+) string {
+	head := fmt.Sprintf("[%s] %s", ref, at.Local().Format(layout))
+	if user != "" {
+		head += " " + user
 	}
-	fmt.Printf("[%s] %s%s: %s%s%s\n", e.Ref,
-		listTime(e, order).Local().Format(layout), placeLabel(e.Ancestors),
-		subjectLine(e.Subject, e.Deleted), supersededLabel(e.SupersededBy),
-		below)
+	return head + placeLabel(ancestors)
 }
 
-func printEntryLines(entries []api.ListedEntry, order listOrder) {
-	var times []time.Time
-	for _, e := range entries {
-		times = append(times, listTime(e, order))
-	}
-	layout := timeLayout(times)
-	for _, e := range entries {
-		printEntryLine(e, order, layout)
-	}
-}
-
-func printSearchResult(
-	result api.SearchResult, offset, limit int, order listOrder, idOnly bool,
+// printEntryLine prints an entry on one line, with a time, its author,
+// the path to it, and a suffix such as a count.
+func printEntryLine(
+	e api.Entry, ancestors []api.EntryRef, at time.Time, layout string,
+	suffix string,
 ) {
-	if idOnly {
-		for _, e := range result.Entries {
-			fmt.Println(e.Ref)
+	fmt.Printf("%s: %s%s%s\n",
+		lineHead(e.Ref, at, layout, e.Origin.User, ancestors),
+		subjectLine(e.Subject, e.Deleted), supersededLabel(e.SupersededBy),
+		suffix)
+}
+
+func newMessagesLabel(count int) string {
+	switch count {
+	case 0:
+		return ""
+	case 1:
+		return " (1 new message)"
+	default:
+		return fmt.Sprintf(" (%d new messages)", count)
+	}
+}
+
+func printMatchRefs(page api.MatchPage) {
+	for _, m := range page.Matches {
+		if m.Message != nil {
+			fmt.Println(m.Message.Ref())
+		} else {
+			fmt.Println(m.Entry.Ref)
 		}
-		return
 	}
-	if len(result.Entries) == 0 && offset > 0 {
-		fmt.Printf("No entries at offset %d.\n", offset)
-		return
-	}
-	if len(result.Entries) == 0 {
-		fmt.Println("No matching entries.")
-		return
-	}
-	var times []time.Time
-	for _, e := range result.Entries {
-		times = append(times, listTime(e.ListedEntry, order))
-		times = append(times, messageTimes(e.TreeMessages)...)
-		times = append(times, messageTimes(e.MatchingMessages)...)
+}
+
+// printMatches prints the matches of a listing a line each, with the
+// path to each one's entry.
+func printMatches(matches []api.Match) {
+	times := make([]time.Time, len(matches))
+	for i, m := range matches {
+		times[i] = m.At
 	}
 	layout := timeLayout(times)
-	for _, e := range result.Entries {
-		printEntryLine(e.ListedEntry, order, layout)
-		if e.EarlierTreeMessages > 0 {
-			fmt.Printf("  ... %d earlier\n", e.EarlierTreeMessages)
+	for _, m := range matches {
+		if m.Message != nil {
+			printMessage(*m.Message, m.Ancestors, "", layout)
+		} else {
+			printEntryLine(m.Entry, m.Ancestors, m.At, layout,
+				newMessagesLabel(m.NewMessages))
 		}
-		for _, m := range e.TreeMessages {
-			printMessage(m, "  ", layout)
-		}
-		for _, m := range e.MatchingMessages {
-			printMessage(m, "  ", layout)
-		}
-		if e.MoreMatchingMessages > 0 {
-			fmt.Printf("  ... %d more matching\n", e.MoreMatchingMessages)
-		}
-	}
-	if result.More {
-		fmt.Printf("--- more entries (use --offset %d to view older) ---\n",
-			offset+limit)
 	}
 }
 
@@ -339,11 +315,15 @@ func messageTimes(messages []api.Message) []time.Time {
 }
 
 // printMessage prints a message on one line, with any further lines of
-// its text indented beneath. A deleted message shows no text.
-func printMessage(m api.Message, indent, layout string) {
+// its text indented beneath. The path, when given, is to the message's
+// entry. A deleted message shows no text.
+func printMessage(
+	m api.Message, ancestors []api.EntryRef, indent, layout string,
+) {
+	head := indent + lineHead(m.Ref(), m.Created, layout, m.Origin.User,
+		ancestors)
 	if m.Deleted {
-		fmt.Printf("%s[%s] %s %s (deleted)\n", indent, m.Ref(),
-			m.Created.Local().Format(layout), m.Origin.User)
+		fmt.Println(head + " (deleted)")
 		return
 	}
 
@@ -352,8 +332,7 @@ func printMessage(m api.Message, indent, layout string) {
 		edited = " (edited)"
 	}
 	lines := strings.Split(m.Body, "\n")
-	fmt.Printf("%s[%s] %s %s%s: %s\n", indent, m.Ref(),
-		m.Created.Local().Format(layout), m.Origin.User, edited, lines[0])
+	fmt.Printf("%s%s: %s\n", head, edited, lines[0])
 	for _, line := range lines[1:] {
 		fmt.Printf("%s    %s\n", indent, line)
 	}
@@ -385,7 +364,7 @@ func printChatPage(
 	}
 	layout := timeLayout(messageTimes(page.Messages))
 	for _, m := range page.Messages {
-		printMessage(m, "", layout)
+		printMessage(m, nil, "", layout)
 	}
 	printCursorLine(entry, page, filterArgs)
 }
@@ -416,7 +395,7 @@ func printOverview(overview api.ChatOverview, workspace string) {
 			fmt.Printf("  ... %d earlier\n", earlier)
 		}
 		for _, m := range chat.Messages {
-			printMessage(m, "  ", layout)
+			printMessage(m, nil, "  ", layout)
 		}
 	}
 }
@@ -481,10 +460,8 @@ func printProjects(result api.ProjectsResponse) {
 	}
 }
 
-// printChanges prints changes oldest first. An entry's change shows as
-// it does in a flat listing, and a message as it does in the chat
-// overview, under its entry unless the line above is about that entry
-// already.
+// printChanges prints changes oldest first, a line each, as a listing
+// shows them.
 func printChanges(changes []api.Change) {
 	var times []time.Time
 	for _, change := range changes {
@@ -495,20 +472,12 @@ func printChanges(changes []api.Change) {
 		}
 	}
 	layout := timeLayout(times)
-	var above api.Ref
 	for _, change := range changes {
 		e := change.Entry
-		if change.Message == nil {
-			printEntryLine(e, byModified, layout)
-			above = e.Ref
-			continue
+		if change.Message != nil {
+			printMessage(*change.Message, e.Ancestors, "", layout)
+		} else {
+			printEntryLine(e.Entry, e.Ancestors, e.Modified, layout, "")
 		}
-
-		if e.Ref != above {
-			printChatHeader(api.EntryRef{Ref: e.Ref, Subject: e.Subject,
-				Deleted: e.Deleted, SupersededBy: e.SupersededBy})
-			above = e.Ref
-		}
-		printMessage(*change.Message, "  ", layout)
 	}
 }

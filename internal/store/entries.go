@@ -194,10 +194,10 @@ func (s *Store) Add(
 	if _, err := v.tx.ExecContext(ctx, `
 		INSERT INTO entries (
 			workspace_id, id, created_utc, modified_utc, activity_utc,
-			revision, project, subject, body, origin_user, origin_host,
-			origin_dir, origin_claude_session
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		key.Workspace, key.ID, now, now, now, revision, req.Project,
+			revision, activity_revision, project, subject, body,
+			origin_user, origin_host, origin_dir, origin_claude_session
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		key.Workspace, key.ID, now, now, now, revision, revision, req.Project,
 		req.Subject, req.Body, req.Origin.User, req.Origin.Host,
 		req.Origin.Dir, req.Origin.ClaudeSession,
 	); err != nil {
@@ -220,7 +220,7 @@ func (s *Store) Add(
 }
 
 // editContent updates an entry's own fields, its modified and activity
-// times, and its revision. A change to links alone leaves all three as
+// times, and its revisions. A change to links alone leaves them all as
 // they are, so organising old entries does not reorder listings or
 // show in the changes feed.
 func (v view) editContent(
@@ -232,8 +232,8 @@ func (v view) editContent(
 	}
 	now := nowUTC()
 	query := `UPDATE entries SET modified_utc = ?, activity_utc = ?,
-		revision = ?`
-	args := []any{now, now, revision}
+		revision = ?, activity_revision = ?`
+	args := []any{now, now, revision, revision}
 	if req.Project != nil {
 		query += `, project = ?`
 		args = append(args, *req.Project)

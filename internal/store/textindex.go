@@ -108,7 +108,7 @@ func (v view) findTextCandidates(
 	if err != nil || !ok {
 		return candidateSet{}, false, err
 	}
-	if !searchesChat(filter) {
+	if !filter.IncludeChat {
 		return found, true, nil
 	}
 

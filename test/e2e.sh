@@ -146,6 +146,13 @@ check_status() {
 
 added() { sed -n 's/^Added entry \[\([a-z]*[0-9]*\)\]\.$/\1/p'; }
 cursor_of() { sed -n 's/^Cursor: \([0-9]*\) .*/\1/p'; }
+# untimed drops the times from listings, which differ from run to run,
+# and writes an exact time as T and a revision as @R.
+untimed() {
+    sed -E 's# ([0-9]{2}/[0-9]{2}/[0-9]{4} )?[0-9]{2}:[0-9]{2}##g
+        s#[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z#T#g
+        s#@[0-9]+#@R#g'
+}
 
 # Each build reads only its own config, and without one it explains
 # how to write one and does nothing else.
@@ -265,8 +272,25 @@ for index in 2 3; do
     ws add "Pond $index" --project views --parent "$root" \
         --no-recent >/dev/null
 done
-check "a top-level entry counts what is below it" \
-    "Count the ducklings (+8 below)" "$(ws recent --project views)"
+pond_n="${pond_1#e}"
+check_equal "recent shows the newest entries with their paths" \
+    "[e$((pond_n + 2))] $(id -un) in $root: Pond 3
+[e$((pond_n + 1))] $(id -un) in $root: Pond 2
+[$pond_1] $(id -un) in $root: Pond 1
+--- more older matches: ws recent --before @R --workspace general --limit 3 --project views ---" \
+    "$(ws recent --project views -n 3 | untimed)"
+check_equal "recent says on stderr what it ran" \
+    "Newest 3 entries matching --project views:" \
+    "$(ws recent --project views -n 3 2>&1 >/dev/null)"
+older="$(ws recent --project views -n 3 | tail -1 |
+    sed -E 's/^--- more older matches: (.*) ---$/\1/')"
+check_equal "the footer's command lists the next page" \
+    "[e$((${recount#e} + 3))] $(id -un) in $root.$pond_a.$recount: Recount 3
+[e$((${recount#e} + 2))] $(id -un) in $root.$pond_a.$recount: Recount 2
+[e$((${recount#e} + 1))] $(id -un) in $root.$pond_a.$recount: Recount 1" \
+    "$(eval "$older" | untimed | head -3)"
+check_equal "recent under a subtree stays inside it" "4" \
+    "$(ws recent --under "$recount" --id-only | wc -l | tr -d ' ')"
 check "search shows each hit's path on its line" \
     " in $root.$pond_a: Recount needed" \
     "$(ws search 'Recount needed' --project views)"
@@ -340,7 +364,7 @@ check "a link to an unreadable entry is refused" "link target not found" \
 ws chat send p2 "Protected message PROTECTEDMARK" >/dev/null
 ws chat send "$root" "Open message" >/dev/null
 open_views="$(ws entry "$root"; ws tree "$root"; ws search --under "$root"
-    ws recent; ws recent --flat; ws search "$under_protected"
+    ws recent; ws recent --include-chat; ws search "$under_protected"
     ws entry "$under_protected"; ws chat recent; ws chat recent "$root"
     ws wait --since 0 --timeout 1s)"
 check_equal "no protected content reaches the open workspace" "" \
@@ -415,11 +439,16 @@ check "a wait ends at its timeout" "No matching messages after 4 within 1s." \
     "$(ws chat wait "$chat" --since 4 --timeout 1s)"
 check "an entry shows its chat" "Chat: 4 messages, newest $chat-m4" \
     "$(ws entry "$chat")"
-check "recent shows a tree's newest messages, not its edited ones" \
-    "  ... 2 earlier
-  [$chat-m3]" "$(ws recent --project chat)"
-check "search shows the matching messages" "  [$chat-m4]" \
-    "$(ws search Woken)"
+check_equal "recent counts the messages posted since its oldest match" \
+    "[$chat] $(id -un): Chat thread (1 new message)" \
+    "$(ws recent --project chat -n 1 | untimed | head -1)"
+check_equal "recent with chat shares the limit with messages" \
+    "[$chat-m4] $(id -un): Woken
+[$race-m26] $(id -un): Catching up
+--- more older matches: ws recent --before @R --workspace general --limit 2 --include-chat --project chat ---" \
+    "$(ws recent --project chat --include-chat -n 2 | untimed)"
+check "search shows the matching messages" "[$chat-m4] $(id -un): Woken" \
+    "$(ws search Woken | untimed)"
 
 # Only the user who posted an entry or message can edit or delete it,
 # and anyone can add under it and chat on it. The client always sends
@@ -444,8 +473,9 @@ check_equal "anyone can chat on another user's entry" "Sent [$heron-m1]." \
     "$(ws chat send "$heron" "Please fix the subject")"
 post_as_heron "entries/$heron/messages" \
     '{"body":"Fixed soon","origin":{"user":"heron"}}'
-check "an origin filter finds that user's messages" "  [$heron-m2]" \
-    "$(ws search --origin-user heron)"
+check "an origin filter finds that user's messages" \
+    "[$heron-m2] heron: Fixed soon" \
+    "$(ws search --origin-user heron | untimed)"
 check_equal "a message meets the text and origin filters itself" "" \
     "$(ws search Please --origin-user heron --id-only)"
 heron_changes="$(ws wait --since 0 --origin-user heron --include-mine \
@@ -458,14 +488,22 @@ check_equal "a chat wait's origin filter matches each message" \
     "[$heron-m2]" \
     "$(ws chat wait "$heron" --since 0 --origin-user heron --include-mine \
         --timeout 1s | grep -o "^\[$heron-m[0-9]*\]")"
-check "a span back from now keeps recent messages" "  [$heron-m2]" \
+check_equal "recent finds an entry at any level by its origin" \
+    "[$reply] $(id -un) in $heron: Reply under heron" \
+    "$(ws recent --project owners --no-origin-user heron | untimed)"
+check_equal "recent with chat filters each message itself" \
+    "[$heron-m1] $(id -un): Please fix the subject
+[$reply] $(id -un) in $heron: Reply under heron" \
+    "$(ws recent --project owners --no-origin-user heron --include-chat |
+        untimed)"
+check "a span back from now keeps recent messages" "[$heron-m2]" \
     "$(ws search --origin-user heron --after 1h)"
-check_equal "a date leaves out what changed after it" "No matching entries." \
+check_equal "a date leaves out what changed after it" "No matches." \
     "$(ws search --origin-user heron --before 2000-01-01)"
-check "recent keeps to trees changed in the span" "Heron topic" \
+check "recent keeps to what changed in the span" "Heron topic" \
     "$(ws recent --project owners --after 10m)"
-check_equal "recent leaves out trees with no change in the span" \
-    "No matching entries." "$(ws recent --project owners --before 2000-01-01)"
+check_equal "recent leaves out what did not change in the span" \
+    "No matches." "$(ws recent --project owners --before 2000-01-01)"
 check "a time flag names the forms it takes" "like 2d, 6h or 90m" \
     "$(ws search --after yesterday 2>&1 || true)"
 check "an edit of another user's message is refused" \
@@ -507,21 +545,24 @@ check "a deleted entry keeps its place in the tree" \
     "  [$gadwall] (deleted)
     [$egg] Eggs counted" "$(ws tree "$reply" | untimed)"
 check "a listing shows a deleted entry as deleted" \
-    "[$gadwall] in $heron.$reply: (deleted)" \
-    "$(ws recent --flat --project owners | untimed)"
+    "[$gadwall] $(id -un) in $heron.$reply: (deleted)" \
+    "$(ws recent --project owners | untimed)"
+check "a listing shows a deleted message as deleted" \
+    "[$gadwall-m2] $(id -un) in $heron.$reply (deleted)" \
+    "$(ws recent --project owners --include-chat | untimed)"
 check "a deleted message keeps its place and shows no text" \
     "[$gadwall-m1] $(id -un): Before
 [$gadwall-m2] $(id -un) (deleted)
 [$gadwall-m3] $(id -un): After" "$(ws chat recent "$gadwall" | untimed)"
 check "the chat overview names a deleted entry as deleted" \
     "[$gadwall] (deleted)" "$(ws chat recent)"
-check_equal "search no longer finds deleted text" "No matching entries." \
+check_equal "search no longer finds deleted text" "No matches." \
     "$(ws search 4417)"
 deletes="$(ws wait --since "$before_delete" --include-mine --timeout 1s |
     untimed)"
 check "a wait shows the deleted entry and message" \
-    "[$gadwall] in $heron.$reply: (deleted)
-  [$gadwall-m2] $(id -un) (deleted)" "$deletes"
+    "[$gadwall] $(id -un) in $heron.$reply: (deleted)
+[$gadwall-m2] $(id -un) in $heron.$reply (deleted)" "$deletes"
 after_delete="$(echo "$deletes" | cursor_of)"
 check "an edit of a deleted entry is refused" \
     "$gadwall was deleted, so it cannot be edited" \

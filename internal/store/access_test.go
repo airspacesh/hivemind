@@ -133,23 +133,21 @@ func TestProtectedEntriesStayOutOfListings(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertNoSecret(t, "a search under the root", under)
-	if refs := entryRefsOf(under.Entries); !reflect.DeepEqual(refs,
+	if refs := matchRefs(under); !reflect.DeepEqual(refs,
 		refStrings(w.openChild.Ref, w.openRoot.Ref)) {
 		t.Fatalf("search under the root = %v", refs)
 	}
 
-	for _, view := range []View{ViewFlat, ViewTopics} {
-		listing, err := w.store.Search(ctx, open, root.Workspace,
-			Filter{Limit: 20, View: view})
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertNoSecret(t, "a listing", listing)
-		for _, entry := range listing.Entries {
-			if entry.Ref == w.openOld.Ref {
-				t.Fatalf("view %d lists %s, which a protected entry "+
-					"supersedes", view, entry.Ref)
-			}
+	listing, err := w.store.Search(ctx, open, root.Workspace,
+		Filter{Limit: 20, IncludeChat: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoSecret(t, "a listing", listing)
+	for _, match := range listing.Matches {
+		if match.Entry.Ref == w.openOld.Ref {
+			t.Fatalf("search lists %s, which a protected entry "+
+				"supersedes", match.Entry.Ref)
 		}
 	}
 

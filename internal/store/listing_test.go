@@ -1,0 +1,641 @@
+package store
+
+import (
+	"cmp"
+	"context"
+	"fmt"
+	"math/rand"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/airspacesh/workstream/internal/api"
+)
+
+// activityExpr is when entry e last changed by definition: an edit to
+// it, or a post or edit in its chat. activity_utc must always equal it.
+const activityExpr = `max(e.modified_utc, coalesce((
+	SELECT max(m.modified_utc) FROM entry_messages AS m
+	WHERE m.workspace_id = e.workspace_id AND m.entry_id = e.id), ''))`
+
+// forestWriter makes random writes to two workspaces: entries with
+// random parents in the same workspace, supersessions across them,
+// origins, messages, and edits and deletes of both.
+type forestWriter struct {
+	t           *testing.T
+	store       *Store
+	random      *rand.Rand
+	entries     []api.Entry
+	messages    []api.Message
+	inWorkspace map[string][]api.Ref
+	deleted     map[string]bool
+	writes      int
+}
+
+func newForestWriter(
+	t *testing.T, store *Store, random *rand.Rand,
+) *forestWriter {
+	return &forestWriter{t: t, store: store, random: random,
+		inWorkspace: map[string][]api.Ref{}, deleted: map[string]bool{}}
+}
+
+// add adds an entry, in a random place.
+func (w *forestWriter) add() {
+	workspace := "general"
+	if w.random.Intn(3) == 0 {
+		workspace = "personal"
+	}
+	var links []api.Link
+	if parents := w.inWorkspace[workspace]; len(parents) > 0 &&
+		w.random.Intn(10) < 7 {
+		links = append(links, link(api.ParentLink,
+			parents[w.random.Intn(len(parents))]))
+	}
+	if len(w.entries) > 0 && w.random.Intn(7) == 0 {
+		links = append(links, link(api.SupersedesLink,
+			w.entries[w.random.Intn(len(w.entries))].Ref))
+	}
+	entry := addTo(w.t, w.store, workspace, api.AddEntryRequest{
+		Project: []string{"a", "b"}[w.random.Intn(2)],
+		Subject: fmt.Sprintf("entry %d %s", w.writes, w.word()),
+		Links:   links,
+		Origin:  api.Origin{User: []string{"ines", "omar"}[w.random.Intn(2)]},
+	})
+	w.entries = append(w.entries, entry)
+	w.inWorkspace[workspace] = append(w.inWorkspace[workspace], entry.Ref)
+}
+
+func (w *forestWriter) word() string {
+	return []string{"heron", "duck"}[w.random.Intn(2)]
+}
+
+// write makes one random write.
+func (w *forestWriter) write() {
+	w.t.Helper()
+	ctx := context.Background()
+	w.writes++
+	if len(w.entries) < 20 || w.random.Intn(3) == 0 {
+		w.add()
+		return
+	}
+	entry := w.entries[w.random.Intn(len(w.entries))]
+	key := w.store.mustKey(entry.Ref)
+	switch choice := w.random.Intn(16); {
+	case choice < 3 && !w.deleted[entry.Ref.String()]:
+		subject := fmt.Sprintf("edited %d %s", w.writes, w.word())
+		if _, err := w.store.Edit(ctx, everyAccess(w.store), key,
+			api.EditEntryRequest{Subject: &subject,
+				User: entry.Origin.User}); err != nil {
+			w.t.Fatal(err)
+		}
+	case choice < 4:
+		if _, err := w.store.Delete(ctx, everyAccess(w.store), key,
+			api.DeleteRequest{User: entry.Origin.User}); err != nil {
+			w.t.Fatal(err)
+		}
+		w.deleted[entry.Ref.String()] = true
+	case choice < 8 && len(w.messages) > 0:
+		message := w.messages[w.random.Intn(len(w.messages))]
+		messageKey := w.store.mustKey(message.Entry)
+		if w.deleted[message.Ref().String()] {
+			return
+		}
+		if choice == 7 {
+			if _, err := w.store.DeleteMessage(ctx, messageKey,
+				message.Number, api.DeleteRequest{
+					User: message.Origin.User}); err != nil {
+				w.t.Fatal(err)
+			}
+			w.deleted[message.Ref().String()] = true
+			return
+		}
+		if _, _, err := w.store.EditMessage(ctx, messageKey,
+			message.Number, api.EditMessageRequest{
+				Body: fmt.Sprintf("edited %d %s", w.writes, w.word()),
+				User: message.Origin.User,
+			}); err != nil {
+			w.t.Fatal(err)
+		}
+	default:
+		message, err := w.store.Post(ctx, key, api.PostMessageRequest{
+			Body:   w.word(),
+			Origin: api.Origin{User: []string{"ines", "omar"}[w.random.Intn(2)]},
+		})
+		if err != nil {
+			w.t.Fatal(err)
+		}
+		w.messages = append(w.messages, message)
+	}
+}
+
+// scrambleTimes spreads the times of every entry and message over a
+// year at random, and sets each entry's activity time to match, so
+// times no longer follow revisions. When onDays is set, every time
+// falls on midnight, so many share it.
+func scrambleTimes(
+	t *testing.T, store *Store, random *rand.Rand, onDays bool,
+) {
+	t.Helper()
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	year := int64(365 * 24 * time.Hour)
+	at := func() string {
+		moment := start.Add(time.Duration(random.Int63n(year)))
+		if onDays {
+			moment = moment.Truncate(24 * time.Hour)
+		}
+		return moment.Format(timeLayout)
+	}
+	readKeys := func(query string) [][2]int64 {
+		rows, err := store.db.Query(query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var keys [][2]int64
+		for rows.Next() {
+			var key [2]int64
+			if err := rows.Scan(&key[0], &key[1]); err != nil {
+				t.Fatal(err)
+			}
+			keys = append(keys, key)
+		}
+		return keys
+	}
+	for _, key := range readKeys(`SELECT workspace_id, id FROM entries`) {
+		if _, err := store.db.Exec(`
+			UPDATE entries SET created_utc = ?, modified_utc = ?
+			WHERE workspace_id = ? AND id = ?`,
+			at(), at(), key[0], key[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, key := range readKeys(
+		`SELECT post_order, 0 FROM entry_messages`) {
+		if _, err := store.db.Exec(`
+			UPDATE entry_messages SET created_utc = ?, modified_utc = ?
+			WHERE post_order = ?`, at(), at(), key[0]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.db.Exec(`
+		UPDATE entries AS e SET activity_utc = ` + activityExpr); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// forestEntry and forestMessage hold what the reference reads of the
+// entries and messages of a workspace.
+type forestEntry struct {
+	id                  int64
+	revision            int64
+	activityRevision    int64
+	modified, activity  string
+	project, text, user string
+	superseded          bool
+	parent              int64
+}
+
+type forestMessage struct {
+	postOrder, entry, number, revision int64
+	created, text, user                string
+}
+
+// referenceMatch is a match as the reference ranks it.
+type referenceMatch struct {
+	revision  int64
+	entry     int64
+	postOrder int64
+}
+
+// readForest reads every entry and message of a workspace.
+func readForest(
+	t *testing.T, store *Store, workspace int64,
+) (map[int64]forestEntry, []forestMessage) {
+	t.Helper()
+	rows, err := store.db.Query(`
+		SELECT e.id, e.revision, e.activity_revision, e.modified_utc,
+			e.activity_utc, e.project_lower,
+			e.subject_lower || ' ' || e.body_lower, e.origin_user_lower,
+			`+supersededClause+`, coalesce((
+				SELECT target_id FROM entry_links
+				WHERE source_workspace_id = e.workspace_id
+					AND source_id = e.id AND name = 'parent'), 0)
+		FROM entries AS e WHERE e.workspace_id = ?`, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := map[int64]forestEntry{}
+	for rows.Next() {
+		var e forestEntry
+		if err := rows.Scan(&e.id, &e.revision, &e.activityRevision,
+			&e.modified, &e.activity, &e.project, &e.text, &e.user,
+			&e.superseded, &e.parent); err != nil {
+			t.Fatal(err)
+		}
+		entries[e.id] = e
+	}
+	rows.Close()
+
+	rows, err = store.db.Query(`
+		SELECT post_order, entry_id, id, posted_revision, created_utc,
+			lower(body), lower(origin_user)
+		FROM entry_messages WHERE workspace_id = ?`, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var messages []forestMessage
+	for rows.Next() {
+		var m forestMessage
+		if err := rows.Scan(&m.postOrder, &m.entry, &m.number, &m.revision,
+			&m.created, &m.text, &m.user); err != nil {
+			t.Fatal(err)
+		}
+		messages = append(messages, m)
+	}
+	return entries, messages
+}
+
+// listingCase is a listing the reference knows how to filter:
+// whole-value project and origin user patterns and a literal content
+// pattern, without wildcards.
+type listingCase struct {
+	project, user, content string
+	span                   Span
+	revisions              RevisionSpan
+	under                  int64
+	includeSuperseded      bool
+	includeChat            bool
+}
+
+func (c listingCase) filter(workspace int64) Filter {
+	filter := Filter{Changed: c.span, Revisions: c.revisions,
+		IncludeSuperseded: c.includeSuperseded, IncludeChat: c.includeChat}
+	if c.project != "" {
+		filter.Project = []FieldCond{{Value: c.project}}
+	}
+	if c.user != "" {
+		filter.OriginUser = []FieldCond{{Value: c.user}}
+	}
+	if c.content != "" {
+		filter.Content = []FieldCond{{Value: c.content}}
+	}
+	if c.under != 0 {
+		filter.Under = &Key{workspace, c.under}
+	}
+	return filter
+}
+
+// referenceListing is the listing worked out from every entry and
+// message: those that match, by the revision each ranks by, newest
+// first.
+func referenceListing(
+	entries map[int64]forestEntry, messages []forestMessage, c listingCase,
+) []referenceMatch {
+	inSpans := func(revision int64, at string) bool {
+		return (c.revisions.After == 0 || revision > c.revisions.After) &&
+			(c.revisions.Before == 0 || revision < c.revisions.Before) &&
+			(c.span.After.IsZero() || at >= formatTime(c.span.After)) &&
+			(c.span.Before.IsZero() || at < formatTime(c.span.Before))
+	}
+	under := func(id int64) bool {
+		for ; c.under != 0 && id != 0; id = entries[id].parent {
+			if id == c.under {
+				return true
+			}
+		}
+		return c.under == 0
+	}
+	listed := func(e forestEntry) bool {
+		return (c.project == "" || e.project == c.project) &&
+			(c.includeSuperseded || !e.superseded) && under(e.id)
+	}
+	matched := func(text, user string) bool {
+		return (c.user == "" || user == c.user) &&
+			(c.content == "" || strings.Contains(text, c.content))
+	}
+
+	var matches []referenceMatch
+	for _, e := range entries {
+		revision, at := e.activityRevision, e.activity
+		if c.includeChat {
+			revision, at = e.revision, e.modified
+		}
+		if listed(e) && matched(e.text, e.user) && inSpans(revision, at) {
+			matches = append(matches, referenceMatch{revision, e.id, 0})
+		}
+	}
+	for _, m := range messages {
+		if c.includeChat && listed(entries[m.entry]) &&
+			matched(m.text, m.user) && inSpans(m.revision, m.created) {
+			matches = append(matches,
+				referenceMatch{m.revision, m.entry, m.postOrder})
+		}
+	}
+	slices.SortFunc(matches, func(a, b referenceMatch) int {
+		return cmp.Compare(b.revision, a.revision)
+	})
+	return matches
+}
+
+// referenceNewMessages counts, for each entry a page without chat
+// matched, the messages in its chat posted since the page's oldest
+// match.
+func referenceNewMessages(
+	messages []forestMessage, page []referenceMatch, c listingCase,
+) map[int64]int {
+	counts := map[int64]int{}
+	if c.includeChat || len(page) == 0 {
+		return counts
+	}
+	onPage := map[int64]bool{}
+	for _, m := range page {
+		onPage[m.entry] = true
+	}
+	for _, m := range messages {
+		if onPage[m.entry] && m.revision >= page[len(page)-1].revision {
+			counts[m.entry]++
+		}
+	}
+	return counts
+}
+
+// checkListingPage checks a page of a listing against the reference:
+// its matches, the path above each, the new messages counted, and
+// whether more follow. It returns the page's matches, and whether more
+// follow.
+func checkListingPage(
+	t *testing.T,
+	store *Store,
+	workspace int64,
+	entries map[int64]forestEntry,
+	messages []forestMessage,
+	c listingCase,
+	limit int,
+) ([]referenceMatch, bool) {
+	t.Helper()
+	filter := c.filter(workspace)
+	filter.Limit = limit
+	page, err := store.Search(context.Background(), everyAccess(store),
+		workspace, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := referenceListing(entries, messages, c)
+	wantPage := want[:min(limit, len(want))]
+	label := fmt.Sprintf("%+v, limit %d", c, limit)
+
+	var got []referenceMatch
+	gotNew := map[int64]int{}
+	for _, m := range page.Matches {
+		key := store.mustKey(m.Entry.Ref)
+		match := referenceMatch{m.Revision, key.ID, 0}
+		if m.Message != nil {
+			for _, message := range messages {
+				if message.entry == key.ID &&
+					message.number == m.Message.Number {
+					match.postOrder = message.postOrder
+				}
+			}
+		}
+		got = append(got, match)
+		if m.NewMessages != 0 {
+			gotNew[key.ID] = m.NewMessages
+		}
+
+		var path []int64
+		for id := entries[key.ID].parent; id != 0; id = entries[id].parent {
+			path = append([]int64{id}, path...)
+		}
+		var gotPath []int64
+		for _, ancestor := range m.Ancestors {
+			gotPath = append(gotPath, store.mustKey(ancestor.Ref).ID)
+		}
+		if !slices.Equal(gotPath, path) {
+			t.Fatalf("%s: the path to e%d = %v, want %v", label, key.ID,
+				gotPath, path)
+		}
+	}
+	if !slices.Equal(got, wantPage) {
+		t.Fatalf("%s: matches\n%v\nwant\n%v", label, got, wantPage)
+	}
+	if page.More != (len(want) > limit) {
+		t.Fatalf("%s: more %v", label, page.More)
+	}
+	wantNew := referenceNewMessages(messages, wantPage, c)
+	if !reflect.DeepEqual(gotNew, wantNew) {
+		t.Fatalf("%s: new messages %v, want %v", label, gotNew, wantNew)
+	}
+	return got, page.More
+}
+
+// checkPagesBack checks every page of a listing, each listing the
+// matches before the revision of the oldest on the page before it, as
+// its footer suggests, and that together they list every match.
+func checkPagesBack(
+	t *testing.T,
+	store *Store,
+	workspace int64,
+	entries map[int64]forestEntry,
+	messages []forestMessage,
+	c listingCase,
+	limit int,
+) {
+	t.Helper()
+	want := referenceListing(entries, messages, c)
+	listed := 0
+	for {
+		page, more := checkListingPage(t, store, workspace, entries,
+			messages, c, limit)
+		listed += len(page)
+		if !more {
+			break
+		}
+		c.revisions.Before = page[len(page)-1].revision
+	}
+	if listed != len(want) {
+		t.Fatalf("%+v: the pages listed %d matches, want %d", c, listed,
+			len(want))
+	}
+}
+
+func TestListingMatchesTheReference(t *testing.T) {
+	day := func(month time.Month, day int) time.Time {
+		return time.Date(2026, month, day, 0, 0, 0, 0, time.UTC)
+	}
+	spans := []Span{
+		{},
+		{After: day(7, 1)},
+		{Before: day(4, 1)},
+		{After: day(3, 1), Before: day(9, 1)},
+	}
+	for seed := int64(1); seed <= 4; seed++ {
+		store := openTestStore(t)
+		random := rand.New(rand.NewSource(seed))
+		writer := newForestWriter(t, store, random)
+		for range 200 {
+			writer.write()
+		}
+		scrambleTimes(t, store, random, seed%2 == 0)
+		workspace := workspaceID(t, store, "general")
+		entries, messages := readForest(t, store, workspace)
+		var unders []int64
+		for id, e := range entries {
+			if e.parent == 0 && len(unders) < 2 {
+				unders = append(unders, id)
+			}
+		}
+		latest := latestRevision(t, store)
+		middle := RevisionSpan{After: latest / 4, Before: latest * 3 / 4}
+
+		for _, base := range []listingCase{
+			{}, {project: "a"}, {user: "ines"}, {content: "heron"},
+			{project: "b", user: "omar"},
+		} {
+			for _, under := range append([]int64{0}, unders...) {
+				for _, span := range spans {
+					for _, flags := range []int{0, 1, 2, 3} {
+						c := base
+						c.under, c.span = under, span
+						c.includeSuperseded = flags&1 != 0
+						c.includeChat = flags&2 != 0
+						checkListingPage(t, store, workspace, entries,
+							messages, c, 500)
+						checkListingPage(t, store, workspace, entries,
+							messages, c, 1)
+						checkPagesBack(t, store, workspace, entries,
+							messages, c, 3)
+						c.revisions = middle
+						checkListingPage(t, store, workspace, entries,
+							messages, c, 500)
+					}
+				}
+			}
+		}
+	}
+}
+
+// Paging back as a listing's footer says, from a time to start and then
+// by the revision of each page's oldest match, lists each match once
+// while writes land between the pages. A write lifts what it changes
+// above the pages still to come, so the matches the walk must list are
+// those that kept their rank throughout.
+func TestPagingBackListsEachMatchOnceWhileWritesLand(t *testing.T) {
+	for seed := int64(1); seed <= 4; seed++ {
+		for _, includeChat := range []bool{false, true} {
+			store := openTestStore(t)
+			writer := newForestWriter(t, store,
+				rand.New(rand.NewSource(seed)))
+			for range 120 {
+				writer.write()
+			}
+			before := time.Now()
+			for range 40 {
+				writer.write()
+			}
+			workspace := workspaceID(t, store, "general")
+			first := listingCase{includeChat: includeChat,
+				span: Span{Before: before}}
+			if seed%2 == 0 {
+				first.project = "a"
+			}
+
+			entries, messages := readForest(t, store, workspace)
+			atStart := referenceListing(entries, messages, first)
+			listed := map[referenceMatch]bool{}
+			c := first
+			for {
+				page, more := checkListingPage(t, store, workspace,
+					entries, messages, c, 3)
+				for _, m := range page {
+					m.revision = 0
+					if listed[m] {
+						t.Fatalf("%+v: e%d message %d listed twice", c,
+							m.entry, m.postOrder)
+					}
+					listed[m] = true
+				}
+				if !more {
+					break
+				}
+				c.span.Before = time.Time{}
+				c.revisions.Before = page[len(page)-1].revision
+				for range 3 {
+					writer.write()
+				}
+				entries, messages = readForest(t, store, workspace)
+			}
+
+			atEnd := referenceListing(entries, messages, first)
+			for _, m := range atStart {
+				kept := slices.Contains(atEnd, m)
+				m.revision = 0
+				if kept && !listed[m] {
+					t.Fatalf("seed %d, chat %v: e%d message %d was skipped",
+						seed, includeChat, m.entry, m.postOrder)
+				}
+			}
+		}
+	}
+}
+
+// Without chat, an entry ranks by the latest change to it or its chat
+// alone, so a post deep in a tree lifts only the entry it is in, and a
+// filter finds an entry at any level.
+func TestListingRanksEachEntryByItsOwnActivity(t *testing.T) {
+	store := openTestStore(t)
+	root := addTo(t, store, "general", api.AddEntryRequest{
+		Subject: "root", Origin: api.Origin{User: "omar"}})
+	child := addTo(t, store, "general", api.AddEntryRequest{
+		Subject: "child", Origin: api.Origin{User: "ines"},
+		Links: []api.Link{link(api.ParentLink, root.Ref)}})
+	grandchild := addTo(t, store, "general", api.AddEntryRequest{
+		Subject: "grandchild", Origin: api.Origin{User: "omar"},
+		Links: []api.Link{link(api.ParentLink, child.Ref)}})
+	other := mustAdd(t, store, "other", "", nil)
+	mustPost(t, store, grandchild.Ref, "quack")
+
+	page := runSearch(t, store, Filter{Limit: 2})
+	assertEntryRefs(t, page, grandchild.Ref, other.Ref)
+	if got := page.Matches[0].NewMessages; got != 1 {
+		t.Fatalf("new messages = %d, want 1", got)
+	}
+	if page.Matches[0].Ancestors[1].Ref != child.Ref {
+		t.Fatalf("path = %+v, want the root and the child",
+			page.Matches[0].Ancestors)
+	}
+
+	// With chat, the post is a match of its own, and the entry ranks by
+	// its own change.
+	withChat := runSearch(t, store, Filter{Limit: 2, IncludeChat: true})
+	assertMatches(t, withChat, messageRef(grandchild.Ref, 1),
+		other.Ref.String())
+
+	byInes := runSearch(t, store, Filter{
+		OriginUser: []FieldCond{{Value: "ines"}}, IncludeChat: true})
+	assertEntryRefs(t, byInes, child.Ref)
+}
+
+func TestListingLeavesOutSupersededEntries(t *testing.T) {
+	store := openTestStore(t)
+	old := mustAdd(t, store, "old", "", nil)
+	child := addChild(t, store, "child", old.Ref)
+	successor := mustAdd(t, store, "successor", "", nil)
+	if err := addLinks(t, store, successor.Ref,
+		link(api.SupersedesLink, old.Ref)); err != nil {
+		t.Fatal(err)
+	}
+
+	page := runSearch(t, store, Filter{})
+	assertEntryRefs(t, page, successor.Ref, child.Ref)
+	if path := page.Matches[1].Ancestors; len(path) != 1 ||
+		!reflect.DeepEqual(path[0].SupersededBy, []api.Ref{successor.Ref}) {
+		t.Fatalf("the child's path = %+v, want its superseded parent", path)
+	}
+	all := runSearch(t, store, Filter{IncludeSuperseded: true})
+	if got := len(all.Matches); got != 3 {
+		t.Fatalf("listing with superseded lists %d, want 3", got)
+	}
+}

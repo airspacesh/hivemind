@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -390,11 +391,12 @@ func TestAddTakesItsParentsWorkspace(t *testing.T) {
 // entry looks in that entry's workspace unless --workspace names one.
 func TestSearchUnderTakesItsEntrysWorkspace(t *testing.T) {
 	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/workspaces/personal/entries" {
+		switch r.URL.Path {
+		case "/api/workspaces/personal/entries":
+			reply(w, http.StatusOK, api.MatchPage{})
+		default:
 			refuse(w, http.StatusNotFound, api.CodeRouteNotFound, "no route")
-			return
 		}
-		reply(w, http.StatusOK, api.SearchResult{})
 	})
 	config := writeConfig(t, fmt.Sprintf("workspaces:\n  general:\n    "+
 		"server: %s\n    prefix: e\n  personal:\n    server: %s\n    "+
@@ -505,63 +507,171 @@ func TestSendSinceLeavesOutOlderMessages(t *testing.T) {
 	}
 }
 
-// A search shows the messages that matched in an entry's chat beneath
-// it, and how many more matched than the page had room for.
-func TestSearchShowsMatchingMessages(t *testing.T) {
-	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
-	ref := api.Ref{Prefix: "e", ID: 1}
-	message := func(number int64) api.Message {
-		return api.Message{Entry: ref, Number: number, Created: when,
-			Modified: when, Body: "heron", Origin: api.Origin{User: "duck"}}
-	}
+// listingServer answers every listing with a page, and records the
+// query of each.
+func listingServer(
+	t *testing.T, page api.MatchPage,
+) (string, func() []url.Values) {
+	t.Helper()
+	var mu sync.Mutex
+	var queries []url.Values
 	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
-		reply(w, http.StatusOK, api.SearchResult{Entries: []api.MatchedEntry{{
-			ListedEntry: api.ListedEntry{Entry: api.Entry{Ref: ref,
-				Created: when, Modified: when,
-				Subject: "Pond"}, Activity: when},
-			MatchingMessages:     []api.Message{message(7), message(9)},
-			MoreMatchingMessages: 4,
-		}}})
+		if r.URL.Path != "/api/workspaces/general/entries" {
+			t.Errorf("request to %s", r.URL.Path)
+		}
+		mu.Lock()
+		queries = append(queries, r.URL.Query())
+		mu.Unlock()
+		reply(w, http.StatusOK, page)
 	})
 	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
-	got := ws(t, config, "search", "heron")
-	want := "[e1] 05:20: Pond\n" +
-		"  [e1-m7] 05:20 duck: heron\n  [e1-m9] 05:20 duck: heron\n" +
-		"  ... 4 more matching\n"
-	if !got.ok || got.stdout != want {
-		t.Fatalf("search =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
+	return config, func() []url.Values {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(queries)
 	}
 }
 
-// The topics view shows the newest messages in each tree beneath its
-// top-level entry, each named by its own entry, after how many came
-// earlier.
-func TestRecentShowsTheNewestMessagesInEachTree(t *testing.T) {
-	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
-	root := api.Ref{Prefix: "e", ID: 1}
-	child := api.Ref{Prefix: "e", ID: 3}
-	message := func(entry api.Ref, number int64) api.Message {
-		return api.Message{Entry: entry, Number: number, Created: when,
-			Modified: when, Body: "quack", Origin: api.Origin{User: "duck"}}
+// A listing shows a match a line, each with its author and the path to
+// its entry, says on stderr what it ran, and ends with the command that
+// lists the older matches.
+func TestListingShowsAMatchALine(t *testing.T) {
+	at := func(minute int) time.Time {
+		return time.Date(2026, 10, 9, 8, minute, 0, 0, time.UTC)
 	}
-	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
-		reply(w, http.StatusOK, api.SearchResult{Entries: []api.MatchedEntry{{
-			ListedEntry: api.ListedEntry{Entry: api.Entry{Ref: root,
-				Created: when, Modified: when,
-				Subject: "Why?"}, Activity: when, Descendants: 1},
-			TreeMessages: []api.Message{message(root, 3),
-				message(child, 2)},
-			EarlierTreeMessages: 2,
-		}}})
+	ref := func(id int64) api.Ref { return api.Ref{Prefix: "f", ID: id} }
+	by := func(user string) api.Origin { return api.Origin{User: user} }
+	releases := api.EntryRef{Ref: ref(4), Subject: "toolkit releases"}
+	release := api.EntryRef{Ref: ref(5), Subject: "toolkit 2.4.0"}
+	config, queries := listingServer(t, api.MatchPage{
+		Matches: []api.Match{
+			{Entry: api.Entry{Ref: ref(21), Subject: "Fixture rules",
+				Origin: by("ruth")}, Revision: 90, At: at(59),
+				NewMessages: 4},
+			{Entry: api.Entry{Ref: ref(6), Origin: by("lena")},
+				Ancestors: []api.EntryRef{releases, release},
+				Message: &api.Message{Entry: ref(6), Number: 4,
+					Created: at(58), Modified: at(59), Body: "two\nlines",
+					Origin: by("lena")}, Revision: 89, At: at(58)},
+			{Entry: api.Entry{Ref: ref(7), Deleted: true,
+				Origin: by("omar")}, Ancestors: []api.EntryRef{releases},
+				Revision: 85, At: at(40), NewMessages: 1},
+			{Entry: api.Entry{Ref: ref(6), Origin: by("lena")},
+				Ancestors: []api.EntryRef{releases, release},
+				Message: &api.Message{Entry: ref(6), Number: 2,
+					Created: at(38), Modified: at(38), Deleted: true,
+					Origin: by("ines")}, Revision: 81, At: at(38)},
+		},
+		More: true,
 	})
-	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
-		server.URL+"\n", 0o600)
-	got := ws(t, config, "recent")
-	want := "[e1] 05:20: Why? (+1 below)\n  ... 2 earlier\n" +
-		"  [e1-m3] 05:20 duck: quack\n  [e3-m2] 05:20 duck: quack\n"
+
+	got := ws(t, config, "recent", "-n", "4", "--project", "ai",
+		"--after", "@12")
+	want := `[f21] 08:59 ruth: Fixture rules (4 new messages)
+[f6-m4] 08:58 lena in f4.f5 (edited): two
+    lines
+[f7] 08:40 omar in f4: (deleted) (1 new message)
+[f6-m2] 08:38 ines in f4.f5 (deleted)
+--- more older matches: ws recent --before @81 --workspace general --after @12 --limit 4 --project ai ---
+`
 	if !got.ok || got.stdout != want {
 		t.Fatalf("recent =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
+	}
+	header := "Newest 4 entries after @12 matching --project ai:\n"
+	if got.stderr != header {
+		t.Fatalf("recent said %q on stderr, want %q", got.stderr, header)
+	}
+
+	got = ws(t, config, "search", "hook", "--id-only")
+	if want := "f21\nf6-m4\nf7\nf6-m2\n"; !got.ok || got.stdout != want {
+		t.Fatalf("search --id-only =\n%s\nwant\n%s (%+v)", got.stdout,
+			want, got)
+	}
+	header = "Newest 20 entries and messages matching hook:\n"
+	if got.stderr != header {
+		t.Fatalf("search said %q on stderr, want %q", got.stderr, header)
+	}
+
+	sent := queries()
+	if sent[0].Has("include-chat") || sent[1].Get("include-chat") != "true" {
+		t.Fatalf("recent sent %v and search %v, want chat in search only",
+			sent[0], sent[1])
+	}
+}
+
+// shellWords splits a command as a POSIX shell would, for the words
+// and quoting shellQuote writes.
+func shellWords(command string) ([]string, error) {
+	var words []string
+	var word strings.Builder
+	inWord, quoted, escaped := false, false, false
+	for _, character := range command {
+		switch {
+		case escaped:
+			word.WriteRune(character)
+			escaped = false
+		case quoted && character != '\'':
+			word.WriteRune(character)
+		case character == '\'':
+			quoted, inWord = !quoted, true
+		case character == '\\':
+			escaped, inWord = true, true
+		case character == ' ':
+			if inWord {
+				words = append(words, word.String())
+				word.Reset()
+			}
+			inWord = false
+		default:
+			word.WriteRune(character)
+			inWord = true
+		}
+	}
+	if quoted || escaped {
+		return nil, fmt.Errorf("unfinished quoting in %q", command)
+	}
+	if inWord {
+		words = append(words, word.String())
+	}
+	return words, nil
+}
+
+// The command a footer names asks for the page before the oldest match
+// shown, with the same text, filters and bounds.
+func TestFooterAsksForTheNextPage(t *testing.T) {
+	config, queries := listingServer(t, api.MatchPage{
+		Matches: []api.Match{{Entry: api.Entry{
+			Ref: api.Ref{Prefix: "e", ID: 3}, Subject: "Pond"},
+			Revision: 812345}},
+		More: true,
+	})
+	first := ws(t, config, "search", "duck's pond", "--entries-only",
+		"--after", "2026-10-09T04:00:00Z", "--no-project", "x", "-n", "1",
+		"--include-superseded")
+	lines := strings.Split(strings.TrimSpace(first.stdout), "\n")
+	footer, ok := strings.CutPrefix(lines[len(lines)-1],
+		"--- more older matches: ws ")
+	if !first.ok || !ok {
+		t.Fatalf("search printed no footer: %+v", first)
+	}
+	words, err := shellWords(strings.TrimSuffix(footer, " ---"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next := ws(t, config, words...); !next.ok {
+		t.Fatalf("the footer's command failed: %+v", next)
+	}
+
+	sent := queries()
+	if sent[1].Get("before") != "@812345" {
+		t.Fatalf("the next page sent before %q, want @812345",
+			sent[1].Get("before"))
+	}
+	sent[1].Del("before")
+	if !reflect.DeepEqual(sent[0], sent[1]) {
+		t.Fatalf("the next page sent %v, want %v and before", sent[1],
+			sent[0])
 	}
 }
 
@@ -791,19 +901,16 @@ func TestUncertainWritesAreReportedNotRepeated(t *testing.T) {
 // listing answers a search with entries changed at the given times.
 func listing(times ...time.Time) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var result api.SearchResult
+		var page api.MatchPage
 		for i, when := range times {
-			result.Entries = append(result.Entries, api.MatchedEntry{
-				ListedEntry: api.ListedEntry{
-					Entry: api.Entry{
-						Ref:     api.Ref{Prefix: "e", ID: int64(i + 1)},
-						Created: when, Modified: when,
-						Subject: "Duck"},
-					Activity: when,
-				},
+			page.Matches = append(page.Matches, api.Match{
+				Entry: api.Entry{
+					Ref:     api.Ref{Prefix: "e", ID: int64(i + 1)},
+					Created: when, Modified: when, Subject: "Duck"},
+				At: when,
 			})
 		}
-		reply(w, http.StatusOK, result)
+		reply(w, http.StatusOK, page)
 	}
 }
 
@@ -830,7 +937,7 @@ func TestTimesShowDatesOnlyWhenDaysDiffer(t *testing.T) {
 			config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 				server.URL+"\n", 0o600)
 			got := runBinary(t, wsBinary, append(utcPlus8,
-				"WORKSTREAM_CONFIG="+config), "recent", "--flat")
+				"WORKSTREAM_CONFIG="+config), "search")
 			lines := strings.Split(strings.TrimSpace(got.stdout), "\n")
 			if strings.Join(lines, "\n") != strings.Join(test.want, "\n") {
 				t.Errorf("got\n%s\nwant\n%s", got.stdout,
@@ -964,29 +1071,32 @@ func TestWaitsExcludeTheirOwnSession(t *testing.T) {
 	}
 }
 
-// A date, or a date and time, reads in local time, and a span counts
-// back from now.
-func TestTimeFlagsReadLocalDatesAndSpansBack(t *testing.T) {
+// A date, or a date and time, reads in local time, a span counts back
+// from now, and @ names a revision.
+func TestBoundFlagsReadLocalDatesSpansAndRevisions(t *testing.T) {
 	now := time.Date(2026, 10, 11, 9, 30, 0, 0, time.UTC)
-	for value, want := range map[string]time.Time{
-		"2d":         now.Add(-48 * time.Hour),
-		"6h":         now.Add(-6 * time.Hour),
-		"90m":        now.Add(-90 * time.Minute),
-		"2026-10-09": time.Date(2026, 10, 9, 0, 0, 0, 0, time.Local),
-		"2026-10-09T14:30": time.Date(2026, 10, 9, 14, 30, 0, 0,
-			time.Local),
-		"2026-10-09 14:30:05": time.Date(2026, 10, 9, 14, 30, 5, 0,
-			time.Local),
-		"2026-10-09T04:00:00+10:00": time.Date(2026, 10, 8, 18, 0, 0, 0,
-			time.UTC),
+	for value, want := range map[string]api.Bound{
+		"2d":         {Time: now.Add(-48 * time.Hour)},
+		"6h":         {Time: now.Add(-6 * time.Hour)},
+		"90m":        {Time: now.Add(-90 * time.Minute)},
+		"2026-10-09": {Time: time.Date(2026, 10, 9, 0, 0, 0, 0, time.Local)},
+		"2026-10-09T14:30": {Time: time.Date(2026, 10, 9, 14, 30, 0, 0,
+			time.Local)},
+		"2026-10-09 14:30:05": {Time: time.Date(2026, 10, 9, 14, 30, 5, 0,
+			time.Local)},
+		"2026-10-09T04:00:00+10:00": {Time: time.Date(2026, 10, 8, 18, 0,
+			0, 0, time.UTC)},
+		"@812345": {Revision: 812345},
 	} {
-		got, err := parseTimeFlag("--after", value, now)
-		if err != nil || !got.Equal(want) {
+		got, err := parseBoundFlag("--after", value, now)
+		if err != nil || !got.Time.Equal(want.Time) ||
+			got.Revision != want.Revision {
 			t.Errorf("%q = %v, %v, want %v", value, got, err, want)
 		}
 	}
-	for _, value := range []string{"-2h", "2", "yesterday", "2026-13-01"} {
-		if _, err := parseTimeFlag("--after", value, now); err == nil {
+	for _, value := range []string{"-2h", "2", "yesterday", "2026-13-01",
+		"@0", "@", "@-3", "@12a"} {
+		if _, err := parseBoundFlag("--after", value, now); err == nil {
 			t.Errorf("%q was accepted", value)
 		}
 	}

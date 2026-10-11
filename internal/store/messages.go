@@ -62,15 +62,15 @@ func (s *Store) getMessage(
 	return message, nil
 }
 
-// recordChatActivity moves an entry's activity time to a change in its
-// chat, in the transaction that makes the change.
+// recordChatActivity moves an entry's activity time and revision to a
+// change in its chat, in the transaction that makes the change.
 func recordChatActivity(
-	ctx context.Context, tx *sql.Tx, entry Key, at string,
+	ctx context.Context, tx *sql.Tx, entry Key, at string, revision int64,
 ) error {
 	if _, err := tx.ExecContext(ctx, `
-		UPDATE entries SET activity_utc = ?
+		UPDATE entries SET activity_utc = ?, activity_revision = ?
 		WHERE workspace_id = ? AND id = ?`,
-		at, entry.Workspace, entry.ID,
+		at, revision, entry.Workspace, entry.ID,
 	); err != nil {
 		return fmt.Errorf("recording chat activity: %w", err)
 	}
@@ -108,16 +108,18 @@ func (s *Store) Post(
 	if _, err := v.tx.ExecContext(ctx, `
 		INSERT INTO entry_messages (
 			workspace_id, entry_id, id, created_utc, modified_utc,
-			revision, body, origin_user, origin_host, origin_dir,
-			origin_claude_session
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		entry.Workspace, entry.ID, number, now, now, revision, req.Body,
+			revision, posted_revision, body, origin_user, origin_host,
+			origin_dir, origin_claude_session
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		entry.Workspace, entry.ID, number, now, now, revision, revision,
+		req.Body,
 		req.Origin.User, req.Origin.Host, req.Origin.Dir,
 		req.Origin.ClaudeSession,
 	); err != nil {
 		return api.Message{}, fmt.Errorf("posting message: %w", err)
 	}
-	if err := recordChatActivity(ctx, v.tx, entry, now); err != nil {
+	if err := recordChatActivity(ctx, v.tx, entry, now,
+		revision); err != nil {
 		return api.Message{}, err
 	}
 	message, err := s.getMessage(ctx, v.tx, entry, number)
@@ -149,7 +151,7 @@ func overwriteMessage(
 	); err != nil {
 		return fmt.Errorf("overwriting message: %w", err)
 	}
-	return recordChatActivity(ctx, tx, entry, now)
+	return recordChatActivity(ctx, tx, entry, now, revision)
 }
 
 // EditMessage overwrites a message's text, and reports whether it

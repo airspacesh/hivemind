@@ -145,10 +145,16 @@ func mustGet(t *testing.T, store *Store, ref api.Ref) api.EntryDetail {
 	return detail
 }
 
-func entryRefsOf(entries []api.MatchedEntry) []string {
-	refs := make([]string, len(entries))
-	for i, entry := range entries {
-		refs[i] = entry.Ref.String()
+// matchRefs names a page's matches, an entry by its ref and a message
+// by its own.
+func matchRefs(page api.MatchPage) []string {
+	refs := []string{}
+	for _, m := range page.Matches {
+		if m.Message != nil {
+			refs = append(refs, m.Message.Ref().String())
+		} else {
+			refs = append(refs, m.Entry.Ref.String())
+		}
 	}
 	return refs
 }

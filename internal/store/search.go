@@ -3,7 +3,7 @@ package store
 import (
 	"cmp"
 	"context"
-	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -44,32 +44,19 @@ type Filter struct {
 	OriginHost          []FieldCond
 	OriginDir           []FieldCond
 	OriginClaudeSession []FieldCond
-	// Changed keeps to the entries and messages last changed in a span.
-	Changed Span
+	// Changed and Revisions keep a listing to the matches whose time and
+	// revision fall in spans, those of the change each ranks by.
+	Changed   Span
+	Revisions RevisionSpan
 
-	View View
-	// EntriesOnly keeps a flat search to entries, leaving out the
-	// messages in their chats.
-	EntriesOnly bool
+	// IncludeChat makes a listing match the messages in the chats of
+	// entries as well as the entries.
+	IncludeChat bool
 	// Under limits the search to an entry and its descendants, when set.
 	Under             *Key
-	OrderByCreation   bool
 	IncludeSuperseded bool
 	Limit             int
-	Offset            int
 }
-
-// View chooses which entries a search lists, and in what order.
-type View int
-
-const (
-	// ViewFlat lists every matching entry by its own change time.
-	ViewFlat View = iota
-	// ViewTopics lists the top-level entries of a workspace by the
-	// latest change anywhere in their trees. A superseded entry stays
-	// while a current entry is under it, as context for it.
-	ViewTopics
-)
 
 // Span is the times from After, inclusive, to Before, exclusive. A
 // zero bound leaves that side open.
@@ -78,8 +65,11 @@ type Span struct {
 	Before time.Time
 }
 
-func (span Span) bounded() bool {
-	return !span.After.IsZero() || !span.Before.IsZero()
+// RevisionSpan is the revisions after After and before Before, both
+// exclusive. A zero bound leaves that side open.
+type RevisionSpan struct {
+	After  int64
+	Before int64
 }
 
 type whereBuilder struct {
@@ -283,21 +273,16 @@ func buildWhere(filter Filter) (whereBuilder, error) {
 	)); err != nil {
 		return whereBuilder{}, err
 	}
-	builder.addSpan("e.modified_utc", filter.Changed)
 	return builder, nil
 }
 
 // addMessageFilters adds the filters a message m matches on its own.
 func (builder *whereBuilder) addMessageFilters(filter Filter) error {
-	if err := builder.addFields(append([]fieldFilter{
+	return builder.addFields(append([]fieldFilter{
 		{"content", "lower(m.body)", matchAnywhere(filter.Content)},
 	}, originFilters(filter,
 		func(field string) string { return "lower(m." + field + ")" },
-	)...)); err != nil {
-		return err
-	}
-	builder.addSpan("m.modified_utc", filter.Changed)
-	return nil
+	)...))
 }
 
 // buildMessageWhere builds the where clause a message m in the chat of
@@ -353,147 +338,27 @@ func lowerASCII(value string) string {
 	return string(folded)
 }
 
-// joinedFrom is the FROM clause of the topics view, which reads every
-// entry, or with under, the entries of that subtree.
-func joinedFrom(under *Key) (string, []any) {
-	if under == nil {
-		return `entries AS e`, nil
+// idsJSON encodes entry ids for json_each, so a query can take any
+// number of them as one argument.
+func idsJSON(ids []int64) string {
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		panic(err)
 	}
-	return `(WITH RECURSIVE ` + subtreeCTE("under") +
-			` SELECT workspace_id, id FROM under) AS under
-		JOIN entries AS e
-			ON e.workspace_id = under.workspace_id AND e.id = under.id`,
-		[]any{under.Workspace, under.ID}
+	return string(encoded)
 }
 
-// Search lists the entries of a workspace that match a filter.
-func (s *Store) Search(
-	ctx context.Context,
-	access Access,
-	workspace int64,
-	filter Filter,
-) (api.SearchResult, error) {
+// checkPage checks the conditions and limit of a listing.
+func checkPage(filter Filter) error {
 	if conditionCount(filter) > MaxSearchConditions {
-		return api.SearchResult{}, fmt.Errorf(
-			"%w: at most %d search conditions are allowed",
-			ErrInvalidFilter, MaxSearchConditions,
-		)
+		return fmt.Errorf("%w: at most %d search conditions are allowed",
+			ErrInvalidFilter, MaxSearchConditions)
 	}
 	if filter.Limit < 1 || filter.Limit > MaxSearchLimit {
-		return api.SearchResult{}, fmt.Errorf(
-			"%w: limit must be between 1 and %d",
-			ErrInvalidFilter, MaxSearchLimit,
-		)
+		return fmt.Errorf("%w: limit must be between 1 and %d",
+			ErrInvalidFilter, MaxSearchLimit)
 	}
-	if filter.Offset < 0 {
-		return api.SearchResult{}, fmt.Errorf(
-			"%w: offset must not be negative", ErrInvalidFilter,
-		)
-	}
-	if filter.View == ViewTopics && filter.OrderByCreation {
-		return api.SearchResult{}, fmt.Errorf(
-			"%w: ordering by creation applies to the flat view only",
-			ErrInvalidFilter,
-		)
-	}
-	if filter.View == ViewTopics && filter.EntriesOnly {
-		return api.SearchResult{}, fmt.Errorf(
-			"%w: the topics view searches entries only already",
-			ErrInvalidFilter,
-		)
-	}
-	entryFilter := filter
-	if filter.View == ViewTopics {
-		// The topics view keeps to the changes in each tree within the
-		// span, rather than to top-level entries changed within it.
-		entryFilter.Changed = Span{}
-	}
-	where, err := buildWhere(entryFilter)
-	if err != nil {
-		return api.SearchResult{}, err
-	}
-
-	v, err := s.begin(ctx, access, true)
-	if err != nil {
-		return api.SearchResult{}, fmt.Errorf("starting search: %w", err)
-	}
-	defer v.tx.Rollback()
-	if filter.Under != nil {
-		if err := v.checkEntryExists(ctx, *filter.Under); err != nil {
-			return api.SearchResult{}, err
-		}
-	}
-	var result api.SearchResult
-	if filter.View == ViewTopics {
-		from, fromArgs := joinedFrom(filter.Under)
-		result, err = v.searchTopics(ctx, workspace, filter, from, fromArgs,
-			where, topicWalkRows(filter))
-	} else {
-		result, err = v.searchFlat(ctx, workspace, filter, where)
-	}
-	if err != nil {
-		return api.SearchResult{}, err
-	}
-	if err := v.tx.Commit(); err != nil {
-		return api.SearchResult{}, fmt.Errorf("finishing search: %w", err)
-	}
-	return result, nil
-}
-
-const (
-	// changesBeforeIndex and changesPerMatch bound the newest changes
-	// a flat search walks for a page before it looks its text and
-	// origin user up in the indexes. Common text fills a page from the
-	// newest changes sooner than the indexes can list where it is.
-	changesBeforeIndex = 2048
-	changesPerMatch    = 32
-	// candidatesPerChange bounds the candidates a search reads from
-	// each index, per change it walked first, before it walks every
-	// change instead.
-	candidatesPerChange = 8
-	// candidateReadCost is what reading a candidate costs a search, in
-	// changes walked. A walk reads changes in the order they are
-	// stored, but candidates lie scattered, so each takes reads of its
-	// own.
-	candidateReadCost = 20
-	// matchingMessageBudget is how many matching messages a page of a
-	// search shows, shared by its entries and filled newest first.
-	matchingMessageBudget = 30
-)
-
-// searchesChat reports whether a flat search matches messages as well
-// as entries, which it does when it requires some text, origin or time,
-// unless it keeps to entries. Excluding alone does not search chat, or
-// nearly every message would match.
-func searchesChat(filter Filter) bool {
-	if filter.EntriesOnly {
-		return false
-	}
-	if filter.Changed.bounded() {
-		return true
-	}
-	for _, conditions := range [][]FieldCond{
-		filter.Content, filter.OriginUser, filter.OriginHost,
-		filter.OriginDir, filter.OriginClaudeSession,
-	} {
-		for _, condition := range conditions {
-			if !condition.Negate {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// keepTo limits a where clause on entries e to the entries of a
-// workspace the search shows.
-func (builder *whereBuilder) keepTo(workspace int64, filter Filter) {
-	builder.clauses = append(builder.clauses, `e.workspace_id = ?`)
-	builder.args = append(builder.args, workspace)
-	if !filter.IncludeSuperseded {
-		builder.clauses = append(builder.clauses, `NOT `+supersededClause)
-	}
-	builder.addUnder(filter.Under)
+	return nil
 }
 
 // candidateSet holds the entries, by id, and the messages, by
@@ -502,12 +367,6 @@ func (builder *whereBuilder) keepTo(workspace int64, filter Filter) {
 type candidateSet struct {
 	entries  []int64
 	messages []int64
-}
-
-// readCost is what reading the candidates costs a search, in changes
-// walked.
-func (c candidateSet) readCost() int {
-	return candidateReadCost * (len(c.entries) + len(c.messages))
 }
 
 // within keeps the candidates that are also among others, which come
@@ -525,125 +384,12 @@ func (c candidateSet) within(others candidateSet) candidateSet {
 	}
 }
 
-// matchScope narrows the matches a flat search reads.
-type matchScope struct {
-	// since, unless empty, keeps to the matches at or after a time.
-	since string
-	// indexed keeps to the candidates.
-	indexed    bool
-	candidates candidateSet
-}
-
 // eachChat joins the entries read first to the messages m in their
 // chats. A time filter on the messages would lead SQLite to read every
 // message in the span for each entry instead, so INDEXED BY holds it to
 // the index of each entry's chat.
 const eachChat = `CROSS JOIN entry_messages AS m
 	INDEXED BY sqlite_autoindex_entry_messages_1`
-
-// matchQuery selects a flat search's matches as entry ids, each with
-// the time it ranks by, newest first. A match is an entry the search
-// matches, or when it searches chat, a message the search matches, as
-// buildMessageWhere has it. Unless it keeps to candidates, it walks the
-// entries and messages newest first, so a reader can stop once it has
-// a page.
-func matchQuery(
-	workspace int64,
-	filter Filter,
-	where whereBuilder,
-	scope matchScope,
-) (string, []any, error) {
-	entryKey, messageKey := `e.modified_utc`, `m.modified_utc`
-	chat := `JOIN entry_messages AS m`
-	if filter.OrderByCreation {
-		// A message then ranks by its entry's creation, so the walk
-		// reads the entries newest first and each one's chat within.
-		// CROSS JOIN keeps SQLite from reading every message and
-		// sorting them instead.
-		entryKey, messageKey = `e.created_utc`, `e.created_utc`
-		chat = eachChat
-	}
-	entryFrom := `entries AS e`
-	var entryFromArgs []any
-	messageFrom := `entries AS e ` + chat + `
-		ON m.workspace_id = e.workspace_id AND m.entry_id = e.id`
-	var messageFromArgs []any
-	if scope.indexed {
-		// Reading the candidates first, by their keys, keeps SQLite
-		// from walking every entry and message to keep them in order.
-		entryFrom = `json_each(?) AS candidate CROSS JOIN entries AS e`
-		entryFromArgs = []any{idsJSON(scope.candidates.entries)}
-		where.clauses = append(where.clauses, `e.id = candidate.value`)
-		messageFrom = `json_each(?) AS candidate
-			CROSS JOIN entry_messages AS m ON m.post_order = candidate.value
-			CROSS JOIN entries AS e`
-		messageFromArgs = []any{idsJSON(scope.candidates.messages)}
-	}
-	if scope.since != "" {
-		where.clauses = append(where.clauses, entryKey+` >= ?`)
-		where.args = append(where.args, scope.since)
-	}
-	where.keepTo(workspace, filter)
-	query := `SELECT e.id, ` + entryKey + ` AS at FROM ` + entryFrom +
-		where.sql()
-	args := append(slices.Clone(entryFromArgs), where.args...)
-	if !searchesChat(filter) {
-		return query + ` ORDER BY at DESC`, args, nil
-	}
-
-	messageWhere, err := buildMessageWhere(filter)
-	if err != nil {
-		return "", nil, err
-	}
-	messageWhere.keepTo(workspace, filter)
-	if scope.indexed {
-		messageWhere.clauses = append(messageWhere.clauses,
-			`e.workspace_id = m.workspace_id`, `e.id = m.entry_id`)
-	}
-	if scope.since != "" {
-		messageWhere.clauses = append(messageWhere.clauses,
-			messageKey+` >= ?`)
-		messageWhere.args = append(messageWhere.args, scope.since)
-	}
-	query += ` UNION ALL SELECT e.id, ` + messageKey + ` AS at FROM ` +
-		messageFrom + messageWhere.sql() + ` ORDER BY at DESC`
-	args = append(append(args, messageFromArgs...), messageWhere.args...)
-	return query, args, nil
-}
-
-// walkStart is the time of the n-th newest change a flat search ranks
-// matches by, within the span the search keeps to, or empty when there
-// are fewer.
-func (v view) walkStart(
-	ctx context.Context, workspace int64, filter Filter, n int,
-) (string, error) {
-	bound := whereBuilder{
-		clauses: []string{`workspace_id = ?`}, args: []any{workspace},
-	}
-	column := `modified_utc`
-	if filter.OrderByCreation {
-		column = `created_utc`
-	} else {
-		bound.addSpan(`modified_utc`, filter.Changed)
-	}
-	changes := `SELECT ` + column + ` AS at FROM entries` + bound.sql()
-	args := bound.args
-	if !filter.OrderByCreation && searchesChat(filter) {
-		changes += ` UNION ALL SELECT modified_utc FROM entry_messages` +
-			bound.sql()
-		args = append(slices.Clone(args), bound.args...)
-	}
-	var start string
-	err := v.tx.QueryRowContext(ctx, changes+` ORDER BY at DESC
-		LIMIT 1 OFFSET ?`, append(args, n-1)...).Scan(&start)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("finding where a search starts: %w", err)
-	}
-	return start, nil
-}
 
 // findOriginCandidates lists the entries of a workspace, and when the
 // search covers chat, the messages, that came from a user, by looking
@@ -683,7 +429,7 @@ func (v view) findOriginCandidates(
 	if !ok {
 		return candidateSet{}, false, nil
 	}
-	if searchesChat(filter) {
+	if filter.IncludeChat {
 		found.messages, ok, err = v.readCandidates(ctx, `
 			SELECT post_order FROM entry_messages
 			WHERE workspace_id = ? AND origin_user_lower GLOB ? LIMIT ?`,
@@ -694,43 +440,6 @@ func (v view) findOriginCandidates(
 		}
 		if !ok {
 			return candidateSet{}, false, nil
-		}
-	}
-	slices.Sort(found.entries)
-	slices.Sort(found.messages)
-	return found, true, nil
-}
-
-// findSubtreeCandidates lists the entries of the subtree a search keeps
-// to, and when the search covers chat, the messages in their chats. The
-// candidates come sorted. It reports false when the search keeps to no
-// subtree, or when a lookup finds more than limit rows.
-func (v view) findSubtreeCandidates(
-	ctx context.Context, workspace int64, filter Filter, limit int,
-) (candidateSet, bool, error) {
-	if filter.Under == nil {
-		return candidateSet{}, false, nil
-	}
-
-	var found candidateSet
-	var ok bool
-	var err error
-	found.entries, ok, err = v.readCandidates(ctx, `
-		WITH RECURSIVE `+subtreeCTE("subtree")+`
-		SELECT id FROM subtree WHERE workspace_id = ? LIMIT ?`,
-		limit, filter.Under.Workspace, filter.Under.ID, workspace)
-	if err != nil {
-		return candidateSet{}, false, fmt.Errorf(
-			"listing the subtree of a search: %w", err)
-	}
-	if !ok {
-		return candidateSet{}, false, nil
-	}
-	if searchesChat(filter) {
-		found.messages, ok, err = v.readChatCandidates(ctx, workspace,
-			found.entries, limit)
-		if err != nil || !ok {
-			return candidateSet{}, false, err
 		}
 	}
 	slices.Sort(found.entries)
@@ -765,158 +474,6 @@ func (v view) findIndexedCandidates(
 	return text.within(origin), true, nil
 }
 
-// findCandidates lists the entries and messages of a workspace a
-// search may match, as the indexes and the subtree it keeps to find
-// them. It reports false when none of them narrows the search to at
-// most limit rows of each.
-func (v view) findCandidates(
-	ctx context.Context, workspace int64, filter Filter, limit int,
-) (candidateSet, bool, error) {
-	indexed, indexedFound, err := v.findIndexedCandidates(ctx, workspace,
-		filter, limit)
-	if err != nil {
-		return candidateSet{}, false, err
-	}
-	// Listing the subtree to narrow the candidates down should cost no
-	// more than reading them.
-	subtreeLimit := limit
-	if indexedFound {
-		subtreeLimit = min(limit, indexed.readCost())
-	}
-	subtree, subtreeFound, err := v.findSubtreeCandidates(ctx, workspace,
-		filter, subtreeLimit)
-	if err != nil {
-		return candidateSet{}, false, err
-	}
-	if !subtreeFound {
-		return indexed, indexedFound, nil
-	}
-	if !indexedFound {
-		return subtree, true, nil
-	}
-	// The matches lie in the subtree as well.
-	return indexed.within(subtree), true, nil
-}
-
-// match is an entry a search matched, and the time of its newest
-// match.
-type match struct {
-	id int64
-	at string
-}
-
-// rankMatches reads a flat search's matches within a scope, newest
-// first, until it has count entries, and returns the entries by their
-// newest match, then by id, the newest first.
-func (v view) rankMatches(
-	ctx context.Context,
-	workspace int64,
-	filter Filter,
-	where whereBuilder,
-	scope matchScope,
-	count int,
-) ([]match, error) {
-	query, args, err := matchQuery(workspace, filter, where, scope)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := v.tx.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("reading search results: %w", err)
-	}
-	defer rows.Close()
-	var ranked []match
-	seen := map[int64]bool{}
-	for rows.Next() {
-		var m match
-		if err := rows.Scan(&m.id, &m.at); err != nil {
-			return nil, fmt.Errorf("reading search results: %w", err)
-		}
-		// Matches at the time of the last entry ranked may rank above
-		// it by id, so the walk stops only once time moves on.
-		if len(ranked) >= count && m.at != ranked[len(ranked)-1].at {
-			break
-		}
-		if seen[m.id] {
-			continue
-		}
-		seen[m.id] = true
-		ranked = append(ranked, m)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("reading search results: %w", err)
-	}
-	slices.SortStableFunc(ranked, func(a, b match) int {
-		return cmp.Or(strings.Compare(b.at, a.at), cmp.Compare(b.id, a.id))
-	})
-	return ranked, nil
-}
-
-// showMatchingMessages gives the entries of a page of a search the
-// messages in their chats that the search matches, the latest posted
-// first until the page's budget is spent, and counts each entry's
-// matches left out. The entries of the page meet the filters only an
-// entry matches, so the messages need only meet the others.
-func (v view) showMatchingMessages(
-	ctx context.Context,
-	workspace int64,
-	page []api.MatchedEntry,
-	filter Filter,
-) error {
-	ids := make([]int64, len(page))
-	for i, entry := range page {
-		ids[i] = entry.Ref.ID
-	}
-	where := whereBuilder{args: []any{idsJSON(ids)}}
-	if err := where.addMessageFilters(filter); err != nil {
-		return err
-	}
-	where.clauses = append(where.clauses, `m.workspace_id = ?`,
-		`m.entry_id = page.value`)
-	where.args = append(where.args, workspace)
-	rows, err := v.tx.QueryContext(ctx, `
-		SELECT m.entry_id, m.post_order
-		FROM json_each(?) AS page `+eachChat+
-		where.sql()+`
-		ORDER BY m.post_order DESC`, where.args...)
-	if err != nil {
-		return fmt.Errorf("reading matching messages: %w", err)
-	}
-	matches := map[int64]int{}
-	shown := make([]int64, 0, matchingMessageBudget)
-	for rows.Next() {
-		var entryID, postOrder int64
-		if err := rows.Scan(&entryID, &postOrder); err != nil {
-			rows.Close()
-			return fmt.Errorf("reading matching messages: %w", err)
-		}
-		matches[entryID]++
-		if len(shown) < matchingMessageBudget {
-			shown = append(shown, postOrder)
-		}
-	}
-	if err := rows.Close(); err != nil {
-		return fmt.Errorf("reading matching messages: %w", err)
-	}
-
-	messages, err := v.messagesByPostOrder(ctx, shown)
-	if err != nil {
-		return err
-	}
-	for i := range page {
-		entry := &page[i]
-		for _, message := range messages {
-			if message.Entry == entry.Ref {
-				entry.MatchingMessages = append(entry.MatchingMessages,
-					message)
-			}
-		}
-		entry.MoreMatchingMessages = matches[entry.Ref.ID] -
-			len(entry.MatchingMessages)
-	}
-	return nil
-}
-
 // messagesByPostOrder reads the messages with the given post orders,
 // oldest first.
 func (v view) messagesByPostOrder(
@@ -942,118 +499,326 @@ func (v view) messagesByPostOrder(
 	return messages, rows.Err()
 }
 
-// matchedEntries reads the entries of a workspace a listing shows, in
-// the given order.
-func (v view) matchedEntries(
-	ctx context.Context, workspace int64, ids []int64,
-) ([]api.MatchedEntry, error) {
-	entries := make([]api.Entry, len(ids))
-	for i, id := range ids {
-		var err error
-		if entries[i], err = v.getEntry(ctx, Key{workspace, id}); err != nil {
-			return nil, err
-		}
+// A listing shows the newest entries of a workspace that match a
+// filter. Without chat, each entry ranks by the latest change to it or
+// its chat. With chat, it shows the newest matching messages too, each
+// ranked by its post, and each entry ranks by its own latest change.
+// Every change takes the next revision on the server, so matches rank
+// by revision, which no two share, and a page ends at an exact one.
+
+// candidateLimit bounds the entries, and the messages, a listing reads
+// by key when the indexes narrow it to those. Past it, matches are
+// common enough that reading entries and messages newest first finds a
+// page sooner.
+const candidateLimit = 4096
+
+// listingFrom is the FROM clause a listing reads entries e from, which
+// holds every entry, or with under, the entries of that subtree.
+// Reading the subtree first and sorting it costs time in proportion to
+// the subtree, where walking the workspace newest first and testing
+// each entry would read every entry to fill a page from a small one.
+// CROSS JOIN holds SQLite to that order. Given a time span, it would
+// otherwise read the entries in the span and scan the whole subtree
+// for each.
+func listingFrom(under *Key) (string, []any) {
+	if under == nil {
+		return `entries AS e`, nil
 	}
-	listed, err := v.listEntries(ctx, entries)
-	if err != nil {
-		return nil, err
-	}
-	matched := make([]api.MatchedEntry, len(listed))
-	for i, entry := range listed {
-		matched[i] = api.MatchedEntry{ListedEntry: entry}
-	}
-	return matched, nil
+	return `(WITH RECURSIVE ` + subtreeCTE("under") +
+			` SELECT workspace_id, id FROM under) AS under
+		CROSS JOIN entries AS e
+			ON e.workspace_id = under.workspace_id AND e.id = under.id`,
+		[]any{under.Workspace, under.ID}
 }
 
-// rankFlat reads a flat search's matches, newest first, until it has
-// count entries, as rankMatches does, choosing what to read by what it
-// should cost.
-func (v view) rankFlat(
+// match is a match of a listing, with the revision and time it ranks
+// by. It is an entry, or a message in the entry's chat when postOrder
+// is not 0.
+type match struct {
+	revision  int64
+	at        string
+	entry     int64
+	postOrder int64
+}
+
+// readMatches reads matches, the columns of a match a row.
+func (v view) readMatches(
+	ctx context.Context, query string, args []any,
+) ([]match, error) {
+	rows, err := v.tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("reading matches: %w", err)
+	}
+	defer rows.Close()
+	var matches []match
+	for rows.Next() {
+		var m match
+		if err := rows.Scan(&m.revision, &m.at, &m.entry,
+			&m.postOrder); err != nil {
+			return nil, fmt.Errorf("reading matches: %w", err)
+		}
+		matches = append(matches, m)
+	}
+	return matches, rows.Err()
+}
+
+// addRanks keeps the matches whose revision and time, in the given
+// columns, fall within a filter's spans.
+func (builder *whereBuilder) addRanks(
+	revisionColumn, timeColumn string, filter Filter,
+) {
+	if filter.Revisions.After != 0 {
+		builder.clauses = append(builder.clauses, revisionColumn+` > ?`)
+		builder.args = append(builder.args, filter.Revisions.After)
+	}
+	if filter.Revisions.Before != 0 {
+		builder.clauses = append(builder.clauses, revisionColumn+` < ?`)
+		builder.args = append(builder.args, filter.Revisions.Before)
+	}
+	builder.addSpan(timeColumn, filter.Changed)
+}
+
+// newestEntries reads the count newest entries of a workspace that
+// match a filter, from among the candidates when they are given.
+func (v view) newestEntries(
 	ctx context.Context,
 	workspace int64,
 	filter Filter,
 	where whereBuilder,
+	candidates *candidateSet,
 	count int,
 ) ([]match, error) {
-	walked := changesBeforeIndex + changesPerMatch*count
-	// Reading every candidate in a small subtree costs less than the
-	// walk.
-	subtree, found, err := v.findSubtreeCandidates(ctx, workspace, filter,
-		walked/candidateReadCost)
-	if err != nil {
-		return nil, err
+	revision, at := `e.activity_revision`, `e.activity_utc`
+	if filter.IncludeChat {
+		revision, at = `e.revision`, `e.modified_utc`
 	}
-	if found {
-		return v.rankMatches(ctx, workspace, filter, where,
-			matchScope{indexed: true, candidates: subtree}, count)
+	where.addRanks(revision, at, filter)
+	where.clauses = append(where.clauses, `e.workspace_id = ?`)
+	where.args = append(where.args, workspace)
+	if !filter.IncludeSuperseded {
+		where.clauses = append(where.clauses, `NOT `+supersededClause)
 	}
 
-	since, err := v.walkStart(ctx, workspace, filter, walked)
-	if err != nil {
-		return nil, err
+	from, args := listingFrom(filter.Under)
+	if candidates != nil {
+		from = `json_each(?) AS candidate CROSS JOIN entries AS e
+			ON e.workspace_id = ? AND e.id = candidate.value`
+		args = []any{idsJSON(candidates.entries), workspace}
+		where.addUnder(filter.Under)
 	}
-	ranked, err := v.rankMatches(ctx, workspace, filter, where,
-		matchScope{since: since}, count)
-	if err != nil {
-		return nil, err
-	}
-	if len(ranked) >= count || since == "" {
-		return ranked, nil
-	}
-
-	// The newest changes held too few matches for a page, so the
-	// search reads the candidates the indexes find, unless walking on
-	// to the oldest should cost less.
-	candidates, found, err := v.findCandidates(ctx, workspace, filter,
-		candidatesPerChange*walked)
-	if err != nil {
-		return nil, err
-	}
-	scope := matchScope{}
-	// At the rate the walk found matches, it should find the rest
-	// within (count-len(ranked))*walked/len(ranked) more changes.
-	if found && candidates.readCost()*len(ranked) <
-		(count-len(ranked))*walked {
-		scope = matchScope{indexed: true, candidates: candidates}
-	}
-	return v.rankMatches(ctx, workspace, filter, where, scope, count)
+	return v.readMatches(ctx, `
+		SELECT `+revision+`, `+at+`, e.id, 0 FROM `+from+where.sql()+`
+		ORDER BY `+revision+` DESC LIMIT ?`,
+		append(append(args, where.args...), count))
 }
 
-// searchFlat lists a page of the entries a search matches, and whether
-// more follow. Each entry ranks by its newest match, which is its own
-// change or creation time, or the change time of a matching message in
-// its chat. By creation, an entry matched in its chat ranks by its own
-// creation.
-func (v view) searchFlat(
+// newestMessages reads the count messages of a workspace posted last
+// that match a filter, as buildMessageWhere has it, from among the
+// candidates when they are given.
+func (v view) newestMessages(
 	ctx context.Context,
 	workspace int64,
 	filter Filter,
 	where whereBuilder,
-) (api.SearchResult, error) {
-	ranked, err := v.rankFlat(ctx, workspace, filter, where,
-		filter.Offset+filter.Limit+1)
-	if err != nil {
-		return api.SearchResult{}, err
+	candidates *candidateSet,
+	count int,
+) ([]match, error) {
+	where.addRanks(`m.posted_revision`, `m.created_utc`, filter)
+	where.clauses = append(where.clauses, `m.workspace_id = ?`)
+	where.args = append(where.args, workspace)
+	if !filter.IncludeSuperseded {
+		where.clauses = append(where.clauses, `NOT `+supersededClause)
 	}
 
-	ids := make([]int64, 0, len(ranked))
-	for _, m := range ranked[min(filter.Offset, len(ranked)):min(
-		filter.Offset+filter.Limit, len(ranked))] {
-		ids = append(ids, m.id)
+	// Without a subtree, the messages are read newest first, each
+	// joined to its entry. A subtree's entries are read first, then each
+	// one's chat, as listingFrom explains.
+	from := `entry_messages AS m CROSS JOIN entries AS e
+		ON e.workspace_id = m.workspace_id AND e.id = m.entry_id`
+	var args []any
+	switch {
+	case candidates != nil:
+		from = `json_each(?) AS candidate
+			CROSS JOIN entry_messages AS m ON m.post_order = candidate.value
+			CROSS JOIN entries AS e
+				ON e.workspace_id = m.workspace_id AND e.id = m.entry_id`
+		args = []any{idsJSON(candidates.messages)}
+		where.addUnder(filter.Under)
+	case filter.Under != nil:
+		from, args = listingFrom(filter.Under)
+		from += ` ` + eachChat + `
+			ON m.workspace_id = e.workspace_id AND m.entry_id = e.id`
 	}
-	listed, err := v.matchedEntries(ctx, workspace, ids)
+	return v.readMatches(ctx, `
+		SELECT m.posted_revision, m.created_utc, m.entry_id, m.post_order
+		FROM `+from+where.sql()+`
+		ORDER BY m.posted_revision DESC LIMIT ?`,
+		append(append(args, where.args...), count))
+}
+
+// messagesSince counts, for each of the given entries in a workspace,
+// the messages in its chat posted at or after a revision. It leaves out
+// the entries with none.
+func (v view) messagesSince(
+	ctx context.Context, workspace int64, ids []int64, revision int64,
+) (map[int64]int, error) {
+	rows, err := v.tx.QueryContext(ctx, `
+		SELECT m.entry_id, count(*)
+		FROM json_each(?) AS shown `+eachChat+`
+			ON m.workspace_id = ? AND m.entry_id = shown.value
+		WHERE m.posted_revision >= ? GROUP BY m.entry_id`,
+		idsJSON(ids), workspace, revision)
 	if err != nil {
-		return api.SearchResult{}, err
+		return nil, fmt.Errorf("counting new messages: %w", err)
 	}
-	if searchesChat(filter) {
-		err := v.showMatchingMessages(ctx, workspace, listed, filter)
-		if err != nil {
-			return api.SearchResult{}, err
+	defer rows.Close()
+	counts := map[int64]int{}
+	for rows.Next() {
+		var id int64
+		var count int
+		if err := rows.Scan(&id, &count); err != nil {
+			return nil, fmt.Errorf("counting new messages: %w", err)
+		}
+		counts[id] = count
+	}
+	return counts, rows.Err()
+}
+
+// readPage reads the entries and messages of a page of matches, and the
+// paths above them. Without chat, it counts each entry's messages
+// posted since the page's oldest match.
+func (v view) readPage(
+	ctx context.Context,
+	workspace int64,
+	matches []match,
+	includeChat bool,
+) (api.MatchPage, error) {
+	entries := map[int64]api.Entry{}
+	paths := map[int64][]api.EntryRef{}
+	var ids, postOrders []int64
+	for _, m := range matches {
+		if m.postOrder != 0 {
+			postOrders = append(postOrders, m.postOrder)
+		}
+		if _, read := entries[m.entry]; read {
+			continue
+		}
+		key := Key{workspace, m.entry}
+		var err error
+		if entries[m.entry], err = v.getEntry(ctx, key); err != nil {
+			return api.MatchPage{}, err
+		}
+		if paths[m.entry], err = v.ancestors(ctx, key); err != nil {
+			return api.MatchPage{}, err
+		}
+		ids = append(ids, m.entry)
+	}
+
+	slices.Sort(postOrders)
+	messages, err := v.messagesByPostOrder(ctx, postOrders)
+	if err != nil {
+		return api.MatchPage{}, err
+	}
+	if len(messages) != len(postOrders) {
+		return api.MatchPage{}, fmt.Errorf("read %d of %d matched messages",
+			len(messages), len(postOrders))
+	}
+	byPostOrder := map[int64]*api.Message{}
+	for i, postOrder := range postOrders {
+		byPostOrder[postOrder] = &messages[i]
+	}
+	newMessages := map[int64]int{}
+	if !includeChat && len(matches) > 0 {
+		oldest := matches[len(matches)-1].revision
+		if newMessages, err = v.messagesSince(ctx, workspace, ids,
+			oldest); err != nil {
+			return api.MatchPage{}, err
 		}
 	}
-	result := api.SearchResult{
-		Entries: listed,
-		More:    len(ranked) > filter.Offset+filter.Limit,
+
+	page := api.MatchPage{Matches: []api.Match{}}
+	for _, m := range matches {
+		at, err := parseTime(m.at)
+		if err != nil {
+			return api.MatchPage{}, err
+		}
+		page.Matches = append(page.Matches, api.Match{
+			Entry: entries[m.entry], Ancestors: paths[m.entry],
+			Message: byPostOrder[m.postOrder], Revision: m.revision, At: at,
+			NewMessages: newMessages[m.entry],
+		})
 	}
-	return result, nil
+	return page, nil
+}
+
+// Search lists a page of the newest entries of a workspace that match
+// a filter, and when it includes chat, of the newest messages as well.
+// An entry matches when it meets every filter itself, and a message as
+// buildMessageWhere has it.
+func (s *Store) Search(
+	ctx context.Context,
+	access Access,
+	workspace int64,
+	filter Filter,
+) (api.MatchPage, error) {
+	if err := checkPage(filter); err != nil {
+		return api.MatchPage{}, err
+	}
+	entryWhere, err := buildWhere(filter)
+	if err != nil {
+		return api.MatchPage{}, err
+	}
+	messageWhere, err := buildMessageWhere(filter)
+	if err != nil {
+		return api.MatchPage{}, err
+	}
+
+	v, err := s.begin(ctx, access, true)
+	if err != nil {
+		return api.MatchPage{}, fmt.Errorf("starting search: %w", err)
+	}
+	defer v.tx.Rollback()
+	if filter.Under != nil {
+		if err := v.checkEntryExists(ctx, *filter.Under); err != nil {
+			return api.MatchPage{}, err
+		}
+	}
+	found, ok, err := v.findIndexedCandidates(ctx, workspace, filter,
+		candidateLimit)
+	if err != nil {
+		return api.MatchPage{}, err
+	}
+	var candidates *candidateSet
+	if ok {
+		candidates = &found
+	}
+	// A page of matches and one more, to tell whether more follow.
+	count := filter.Limit + 1
+	matches, err := v.newestEntries(ctx, workspace, filter, entryWhere,
+		candidates, count)
+	if err != nil {
+		return api.MatchPage{}, err
+	}
+	if filter.IncludeChat {
+		messages, err := v.newestMessages(ctx, workspace, filter,
+			messageWhere, candidates, count)
+		if err != nil {
+			return api.MatchPage{}, err
+		}
+		matches = append(matches, messages...)
+		slices.SortFunc(matches, func(a, b match) int {
+			return cmp.Compare(b.revision, a.revision)
+		})
+	}
+
+	page, err := v.readPage(ctx, workspace,
+		matches[:min(filter.Limit, len(matches))], filter.IncludeChat)
+	if err != nil {
+		return api.MatchPage{}, err
+	}
+	page.More = len(matches) > filter.Limit
+	if err := v.tx.Commit(); err != nil {
+		return api.MatchPage{}, fmt.Errorf("finishing search: %w", err)
+	}
+	return page, nil
 }

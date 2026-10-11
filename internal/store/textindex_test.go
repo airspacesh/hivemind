@@ -38,26 +38,29 @@ func globMatches(
 	return ids
 }
 
-// addFiller adds more entries than a search walks before it looks its
-// text up in the text indexes, all newer than everything else, so a
-// search for older text goes on to the indexes. Each one's subject is
-// 0 and its body empty.
+// addFiller adds more entries than a search reads by key from the
+// indexes, all newer than everything else, so a search that walks
+// rather than reading what the indexes find reads them all first. Each
+// one's subject is 0 and its body empty.
 func addFiller(t *testing.T, store *Store) {
 	t.Helper()
-	if _, err := store.db.Exec(`
+	for _, statement := range []string{`
 		WITH RECURSIVE n(i) AS (
 			SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?1
 		)
 		INSERT INTO entries (
 			workspace_id, id, created_utc, modified_utc, activity_utc,
-			revision, project, subject
+			revision, activity_revision, project, subject
 		)
 		SELECT ?2, (SELECT max(id) FROM entries WHERE workspace_id = ?2) + i,
-			?3, ?3, ?3, 0, 'pond', '0'
-		FROM n`,
-		changesBeforeIndex+changesPerMatch*100,
-		workspaceID(t, store, "general"), nowUTC()); err != nil {
-		t.Fatalf("adding filler: %v", err)
+			?3, ?3, ?3, revision + i, revision + i, 'pond', '0'
+		FROM n, revision_counter`, `
+		UPDATE revision_counter SET revision = revision + ?1`,
+	} {
+		if _, err := store.db.Exec(statement, candidateLimit+1,
+			workspaceID(t, store, "general"), nowUTC()); err != nil {
+			t.Fatalf("adding filler: %v", err)
+		}
 	}
 }
 
@@ -92,7 +95,7 @@ func TestTextIndexKeepsGlobSemantics(t *testing.T) {
 				WHERE m.workspace_id = e.workspace_id
 					AND m.entry_id = e.id AND lower(m.body) GLOB ?2
 			)`, func(conditions []FieldCond) Filter {
-			return Filter{Content: conditions}
+			return Filter{Content: conditions, IncludeChat: true}
 		}},
 		{"subject", `e.subject_lower GLOB ?2`,
 			func(conditions []FieldCond) Filter {
@@ -114,10 +117,11 @@ func TestTextIndexKeepsGlobSemantics(t *testing.T) {
 				result := runSearch(t, store,
 					field.filter([]FieldCond{{Value: pattern}}))
 				var got []int64
-				for _, entry := range result.Entries {
-					got = append(got, entry.Ref.ID)
+				for _, match := range result.Matches {
+					got = append(got, match.Entry.Ref.ID)
 				}
 				slices.Sort(got)
+				got = slices.Compact(got)
 				if !slices.Equal(got, want) {
 					t.Fatalf("matched entries %v, want %v", got, want)
 				}
@@ -149,9 +153,9 @@ func TestTextIndexFollowsEdits(t *testing.T) {
 		"ducks": true, "pond": true, "swan": true,
 	} {
 		result := runSearch(t, store, Filter{
-			Content: []FieldCond{{Value: text}},
+			Content: []FieldCond{{Value: text}}, IncludeChat: true,
 		})
-		if got := len(result.Entries) == 1; got != found {
+		if got := len(result.Matches) == 1; got != found {
 			t.Errorf("search for %q found the entry: %v, want %v", text,
 				got, found)
 		}
@@ -205,11 +209,11 @@ func TestTextIndexForgetsDeletedText(t *testing.T) {
 	addFiller(t, store)
 	for _, text := range []string{"heron", "egret", "swan", secret} {
 		result := runSearch(t, store, Filter{
-			Content: []FieldCond{{Value: text}},
+			Content: []FieldCond{{Value: text}}, IncludeChat: true,
 		})
-		if len(result.Entries) != 1 {
-			t.Fatalf("before the delete, a search for %q found %d entries",
-				text, len(result.Entries))
+		if len(result.Matches) == 0 {
+			t.Fatalf("before the delete, a search for %q found nothing",
+				text)
 		}
 	}
 
@@ -218,9 +222,9 @@ func TestTextIndexForgetsDeletedText(t *testing.T) {
 
 	for _, text := range []string{"heron", "egret", "swan", secret} {
 		result := runSearch(t, store, Filter{
-			Content: []FieldCond{{Value: text}},
+			Content: []FieldCond{{Value: text}}, IncludeChat: true,
 		})
-		if len(result.Entries) != 0 {
+		if len(result.Matches) != 0 {
 			t.Errorf("a search for %q still finds the deleted text", text)
 		}
 	}
@@ -239,9 +243,9 @@ func TestTextIndexForgetsDeletedText(t *testing.T) {
 	}
 }
 
-// The newest changes hold the first page here, and the text indexes
-// find the older matches the later pages need.
-func TestSearchPagesFromTheNewestChangesOnToTheIndex(t *testing.T) {
+// The text indexes find old matches beneath newer entries that do not
+// match, page after page.
+func TestSearchPagesBackThroughTheIndex(t *testing.T) {
 	store := openTestStore(t)
 	oldest := mustAdd(t, store, "Heron at dawn", "", nil)
 	addFiller(t, store)
@@ -249,13 +253,18 @@ func TestSearchPagesFromTheNewestChangesOnToTheIndex(t *testing.T) {
 	newest := mustAdd(t, store, "Count", "", nil)
 	mustPost(t, store, newest.Ref, "A heron at dusk")
 
-	for offset, want := range []api.Ref{newest.Ref, older.Ref, oldest.Ref} {
+	want := []string{messageRef(newest.Ref, 1), older.Ref.String(),
+		oldest.Ref.String()}
+	before := Span{}
+	for i, ref := range want {
 		page := runSearch(t, store, Filter{
-			Content: []FieldCond{{Value: "heron"}}, Limit: 1, Offset: offset,
+			Content: []FieldCond{{Value: "heron"}}, IncludeChat: true,
+			Limit: 1, Changed: before,
 		})
-		assertEntryRefs(t, page.Entries, want)
-		if page.More != (offset < 2) {
-			t.Fatalf("more at offset %d = %v", offset, page.More)
+		assertMatches(t, page, ref)
+		if page.More != (i < len(want)-1) {
+			t.Fatalf("more after %s = %v", ref, page.More)
 		}
+		before.Before = page.Matches[0].At
 	}
 }

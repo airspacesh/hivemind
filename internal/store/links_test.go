@@ -191,7 +191,7 @@ func TestIndependentSuccessorsAreAllShown(t *testing.T) {
 		t.Fatalf("superseded by = %v, want both successors", got)
 	}
 	result := runSearch(t, store, Filter{})
-	if refs := entryRefsOf(result.Entries); !reflect.DeepEqual(
+	if refs := matchRefs(result); !reflect.DeepEqual(
 		refs, refStrings(newest.Ref, newer.Ref)) {
 		t.Fatalf("listing = %v, want both successors and not the old", refs)
 	}
@@ -201,9 +201,9 @@ func TestIndependentSuccessorsAreAllShown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Entries) != 3 || result.More {
+	if len(result.Matches) != 3 || result.More {
 		t.Fatalf("listing with superseded holds %d entries and more %v, "+
-			"want 3 and no more", len(result.Entries), result.More)
+			"want 3 and no more", len(result.Matches), result.More)
 	}
 }
 
@@ -222,7 +222,7 @@ func TestChildOfASupersededParentStaysVisible(t *testing.T) {
 	}
 
 	result := runSearch(t, store, Filter{})
-	if refs := entryRefsOf(result.Entries); !reflect.DeepEqual(
+	if refs := matchRefs(result); !reflect.DeepEqual(
 		refs, refStrings(replacement.Ref, child.Ref)) {
 		t.Fatalf("listing = %v, want the replacement and the child", refs)
 	}

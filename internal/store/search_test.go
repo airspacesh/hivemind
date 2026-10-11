@@ -3,8 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -48,7 +46,7 @@ func newSearchEntries(t *testing.T) searchEntries {
 
 // runSearch searches the general workspace with every workspace
 // readable.
-func runSearch(t *testing.T, store *Store, filter Filter) api.SearchResult {
+func runSearch(t *testing.T, store *Store, filter Filter) api.MatchPage {
 	t.Helper()
 	if filter.Limit == 0 {
 		filter.Limit = 50
@@ -61,14 +59,24 @@ func runSearch(t *testing.T, store *Store, filter Filter) api.SearchResult {
 	return result
 }
 
-func assertEntryRefs(
-	t *testing.T, entries []api.MatchedEntry, want ...api.Ref,
-) {
+func assertEntryRefs(t *testing.T, page api.MatchPage, want ...api.Ref) {
 	t.Helper()
-	if got := entryRefsOf(entries); !reflect.DeepEqual(
-		got, refStrings(want...)) {
-		t.Fatalf("entries = %v, want %v", got, refStrings(want...))
+	assertMatches(t, page, refStrings(want...)...)
+}
+
+// assertMatches checks a page's matches by their refs, an entry's like
+// e1 and a message's like e1-m2.
+func assertMatches(t *testing.T, page api.MatchPage, want ...string) {
+	t.Helper()
+	if got := matchRefs(page); !slices.Equal(got, want) &&
+		!(len(got) == 0 && len(want) == 0) {
+		t.Fatalf("matches = %v, want %v", got, want)
 	}
+}
+
+// messageRef names a message of an entry, like e1-m2.
+func messageRef(entry api.Ref, number int64) string {
+	return api.MessageRef{Entry: entry, Number: number}.String()
 }
 
 func TestSearchUsesRawCaseFoldedGlobPatterns(t *testing.T) {
@@ -96,7 +104,7 @@ func TestSearchUsesRawCaseFoldedGlobPatterns(t *testing.T) {
 			result := runSearch(t, entries.store, Filter{
 				Subject: []FieldCond{{Value: test.pattern}},
 			})
-			assertEntryRefs(t, result.Entries, test.want...)
+			assertEntryRefs(t, result, test.want...)
 		})
 	}
 }
@@ -106,28 +114,28 @@ func TestSearchSetAndPairNegationUsesNotExists(t *testing.T) {
 	result := runSearch(t, entries.store, Filter{
 		Key: []FieldCond{{Value: "JIRA"}},
 	})
-	assertEntryRefs(t, result.Entries, entries.third.Ref, entries.first.Ref)
+	assertEntryRefs(t, result, entries.third.Ref, entries.first.Ref)
 
 	result = runSearch(t, entries.store, Filter{
 		Key: []FieldCond{{Negate: true, Value: "JIRA"}},
 	})
-	assertEntryRefs(t, result.Entries,
+	assertEntryRefs(t, result,
 		entries.fifth.Ref, entries.fourth.Ref, entries.second.Ref)
 
 	result = runSearch(t, entries.store, Filter{
 		Meta: []MetaCond{{Key: "jira", Value: "QUACK-*"}},
 	})
-	assertEntryRefs(t, result.Entries, entries.third.Ref, entries.first.Ref)
+	assertEntryRefs(t, result, entries.third.Ref, entries.first.Ref)
 
 	result = runSearch(t, entries.store, Filter{
 		Meta: []MetaCond{{Key: "jira", Value: "QUACK"}},
 	})
-	assertEntryRefs(t, result.Entries)
+	assertEntryRefs(t, result)
 
 	result = runSearch(t, entries.store, Filter{
 		Meta: []MetaCond{{Negate: true, Key: "jira", Value: "QUACK-1"}},
 	})
-	assertEntryRefs(t, result.Entries, entries.fifth.Ref,
+	assertEntryRefs(t, result, entries.fifth.Ref,
 		entries.fourth.Ref, entries.third.Ref, entries.second.Ref)
 }
 
@@ -136,55 +144,52 @@ func TestSearchMatchesProjectWholeValue(t *testing.T) {
 	result := runSearch(t, entries.store, Filter{
 		Project: []FieldCond{{Value: "DUCK-*"}},
 	})
-	assertEntryRefs(t, result.Entries,
+	assertEntryRefs(t, result,
 		entries.third.Ref, entries.second.Ref, entries.first.Ref)
 
 	result = runSearch(t, entries.store, Filter{
 		Project: []FieldCond{{Value: "duck"}},
 	})
-	assertEntryRefs(t, result.Entries)
+	assertEntryRefs(t, result)
 
 	result = runSearch(t, entries.store, Filter{
 		Project: []FieldCond{{Negate: true, Value: "DUCK-POND"}},
 	})
-	assertEntryRefs(t, result.Entries,
+	assertEntryRefs(t, result,
 		entries.fifth.Ref, entries.fourth.Ref, entries.second.Ref)
 
 	result = runSearch(t, entries.store, Filter{
 		Project: []FieldCond{{Value: "ÆTHER"}},
 	})
-	assertEntryRefs(t, result.Entries)
+	assertEntryRefs(t, result)
 }
 
+// A page ends at the oldest match it shows, and the next page lists
+// the matches before it.
 func TestSearchContentPagingAndMetadata(t *testing.T) {
 	entries := newSearchEntries(t)
-	result := runSearch(t, entries.store, Filter{
-		Content: []FieldCond{{Value: "*DUCKLINGS*"}},
-		Limit:   2,
-		Offset:  1,
-	})
+	ducklings := []FieldCond{{Value: "*DUCKLINGS*"}}
+	first := runSearch(t, entries.store, Filter{Content: ducklings, Limit: 2})
+	assertEntryRefs(t, first, entries.third.Ref, entries.second.Ref)
+	if !first.More {
+		t.Fatal("no more after the first 2 of 3 matches")
+	}
+	result := runSearch(t, entries.store, Filter{Content: ducklings,
+		Limit: 2, Changed: Span{Before: first.Matches[1].At}})
 	if result.More {
 		t.Fatal("more after the last of 3 matches")
 	}
-	assertEntryRefs(t, result.Entries, entries.second.Ref, entries.first.Ref)
-	if first := runSearch(t, entries.store, Filter{
-		Content: []FieldCond{{Value: "*DUCKLINGS*"}}, Limit: 2,
-	}); !first.More {
-		t.Fatal("no more after the first 2 of 3 matches")
-	}
-	if got := result.Entries[1].Metadata["jira"]; got != "QUACK-1" {
+	assertEntryRefs(t, result, entries.first.Ref)
+	if got := result.Matches[0].Entry.Metadata["jira"]; got != "QUACK-1" {
 		t.Fatalf("paged metadata jira = %q, want QUACK-1", got)
-	}
-	if result.Entries[0].Metadata == nil {
-		t.Fatal("entry metadata map is nil")
 	}
 }
 
-func TestSearchOrdersEditedEntryFirstByDefault(t *testing.T) {
+func TestSearchRanksAnEditedEntryFirst(t *testing.T) {
 	entries := newSearchEntries(t)
 	oldTime := "2000-01-01T00:00:00.000000000Z"
 	if _, err := entries.store.db.Exec(
-		`UPDATE entries SET modified_utc = ?`, oldTime,
+		`UPDATE entries SET modified_utc = ?1, activity_utc = ?1`, oldTime,
 	); err != nil {
 		t.Fatalf("setting modification times: %v", err)
 	}
@@ -199,15 +204,9 @@ func TestSearchOrdersEditedEntryFirstByDefault(t *testing.T) {
 	}
 
 	result := runSearch(t, entries.store, Filter{})
-	if result.Entries[0].Ref != entries.first.Ref {
-		t.Fatalf("first entry = %s, want the edited %s",
-			result.Entries[0].Ref, entries.first.Ref)
-	}
-
-	byCreation := runSearch(t, entries.store, Filter{OrderByCreation: true})
-	if byCreation.Entries[0].Ref != entries.fifth.Ref {
-		t.Fatalf("first entry by creation = %s, want the newest %s",
-			byCreation.Entries[0].Ref, entries.fifth.Ref)
+	if got := result.Matches[0].Entry.Ref; got != entries.first.Ref {
+		t.Fatalf("first entry = %s, want the edited %s", got,
+			entries.first.Ref)
 	}
 }
 
@@ -220,7 +219,6 @@ func TestSearchRejectsInvalidBoundsAndNUL(t *testing.T) {
 	}{
 		{"zero limit", Filter{}, "limit"},
 		{"large limit", Filter{Limit: MaxSearchLimit + 1}, "limit"},
-		{"negative offset", Filter{Limit: 1, Offset: -1}, "offset"},
 		{"NUL pattern", Filter{
 			Limit: 1,
 			Body:  []FieldCond{{Value: "bad\x00pattern"}},
@@ -280,23 +278,23 @@ func TestSearchByOrigin(t *testing.T) {
 	got := runSearch(t, store, Filter{
 		Limit: 50, OriginHost: []FieldCond{{Value: "pond-a"}},
 	})
-	assertEntryRefs(t, got.Entries, first.Ref)
+	assertEntryRefs(t, got, first.Ref)
 
 	// Directory glob and session match reach only their entry.
 	got = runSearch(t, store, Filter{
 		Limit: 50, OriginDir: []FieldCond{{Value: "*/envs"}},
 	})
-	assertEntryRefs(t, got.Entries, second.Ref)
+	assertEntryRefs(t, got, second.Ref)
 	got = runSearch(t, store, Filter{
 		Limit: 50, OriginClaudeSession: []FieldCond{{Value: "abc-*"}},
 	})
-	assertEntryRefs(t, got.Entries, first.Ref)
+	assertEntryRefs(t, got, first.Ref)
 
 	// Negation excludes the matching origin.
 	got = runSearch(t, store, Filter{
 		Limit: 50, OriginHost: []FieldCond{{Negate: true, Value: "pond-a"}},
 	})
-	assertEntryRefs(t, got.Entries, second.Ref)
+	assertEntryRefs(t, got, second.Ref)
 }
 
 // Entries share numbers across workspaces, so metadata filters must
@@ -315,12 +313,12 @@ func TestSearchMetadataStaysInItsWorkspace(t *testing.T) {
 		{Key: []FieldCond{{Value: "jira"}}},
 	} {
 		result := runSearch(t, store, filter)
-		assertEntryRefs(t, result.Entries)
+		assertEntryRefs(t, result)
 	}
 	result := runSearch(t, store, Filter{
 		Meta: []MetaCond{{Negate: true, Key: "jira", Value: "*"}},
 	})
-	assertEntryRefs(t, result.Entries, inGeneral.Ref)
+	assertEntryRefs(t, result, inGeneral.Ref)
 }
 
 func messageBodies(messages []api.Message) []string {
@@ -331,7 +329,10 @@ func messageBodies(messages []api.Message) []string {
 	return bodies
 }
 
+// Each matching message is a match of its own, ranked by when it was
+// posted, beside the matching entries.
 func TestSearchMatchesChatMessages(t *testing.T) {
+	ctx := context.Background()
 	store := openTestStore(t)
 	pond := mustAdd(t, store, "Pond notes", "", nil)
 	sighting := mustAdd(t, store, "Heron sighting", "", nil)
@@ -342,56 +343,48 @@ func TestSearchMatchesChatMessages(t *testing.T) {
 	}
 	mustPost(t, store, quiet.Ref, "no birds")
 	heron := []FieldCond{{Value: "heron"}}
+	chatMatches := []string{messageRef(pond.Ref, 5), messageRef(pond.Ref, 4),
+		messageRef(pond.Ref, 3), messageRef(pond.Ref, 1),
+		sighting.Ref.String()}
 
-	result := runSearch(t, store, Filter{Content: heron})
-	assertEntryRefs(t, result.Entries, pond.Ref, sighting.Ref)
-	if got, want := messageBodies(result.Entries[0].MatchingMessages),
-		[]string{"a heron landed", "HERON again", "heron thrice",
-			"heron four"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("matching messages = %q, want %q", got, want)
-	}
-	if got := result.Entries[1].MatchingMessages; len(got) != 0 {
-		t.Fatalf("an entry with no matching chat shows messages %v", got)
-	}
-
-	byCreation := runSearch(t, store, Filter{
-		Content: heron, OrderByCreation: true,
-	})
-	assertEntryRefs(t, byCreation.Entries, sighting.Ref, pond.Ref)
-
-	for offset, want := range []api.Ref{pond.Ref, sighting.Ref} {
-		page := runSearch(t, store, Filter{
-			Content: heron, Limit: 1, Offset: offset,
-		})
-		assertEntryRefs(t, page.Entries, want)
-		if page.More != (offset == 0) {
-			t.Fatalf("more at offset %d = %v", offset, page.More)
+	result := runSearch(t, store, Filter{Content: heron, IncludeChat: true})
+	assertMatches(t, result, chatMatches...)
+	before := Span{}
+	for i, want := range chatMatches {
+		page := runSearch(t, store, Filter{Content: heron, IncludeChat: true,
+			Limit: 1, Changed: before})
+		assertMatches(t, page, want)
+		if page.More != (i < len(chatMatches)-1) {
+			t.Fatalf("more after %s = %v", want, page.More)
 		}
+		before.Before = page.Matches[0].At
 	}
 
-	entriesOnly := runSearch(t, store, Filter{
-		Content: heron, EntriesOnly: true,
-	})
-	assertEntryRefs(t, entriesOnly.Entries, sighting.Ref)
+	entriesOnly := runSearch(t, store, Filter{Content: heron})
+	assertEntryRefs(t, entriesOnly, sighting.Ref)
 
 	// The other filters apply to the entry a message is in.
-	sightings := runSearch(t, store, Filter{
-		Content: heron, Subject: []FieldCond{{Value: "sighting"}},
-	})
-	assertEntryRefs(t, sightings.Entries, sighting.Ref)
+	sightings := runSearch(t, store, Filter{Content: heron,
+		Subject: []FieldCond{{Value: "sighting"}}, IncludeChat: true})
+	assertEntryRefs(t, sightings, sighting.Ref)
 
-	// Excluding text alone does not search chat, or every entry with
-	// one message lacking the text would match.
+	// Excluding text matches every message and entry without it. With
+	// chat, an entry ranks by its own change, not by its chat.
 	without := runSearch(t, store, Filter{
-		Content: []FieldCond{{Negate: true, Value: "heron"}},
+		Content:     []FieldCond{{Negate: true, Value: "heron"}},
+		IncludeChat: true,
 	})
-	assertEntryRefs(t, without.Entries, quiet.Ref, pond.Ref)
-	for _, entry := range without.Entries {
-		if len(entry.MatchingMessages) != 0 {
-			t.Fatalf("%s shows messages %v", entry.Ref,
-				entry.MatchingMessages)
-		}
+	assertMatches(t, without, messageRef(quiet.Ref, 1),
+		messageRef(pond.Ref, 2), quiet.Ref.String(), pond.Ref.String())
+
+	// An edit lifts the entry, but the message keeps its place as the
+	// first posted.
+	if _, _, err := store.EditMessage(ctx, store.mustKey(pond.Ref), 1,
+		ownEdit("heron at dawn")); err != nil {
+		t.Fatal(err)
 	}
+	assertMatches(t, runSearch(t, store, Filter{Content: heron,
+		IncludeChat: true}), chatMatches...)
 }
 
 // A message matches when it matches every text filter, required and
@@ -407,18 +400,14 @@ func TestSearchMatchesEachMessageOnItsOwn(t *testing.T) {
 
 	result := runSearch(t, store, Filter{Content: []FieldCond{
 		{Value: "heron"}, {Value: "egret"},
-	}})
-	assertEntryRefs(t, result.Entries, both.Ref)
+	}, IncludeChat: true})
+	assertMatches(t, result, messageRef(both.Ref, 1))
 
 	result = runSearch(t, store, Filter{Content: []FieldCond{
 		{Value: "heron"}, {Negate: true, Value: "egret"},
-	}})
-	assertEntryRefs(t, result.Entries, both.Ref, split.Ref)
-	got := messageBodies(result.Entries[0].MatchingMessages)
-	if !reflect.DeepEqual(got, []string{"heron alone"}) {
-		t.Fatalf("matching messages = %q, want only the one without egret",
-			got)
-	}
+	}, IncludeChat: true})
+	assertMatches(t, result, messageRef(both.Ref, 2),
+		messageRef(split.Ref, 1))
 }
 
 // A message matches the text and origin filters on its own, and the
@@ -445,56 +434,39 @@ func TestSearchMatchesMessagesByOrigin(t *testing.T) {
 	ines := []FieldCond{{Value: "ines"}}
 	notInes := []FieldCond{{Negate: true, Value: "ines"}}
 
-	shown := func(result api.SearchResult) map[string][]string {
-		bodies := map[string][]string{}
-		for _, entry := range result.Entries {
-			bodies[entry.Subject] = messageBodies(entry.MatchingMessages)
-		}
-		return bodies
-	}
 	tests := []struct {
 		name   string
 		filter Filter
-		want   []api.Ref
-		shown  map[string][]string
+		want   []string
 	}{
 		{"text and origin match the same message",
-			Filter{Content: hook, OriginUser: ines},
-			[]api.Ref{garden.Ref, release.Ref, design.Ref},
-			map[string][]string{"Garden": {"hook in the garden"},
-				"Release notes": {"hook fixed"}, "Hook design": nil}},
-		{"an origin alone searches chat",
-			Filter{OriginUser: ines},
-			[]api.Ref{garden.Ref, release.Ref, cats.Ref, design.Ref},
-			map[string][]string{"Garden": {"hook in the garden"},
-				"Release notes": {"hook fixed", "lunch"}, "Cats": nil,
-				"Hook design": nil}},
+			Filter{Content: hook, OriginUser: ines, IncludeChat: true},
+			[]string{messageRef(garden.Ref, 1), messageRef(release.Ref, 2),
+				design.Ref.String()}},
+		{"an origin alone",
+			Filter{OriginUser: ines, IncludeChat: true},
+			[]string{messageRef(garden.Ref, 1), messageRef(release.Ref, 3),
+				messageRef(release.Ref, 2), cats.Ref.String(),
+				design.Ref.String()}},
 		{"the other filters apply to a message's entry",
-			Filter{OriginUser: ines, Project: []FieldCond{{Value: "build"}}},
-			[]api.Ref{release.Ref, design.Ref},
-			map[string][]string{"Release notes": {"hook fixed", "lunch"},
-				"Hook design": nil}},
+			Filter{OriginUser: ines, Project: []FieldCond{{Value: "build"}},
+				IncludeChat: true},
+			[]string{messageRef(release.Ref, 3), messageRef(release.Ref, 2),
+				design.Ref.String()}},
 		{"an excluded origin excludes messages too",
-			Filter{Content: hook, OriginUser: notInes},
-			[]api.Ref{cats.Ref, release.Ref},
-			map[string][]string{"Cats": {"hook question"},
-				"Release notes": {"hook fails"}}},
-		{"an excluded origin alone does not search chat",
-			Filter{OriginUser: notInes},
-			[]api.Ref{garden.Ref, release.Ref},
-			map[string][]string{"Garden": nil, "Release notes": nil}},
+			Filter{Content: hook, OriginUser: notInes, IncludeChat: true},
+			[]string{messageRef(cats.Ref, 1), messageRef(release.Ref, 1)}},
+		{"an excluded origin alone",
+			Filter{OriginUser: notInes, IncludeChat: true},
+			[]string{messageRef(cats.Ref, 1), messageRef(release.Ref, 1),
+				garden.Ref.String(), release.Ref.String()}},
 		{"entries only",
-			Filter{OriginUser: ines, EntriesOnly: true},
-			[]api.Ref{cats.Ref, design.Ref},
-			map[string][]string{"Cats": nil, "Hook design": nil}},
+			Filter{OriginUser: ines},
+			[]string{cats.Ref.String(), design.Ref.String()}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result := runSearch(t, store, test.filter)
-			assertEntryRefs(t, result.Entries, test.want...)
-			if got := shown(result); !reflect.DeepEqual(got, test.shown) {
-				t.Fatalf("matching messages = %q, want %q", got, test.shown)
-			}
+			assertMatches(t, runSearch(t, store, test.filter), test.want...)
 		})
 	}
 }
@@ -509,14 +481,11 @@ func TestSearchMatchesMessagesByOriginInEntriesTheIndexFinds(t *testing.T) {
 	addFiller(t, store)
 
 	result := runSearch(t, store, Filter{
-		Subject:    []FieldCond{{Value: "heron"}},
-		OriginUser: []FieldCond{{Value: "ines"}},
+		Subject:     []FieldCond{{Value: "heron"}},
+		OriginUser:  []FieldCond{{Value: "ines"}},
+		IncludeChat: true,
 	})
-	assertEntryRefs(t, result.Entries, heron.Ref)
-	got := messageBodies(result.Entries[0].MatchingMessages)
-	if !reflect.DeepEqual(got, []string{"seen twice"}) {
-		t.Fatalf("matching messages = %q, want ines's alone", got)
-	}
+	assertMatches(t, result, messageRef(heron.Ref, 1))
 }
 
 // The origin user indexes find old entries, by their own origin or a
@@ -549,13 +518,14 @@ func TestOriginUserIndexKeepsGlobSemantics(t *testing.T) {
 		t.Run(pattern, func(t *testing.T) {
 			want := globMatches(t, store, matches, lowerASCII(pattern))
 			result := runSearch(t, store, Filter{
-				OriginUser: []FieldCond{{Value: pattern}},
+				OriginUser: []FieldCond{{Value: pattern}}, IncludeChat: true,
 			})
 			var got []int64
-			for _, entry := range result.Entries {
-				got = append(got, entry.Ref.ID)
+			for _, match := range result.Matches {
+				got = append(got, match.Entry.Ref.ID)
 			}
 			slices.Sort(got)
+			got = slices.Compact(got)
 			if !slices.Equal(got, want) {
 				t.Fatalf("matched entries %v, want %v", got, want)
 			}
@@ -565,15 +535,17 @@ func TestOriginUserIndexKeepsGlobSemantics(t *testing.T) {
 	// A message must match the text and the origin, so ken's chat has no
 	// match from ken, though both indexes find it.
 	result := runSearch(t, store, Filter{
-		Content:    []FieldCond{{Value: "quack"}},
-		OriginUser: []FieldCond{{Value: "ines"}},
+		Content:     []FieldCond{{Value: "quack"}},
+		OriginUser:  []FieldCond{{Value: "ines"}},
+		IncludeChat: true,
 	})
-	assertEntryRefs(t, result.Entries, chat.Ref)
+	assertMatches(t, result, messageRef(chat.Ref, 1))
 	result = runSearch(t, store, Filter{
-		Content:    []FieldCond{{Value: "quack"}},
-		OriginUser: []FieldCond{{Value: "ken"}},
+		Content:     []FieldCond{{Value: "quack"}},
+		OriginUser:  []FieldCond{{Value: "ken"}},
+		IncludeChat: true,
 	})
-	assertEntryRefs(t, result.Entries)
+	assertMatches(t, result)
 }
 
 func messageRefs(messages []api.Message) []string {
@@ -584,72 +556,10 @@ func messageRefs(messages []api.Message) []string {
 	return refs
 }
 
-// The messages a page shows come from one budget, filled with the
-// newest matches across its entries, so a busy entry can take most of
-// it and an older one none.
-func TestSearchSharesOneMessageBudgetAcrossThePage(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t)
-	oldest := mustAdd(t, store, "Oldest", "", nil)
-	busy := mustAdd(t, store, "Busy", "", nil)
-	quiet := mustAdd(t, store, "Quiet", "", nil)
-	mustPost(t, store, oldest.Ref, "heron at dawn")
-	for i := range matchingMessageBudget {
-		mustPost(t, store, busy.Ref, fmt.Sprintf("heron %d", i+1))
-		mustPost(t, store, busy.Ref, "no birds")
-	}
-	mustPost(t, store, quiet.Ref, "heron once")
-	mustPost(t, store, quiet.Ref, "heron twice")
-	heron := []FieldCond{{Value: "heron"}}
-
-	result := runSearch(t, store, Filter{Content: heron})
-	assertEntryRefs(t, result.Entries, quiet.Ref, busy.Ref, oldest.Ref)
-	wantBusy := matchingMessageBudget - 2
-	got := result.Entries[1].MatchingMessages
-	if len(got) != wantBusy || got[0].Body != "heron 3" ||
-		got[len(got)-1].Body != fmt.Sprintf("heron %d",
-			matchingMessageBudget) {
-		t.Fatalf("busy entry shows %q, want its newest %d oldest first",
-			messageBodies(got), wantBusy)
-	}
-	shown := map[string]int{}
-	more := map[string]int{}
-	for _, entry := range result.Entries {
-		shown[entry.Subject] = len(entry.MatchingMessages)
-		more[entry.Subject] = entry.MoreMatchingMessages
-	}
-	if want := map[string]int{"Quiet": 2, "Busy": wantBusy,
-		"Oldest": 0}; !reflect.DeepEqual(shown, want) {
-		t.Fatalf("messages shown = %v, want %v", shown, want)
-	}
-	if want := map[string]int{"Quiet": 0, "Busy": 2,
-		"Oldest": 1}; !reflect.DeepEqual(more, want) {
-		t.Fatalf("matching messages left out = %v, want %v", more, want)
-	}
-
-	// An edit lifts the entry, which ranks by its change time, but the
-	// edited message keeps its place as the first posted, so it stays
-	// out of the budget.
-	if _, _, err := store.EditMessage(ctx, store.mustKey(busy.Ref), 1,
-		ownEdit("heron again")); err != nil {
-		t.Fatal(err)
-	}
-	result = runSearch(t, store, Filter{Content: heron})
-	assertEntryRefs(t, result.Entries, busy.Ref, quiet.Ref, oldest.Ref)
-	got = result.Entries[0].MatchingMessages
-	if len(got) != wantBusy || got[0].Body != "heron 3" ||
-		got[len(got)-1].Body != fmt.Sprintf("heron %d",
-			matchingMessageBudget) {
-		t.Fatalf("busy entry shows %q, want heron 3 to %d", messageBodies(got),
-			matchingMessageBudget)
-	}
-	if more := result.Entries[0].MoreMatchingMessages; more != 2 {
-		t.Fatalf("busy entry leaves out %d matches, want 2", more)
-	}
-}
-
-// A time filter keeps to the entries and messages last changed within
-// a span, from its start up to but not including its end.
+// A time filter keeps to the matches whose change they rank by falls
+// within a span, from its start up to but not including its end. That
+// is an entry's latest change to it or its chat without chat, or to it
+// alone with chat, and a message's post.
 func TestSearchKeepsToASpan(t *testing.T) {
 	store := openTestStore(t)
 	day := func(month time.Month, day int) time.Time {
@@ -658,8 +568,8 @@ func TestSearchKeepsToASpan(t *testing.T) {
 	setChanged := func(ref api.Ref, message int64, at time.Time) {
 		t.Helper()
 		key := store.mustKey(ref)
-		query := `UPDATE entries SET created_utc = ?1, modified_utc = ?1,
-			activity_utc = ?1 WHERE workspace_id = ?2 AND id = ?3`
+		query := `UPDATE entries SET created_utc = ?1, modified_utc = ?1
+			WHERE workspace_id = ?2 AND id = ?3`
 		if message != 0 {
 			query = `UPDATE entry_messages SET created_utc = ?1,
 				modified_utc = ?1 WHERE workspace_id = ?2 AND entry_id = ?3
@@ -680,56 +590,45 @@ func TestSearchKeepsToASpan(t *testing.T) {
 		day(1, 15))
 	recent := mustAdd(t, store, "Recent", "", nil)
 	setChanged(recent.Ref, 0, day(4, 1))
-
-	shown := func(result api.SearchResult) map[string][]string {
-		bodies := map[string][]string{}
-		for _, entry := range result.Entries {
-			bodies[entry.Subject] = messageBodies(entry.MatchingMessages)
-		}
-		return bodies
+	if _, err := store.db.Exec(`
+		UPDATE entries AS e SET activity_utc = ` + activityExpr); err != nil {
+		t.Fatal(err)
 	}
+	late, early := messageRef(mid.Ref, 1), messageRef(mid.Ref, 2)
+
 	tests := []struct {
 		name   string
 		filter Filter
-		want   []api.Ref
-		shown  map[string][]string
+		want   []string
 	}{
 		{"after",
-			Filter{Changed: Span{After: day(2, 15)}},
-			[]api.Ref{recent.Ref, mid.Ref},
-			map[string][]string{"Recent": nil, "Mid": {"late"}}},
+			Filter{Changed: Span{After: day(2, 15)}, IncludeChat: true},
+			[]string{recent.Ref.String(), late}},
 		{"before leaves out its own instant",
-			Filter{Changed: Span{Before: day(2, 1)}},
-			[]api.Ref{mid.Ref, old.Ref},
-			map[string][]string{"Mid": {"early"}, "Old": nil}},
+			Filter{Changed: Span{Before: day(3, 1)}, IncludeChat: true},
+			[]string{early, mid.Ref.String(), old.Ref.String()}},
 		{"after takes in its own instant",
-			Filter{Changed: Span{After: day(2, 1), Before: day(2, 2)}},
-			[]api.Ref{mid.Ref},
-			map[string][]string{"Mid": nil}},
+			Filter{Changed: Span{After: day(3, 1), Before: day(3, 2)},
+				IncludeChat: true},
+			[]string{late}},
 		{"with an origin",
 			Filter{Changed: Span{After: day(1, 10)},
-				OriginUser: []FieldCond{{Value: "ken"}}},
-			[]api.Ref{mid.Ref},
-			map[string][]string{"Mid": {"early"}}},
+				OriginUser: []FieldCond{{Value: "ken"}}, IncludeChat: true},
+			[]string{early}},
 		{"entries only",
-			Filter{Changed: Span{After: day(2, 15)}, EntriesOnly: true},
-			[]api.Ref{recent.Ref},
-			map[string][]string{"Recent": nil}},
+			Filter{Changed: Span{After: day(2, 15)}},
+			[]string{recent.Ref.String(), mid.Ref.String()}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result := runSearch(t, store, test.filter)
-			assertEntryRefs(t, result.Entries, test.want...)
-			if got := shown(result); !reflect.DeepEqual(got, test.shown) {
-				t.Fatalf("matching messages = %q, want %q", got, test.shown)
-			}
+			assertMatches(t, runSearch(t, store, test.filter), test.want...)
 		})
 	}
 }
 
 // A search under an entry keeps to its subtree in a big workspace,
-// whether the subtree is small enough to read whole or so large the
-// search walks the newest changes first.
+// whether the indexes find its matches or it reads the subtree newest
+// first.
 func TestSearchUnderASubtreeInABigWorkspace(t *testing.T) {
 	store := openTestStore(t)
 	root := mustAdd(t, store, "Heron nest", "", nil)
@@ -745,47 +644,34 @@ func TestSearchUnderASubtreeInABigWorkspace(t *testing.T) {
 	postAs(t, store, "ines", outside.Ref, "a heron again")
 	addFiller(t, store)
 
-	shown := func(result api.SearchResult) map[string][]string {
-		bodies := map[string][]string{}
-		for _, entry := range result.Entries {
-			bodies[entry.Subject] = messageBodies(entry.MatchingMessages)
-		}
-		return bodies
-	}
 	under := store.mustKey(root.Ref)
 	heron := []FieldCond{{Value: "heron"}}
 	tests := []struct {
 		name   string
 		filter Filter
-		want   []api.Ref
-		shown  map[string][]string
+		want   []string
 	}{
 		{"text",
-			Filter{Under: &under, Content: heron},
-			[]api.Ref{child.Ref, grandchild.Ref, root.Ref},
-			map[string][]string{"Reeds": {"a heron landed"},
-				"Heron eggs": nil, "Heron nest": nil}},
+			Filter{Under: &under, Content: heron, IncludeChat: true},
+			[]string{messageRef(child.Ref, 1), grandchild.Ref.String(),
+				root.Ref.String()}},
 		{"entries only",
-			Filter{Under: &under, Content: heron, EntriesOnly: true},
-			[]api.Ref{grandchild.Ref, root.Ref},
-			map[string][]string{"Heron eggs": nil, "Heron nest": nil}},
+			Filter{Under: &under, Content: heron},
+			[]string{root.Ref.String(), grandchild.Ref.String()}},
 		{"origin",
-			Filter{Under: &under, OriginUser: []FieldCond{{Value: "ines"}}},
-			[]api.Ref{child.Ref},
-			map[string][]string{"Reeds": {"a heron landed"}}},
+			Filter{Under: &under, OriginUser: []FieldCond{{Value: "ines"}},
+				IncludeChat: true},
+			[]string{messageRef(child.Ref, 1)}},
 		{"nothing matches",
-			Filter{Under: &under, OriginHost: []FieldCond{{Value: "h"}}},
-			nil, map[string][]string{}},
+			Filter{Under: &under, OriginHost: []FieldCond{{Value: "h"}},
+				IncludeChat: true},
+			nil},
 	}
 	run := func(t *testing.T) {
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
-				result := runSearch(t, store, test.filter)
-				assertEntryRefs(t, result.Entries, test.want...)
-				if got := shown(result); !reflect.DeepEqual(got, test.shown) {
-					t.Fatalf("matching messages = %q, want %q", got,
-						test.shown)
-				}
+				assertMatches(t, runSearch(t, store, test.filter),
+					test.want...)
 			})
 		}
 	}

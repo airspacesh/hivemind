@@ -37,11 +37,8 @@ var repeatedQueryParameters = map[string]bool{
 
 var singleQueryParameters = map[string]bool{
 	"limit":              true,
-	"offset":             true,
-	"order-by":           true,
 	"include-superseded": true,
-	"entries-only":       true,
-	"view":               true,
+	"include-chat":       true,
 	"under":              true,
 	"after":              true,
 	"before":             true,
@@ -238,51 +235,28 @@ func searchFilter(query url.Values) (store.Filter, error) {
 	if err != nil {
 		return store.Filter{}, err
 	}
-	offset, err := queryInteger(query, "offset", 0, 0, 1<<31-1)
-	if err != nil {
-		return store.Filter{}, err
-	}
 	includeSuperseded, err := queryFlag(query, "include-superseded")
 	if err != nil {
 		return store.Filter{}, err
 	}
-	entriesOnly, err := queryFlag(query, "entries-only")
+	includeChat, err := queryFlag(query, "include-chat")
 	if err != nil {
 		return store.Filter{}, err
 	}
-	after, err := queryTime(query, "after")
+	after, err := queryBound(query, "after")
 	if err != nil {
 		return store.Filter{}, err
 	}
-	before, err := queryTime(query, "before")
+	before, err := queryBound(query, "before")
 	if err != nil {
 		return store.Filter{}, err
 	}
-	filter.Changed = store.Span{After: after, Before: before}
+	filter.Changed = store.Span{After: after.Time, Before: before.Time}
+	filter.Revisions = store.RevisionSpan{After: after.Revision,
+		Before: before.Revision}
 	filter.IncludeSuperseded = includeSuperseded
-	filter.EntriesOnly = entriesOnly
+	filter.IncludeChat = includeChat
 	filter.Limit = int(limit)
-	filter.Offset = int(offset)
-	if values := query["view"]; len(values) != 0 {
-		switch values[0] {
-		case "flat":
-		case "topics":
-			filter.View = store.ViewTopics
-		default:
-			return store.Filter{}, fmt.Errorf(
-				"view must be 'flat' or 'topics'")
-		}
-	}
-	if values := query["order-by"]; len(values) != 0 {
-		switch values[0] {
-		case "modified":
-		case "created":
-			filter.OrderByCreation = true
-		default:
-			return store.Filter{}, fmt.Errorf(
-				"order-by must be 'created' or 'modified'")
-		}
-	}
 	return filter, nil
 }
 
@@ -312,10 +286,10 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.Under = &under
 	}
-	result, err := h.store.Search(r.Context(), access, workspace.ID, filter)
+	page, err := h.store.Search(r.Context(), access, workspace.ID, filter)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, page)
 }

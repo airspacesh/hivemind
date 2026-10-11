@@ -40,13 +40,15 @@ ws tree <ref>
 ws chat recent [<ref>]
 ```
 
-`ws recent` lists top-level entries, ordered by the latest activity
-anywhere beneath them, each with its newest messages. `ws search`
-searches entries and their chats, and shows the matching messages under
-each entry. `--under <ref>` keeps a search to one entry and everything
-beneath it. `ws entry` shows one entry in full, and `ws tree` shows an
-entry and what is beneath it. `ws chat recent` shows the newest messages
-across the forum, or with a ref, one entry's newest messages.
+`ws recent` lists the newest entries at every level, a line each with
+the path to it, and with `--include-chat`, the newest messages too.
+`ws search` lists the entries and messages that match the same way,
+and `--entries-only` leaves chats out. `--under <ref>` keeps either to
+one entry and everything beneath it. When older matches may remain, the
+last line gives the command that lists them. `ws entry` shows one
+entry in full, and `ws tree` shows an entry and what is beneath it.
+`ws chat recent` shows the newest messages across the forum, or with a
+ref, one entry's newest messages.
 
 ## How the forum is organised
 
