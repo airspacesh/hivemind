@@ -726,3 +726,78 @@ func TestSearchKeepsToASpan(t *testing.T) {
 		})
 	}
 }
+
+// A search under an entry keeps to its subtree in a big workspace,
+// whether the subtree is small enough to read whole or so large the
+// search walks the newest changes first.
+func TestSearchUnderASubtreeInABigWorkspace(t *testing.T) {
+	store := openTestStore(t)
+	root := mustAdd(t, store, "Heron nest", "", nil)
+	child := addTo(t, store, "default", api.AddEntryRequest{
+		Project: "pond", Subject: "Reeds",
+		Links: []api.Link{link(api.ParentLink, root.Ref)}})
+	grandchild := addTo(t, store, "default", api.AddEntryRequest{
+		Project: "pond", Subject: "Heron eggs",
+		Links: []api.Link{link(api.ParentLink, child.Ref)}})
+	postAs(t, store, "ines", child.Ref, "a heron landed")
+	postAs(t, store, "ken", root.Ref, "no birds today")
+	outside := mustAdd(t, store, "Heron elsewhere", "", nil)
+	postAs(t, store, "ines", outside.Ref, "a heron again")
+	addFiller(t, store)
+
+	shown := func(result api.SearchResult) map[string][]string {
+		bodies := map[string][]string{}
+		for _, entry := range result.Entries {
+			bodies[entry.Subject] = messageBodies(entry.MatchingMessages)
+		}
+		return bodies
+	}
+	under := store.mustKey(root.Ref)
+	heron := []FieldCond{{Value: "heron"}}
+	tests := []struct {
+		name   string
+		filter Filter
+		want   []api.Ref
+		shown  map[string][]string
+	}{
+		{"text",
+			Filter{Under: &under, Content: heron},
+			[]api.Ref{child.Ref, grandchild.Ref, root.Ref},
+			map[string][]string{"Reeds": {"a heron landed"},
+				"Heron eggs": nil, "Heron nest": nil}},
+		{"entries only",
+			Filter{Under: &under, Content: heron, EntriesOnly: true},
+			[]api.Ref{grandchild.Ref, root.Ref},
+			map[string][]string{"Heron eggs": nil, "Heron nest": nil}},
+		{"origin",
+			Filter{Under: &under, OriginUser: []FieldCond{{Value: "ines"}}},
+			[]api.Ref{child.Ref},
+			map[string][]string{"Reeds": {"a heron landed"}}},
+		{"nothing matches",
+			Filter{Under: &under, OriginHost: []FieldCond{{Value: "h"}}},
+			nil, map[string][]string{}},
+	}
+	run := func(t *testing.T) {
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				result := runSearch(t, store, test.filter)
+				assertEntryRefs(t, result.Entries, test.want...)
+				if got := shown(result); !reflect.DeepEqual(got, test.shown) {
+					t.Fatalf("matching messages = %q, want %q", got,
+						test.shown)
+				}
+			})
+		}
+	}
+	t.Run("small subtree", run)
+
+	if _, err := store.db.Exec(`
+		INSERT INTO entry_links (source_workspace_id, source_id, name,
+			target_workspace_id, target_id)
+		SELECT workspace_id, id, 'parent', workspace_id, ?1 FROM entries
+		WHERE workspace_id = ?2 AND subject = '0'`,
+		under.ID, under.Workspace); err != nil {
+		t.Fatalf("moving the filler under the root: %v", err)
+	}
+	t.Run("large subtree", run)
+}

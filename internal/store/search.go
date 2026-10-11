@@ -353,8 +353,8 @@ func lowerASCII(value string) string {
 	return string(folded)
 }
 
-// joinedFrom is the FROM clause of a search: every entry, or with
-// under, the entries of that subtree.
+// joinedFrom is the FROM clause of the topics view, which reads every
+// entry, or with under, the entries of that subtree.
 func joinedFrom(under *Key) (string, []any) {
 	if under == nil {
 		return `entries AS e`, nil
@@ -412,7 +412,6 @@ func (s *Store) Search(
 	if err != nil {
 		return api.SearchResult{}, err
 	}
-	from, fromArgs := joinedFrom(filter.Under)
 
 	v, err := s.begin(ctx, access, true)
 	if err != nil {
@@ -426,11 +425,11 @@ func (s *Store) Search(
 	}
 	var result api.SearchResult
 	if filter.View == ViewTopics {
+		from, fromArgs := joinedFrom(filter.Under)
 		result, err = v.searchTopics(ctx, workspace, filter, from, fromArgs,
 			where, topicWalkRows(filter))
 	} else {
-		result, err = v.searchFlat(ctx, workspace, filter, from, fromArgs,
-			where)
+		result, err = v.searchFlat(ctx, workspace, filter, where)
 	}
 	if err != nil {
 		return api.SearchResult{}, err
@@ -494,10 +493,12 @@ func (builder *whereBuilder) keepTo(workspace int64, filter Filter) {
 	if !filter.IncludeSuperseded {
 		builder.clauses = append(builder.clauses, `NOT `+supersededClause)
 	}
+	builder.addUnder(filter.Under)
 }
 
 // candidateSet holds the entries, by id, and the messages, by
-// post_order, that a search may match, as the indexes found them.
+// post_order, that a search may match, as the indexes or the subtree
+// it keeps to found them.
 type candidateSet struct {
 	entries  []int64
 	messages []int64
@@ -507,6 +508,21 @@ type candidateSet struct {
 // walked.
 func (c candidateSet) readCost() int {
 	return candidateReadCost * (len(c.entries) + len(c.messages))
+}
+
+// within keeps the candidates that are also among others, which come
+// sorted.
+func (c candidateSet) within(others candidateSet) candidateSet {
+	keep := func(ids, sorted []int64) []int64 {
+		return slices.DeleteFunc(ids, func(id int64) bool {
+			_, found := slices.BinarySearch(sorted, id)
+			return !found
+		})
+	}
+	return candidateSet{
+		entries:  keep(c.entries, others.entries),
+		messages: keep(c.messages, others.messages),
+	}
 }
 
 // matchScope narrows the matches a flat search reads.
@@ -534,8 +550,6 @@ const eachChat = `CROSS JOIN entry_messages AS m
 func matchQuery(
 	workspace int64,
 	filter Filter,
-	from string,
-	fromArgs []any,
 	where whereBuilder,
 	scope matchScope,
 ) (string, []any, error) {
@@ -549,22 +563,21 @@ func matchQuery(
 		entryKey, messageKey = `e.created_utc`, `e.created_utc`
 		chat = eachChat
 	}
-	entryFrom, entryFromArgs := from, fromArgs
-	messageFrom := from + ` ` + chat + `
+	entryFrom := `entries AS e`
+	var entryFromArgs []any
+	messageFrom := `entries AS e ` + chat + `
 		ON m.workspace_id = e.workspace_id AND m.entry_id = e.id`
-	messageFromArgs := fromArgs
+	var messageFromArgs []any
 	if scope.indexed {
 		// Reading the candidates first, by their keys, keeps SQLite
 		// from walking every entry and message to keep them in order.
-		entryFrom = `json_each(?) AS candidate CROSS JOIN ` + from
-		entryFromArgs = append([]any{idsJSON(scope.candidates.entries)},
-			fromArgs...)
+		entryFrom = `json_each(?) AS candidate CROSS JOIN entries AS e`
+		entryFromArgs = []any{idsJSON(scope.candidates.entries)}
 		where.clauses = append(where.clauses, `e.id = candidate.value`)
 		messageFrom = `json_each(?) AS candidate
 			CROSS JOIN entry_messages AS m ON m.post_order = candidate.value
-			CROSS JOIN ` + from
-		messageFromArgs = append([]any{idsJSON(scope.candidates.messages)},
-			fromArgs...)
+			CROSS JOIN entries AS e`
+		messageFromArgs = []any{idsJSON(scope.candidates.messages)}
 	}
 	if scope.since != "" {
 		where.clauses = append(where.clauses, entryKey+` >= ?`)
@@ -688,11 +701,48 @@ func (v view) findOriginCandidates(
 	return found, true, nil
 }
 
-// findCandidates lists the entries and messages of a workspace a
-// search may match, as the text and origin user indexes find them. It
-// reports false when neither index narrows the search to at most limit
-// rows of each.
-func (v view) findCandidates(
+// findSubtreeCandidates lists the entries of the subtree a search keeps
+// to, and when the search covers chat, the messages in their chats. The
+// candidates come sorted. It reports false when the search keeps to no
+// subtree, or when a lookup finds more than limit rows.
+func (v view) findSubtreeCandidates(
+	ctx context.Context, workspace int64, filter Filter, limit int,
+) (candidateSet, bool, error) {
+	if filter.Under == nil {
+		return candidateSet{}, false, nil
+	}
+
+	var found candidateSet
+	var ok bool
+	var err error
+	found.entries, ok, err = v.readCandidates(ctx, `
+		WITH RECURSIVE `+subtreeCTE("subtree")+`
+		SELECT id FROM subtree WHERE workspace_id = ? LIMIT ?`,
+		limit, filter.Under.Workspace, filter.Under.ID, workspace)
+	if err != nil {
+		return candidateSet{}, false, fmt.Errorf(
+			"listing the subtree of a search: %w", err)
+	}
+	if !ok {
+		return candidateSet{}, false, nil
+	}
+	if searchesChat(filter) {
+		found.messages, ok, err = v.readChatCandidates(ctx, workspace,
+			found.entries, limit)
+		if err != nil || !ok {
+			return candidateSet{}, false, err
+		}
+	}
+	slices.Sort(found.entries)
+	slices.Sort(found.messages)
+	return found, true, nil
+}
+
+// findIndexedCandidates lists the entries and messages of a workspace
+// a search may match, as the text and origin user indexes find them.
+// It reports false when neither index narrows the search to at most
+// limit rows of each.
+func (v view) findIndexedCandidates(
 	ctx context.Context, workspace int64, filter Filter, limit int,
 ) (candidateSet, bool, error) {
 	text, textFound, err := v.findTextCandidates(ctx, workspace, filter,
@@ -712,16 +762,40 @@ func (v view) findCandidates(
 		return origin, true, nil
 	}
 	// Each index finds every match, so the matches are among both.
-	within := func(ids, sorted []int64) []int64 {
-		return slices.DeleteFunc(ids, func(id int64) bool {
-			_, found := slices.BinarySearch(sorted, id)
-			return !found
-		})
+	return text.within(origin), true, nil
+}
+
+// findCandidates lists the entries and messages of a workspace a
+// search may match, as the indexes and the subtree it keeps to find
+// them. It reports false when none of them narrows the search to at
+// most limit rows of each.
+func (v view) findCandidates(
+	ctx context.Context, workspace int64, filter Filter, limit int,
+) (candidateSet, bool, error) {
+	indexed, indexedFound, err := v.findIndexedCandidates(ctx, workspace,
+		filter, limit)
+	if err != nil {
+		return candidateSet{}, false, err
 	}
-	return candidateSet{
-		entries:  within(text.entries, origin.entries),
-		messages: within(text.messages, origin.messages),
-	}, true, nil
+	// Listing the subtree to narrow the candidates down should cost no
+	// more than reading them.
+	subtreeLimit := limit
+	if indexedFound {
+		subtreeLimit = min(limit, indexed.readCost())
+	}
+	subtree, subtreeFound, err := v.findSubtreeCandidates(ctx, workspace,
+		filter, subtreeLimit)
+	if err != nil {
+		return candidateSet{}, false, err
+	}
+	if !subtreeFound {
+		return indexed, indexedFound, nil
+	}
+	if !indexedFound {
+		return subtree, true, nil
+	}
+	// The matches lie in the subtree as well.
+	return indexed.within(subtree), true, nil
 }
 
 // match is an entry a search matched, and the time of its newest
@@ -738,14 +812,11 @@ func (v view) rankMatches(
 	ctx context.Context,
 	workspace int64,
 	filter Filter,
-	from string,
-	fromArgs []any,
 	where whereBuilder,
 	scope matchScope,
 	count int,
 ) ([]match, error) {
-	query, args, err := matchQuery(workspace, filter, from, fromArgs, where,
-		scope)
+	query, args, err := matchQuery(workspace, filter, where, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -894,6 +965,60 @@ func (v view) matchedEntries(
 	return matched, nil
 }
 
+// rankFlat reads a flat search's matches, newest first, until it has
+// count entries, as rankMatches does, choosing what to read by what it
+// should cost.
+func (v view) rankFlat(
+	ctx context.Context,
+	workspace int64,
+	filter Filter,
+	where whereBuilder,
+	count int,
+) ([]match, error) {
+	walked := changesBeforeIndex + changesPerMatch*count
+	// Reading every candidate in a small subtree costs less than the
+	// walk.
+	subtree, found, err := v.findSubtreeCandidates(ctx, workspace, filter,
+		walked/candidateReadCost)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return v.rankMatches(ctx, workspace, filter, where,
+			matchScope{indexed: true, candidates: subtree}, count)
+	}
+
+	since, err := v.walkStart(ctx, workspace, filter, walked)
+	if err != nil {
+		return nil, err
+	}
+	ranked, err := v.rankMatches(ctx, workspace, filter, where,
+		matchScope{since: since}, count)
+	if err != nil {
+		return nil, err
+	}
+	if len(ranked) >= count || since == "" {
+		return ranked, nil
+	}
+
+	// The newest changes held too few matches for a page, so the
+	// search reads the candidates the indexes find, unless walking on
+	// to the oldest should cost less.
+	candidates, found, err := v.findCandidates(ctx, workspace, filter,
+		candidatesPerChange*walked)
+	if err != nil {
+		return nil, err
+	}
+	scope := matchScope{}
+	// At the rate the walk found matches, it should find the rest
+	// within (count-len(ranked))*walked/len(ranked) more changes.
+	if found && candidates.readCost()*len(ranked) <
+		(count-len(ranked))*walked {
+		scope = matchScope{indexed: true, candidates: candidates}
+	}
+	return v.rankMatches(ctx, workspace, filter, where, scope, count)
+}
+
 // searchFlat lists a page of the entries a search matches, and whether
 // more follow. Each entry ranks by its newest match, which is its own
 // change or creation time, or the change time of a matching message in
@@ -903,42 +1028,12 @@ func (v view) searchFlat(
 	ctx context.Context,
 	workspace int64,
 	filter Filter,
-	from string,
-	fromArgs []any,
 	where whereBuilder,
 ) (api.SearchResult, error) {
-	count := filter.Offset + filter.Limit + 1
-	walked := changesBeforeIndex + changesPerMatch*count
-	since, err := v.walkStart(ctx, workspace, filter, walked)
+	ranked, err := v.rankFlat(ctx, workspace, filter, where,
+		filter.Offset+filter.Limit+1)
 	if err != nil {
 		return api.SearchResult{}, err
-	}
-	ranked, err := v.rankMatches(ctx, workspace, filter, from, fromArgs, where,
-		matchScope{since: since}, count)
-	if err != nil {
-		return api.SearchResult{}, err
-	}
-	// The newest changes held too few matches for a page, so the
-	// search reads the candidates the indexes find, unless walking on
-	// to the oldest should cost less.
-	if len(ranked) < count && since != "" {
-		candidates, found, err := v.findCandidates(ctx, workspace, filter,
-			candidatesPerChange*walked)
-		if err != nil {
-			return api.SearchResult{}, err
-		}
-		scope := matchScope{}
-		// At the rate the walk found matches, it should find the rest
-		// within (count-len(ranked))*walked/len(ranked) more changes.
-		if found && candidates.readCost()*len(ranked) <
-			(count-len(ranked))*walked {
-			scope = matchScope{indexed: true, candidates: candidates}
-		}
-		ranked, err = v.rankMatches(ctx, workspace, filter, from, fromArgs,
-			where, scope, count)
-		if err != nil {
-			return api.SearchResult{}, err
-		}
 	}
 
 	ids := make([]int64, 0, len(ranked))

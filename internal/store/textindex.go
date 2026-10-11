@@ -118,13 +118,10 @@ func (v view) findTextCandidates(
 		// A matching message's entry holds the subject and body text,
 		// so with no text for the messages, the messages in the chats
 		// of the entries found are the candidates.
-		found.messages, ok, err = v.readCandidates(ctx, `
-			SELECT m.post_order FROM json_each(?) AS candidate `+eachChat+`
-				ON m.workspace_id = ? AND m.entry_id = candidate.value
-			LIMIT ?`, limit, idsJSON(found.entries), workspace)
+		found.messages, ok, err = v.readChatCandidates(ctx, workspace,
+			found.entries, limit)
 		if err != nil {
-			return candidateSet{}, false, fmt.Errorf(
-				"reading the chats of search candidates: %w", err)
+			return candidateSet{}, false, err
 		}
 	} else {
 		found.messages, ok, err = v.lookUpText(ctx, `
@@ -159,6 +156,23 @@ func (v view) lookUpText(
 		strings.Join(query, " AND "), first, first|0xffffffff)
 	if err != nil {
 		return nil, false, fmt.Errorf("looking up search text: %w", err)
+	}
+	return ids, ok, nil
+}
+
+// readChatCandidates lists the messages in the chats of the given
+// entries of a workspace, by post_order. It reports false when there
+// are more than limit.
+func (v view) readChatCandidates(
+	ctx context.Context, workspace int64, entries []int64, limit int,
+) ([]int64, bool, error) {
+	ids, ok, err := v.readCandidates(ctx, `
+		SELECT m.post_order FROM json_each(?) AS candidate `+eachChat+`
+			ON m.workspace_id = ? AND m.entry_id = candidate.value
+		LIMIT ?`, limit, idsJSON(entries), workspace)
+	if err != nil {
+		return nil, false, fmt.Errorf(
+			"reading the chats of search candidates: %w", err)
 	}
 	return ids, ok, nil
 }
