@@ -661,7 +661,8 @@ func shellWords(command string) ([]string, error) {
 }
 
 // The command a footer names asks for the page before the oldest match
-// shown, with the same text, filters and bounds.
+// shown, with the same text, filters and bounds, and gives a time bound
+// in local time with its offset.
 func TestFooterAsksForTheNextPage(t *testing.T) {
 	config, queries := listingServer(t, api.MatchPage{
 		Matches: []api.Match{{Post: api.Post{
@@ -669,32 +670,40 @@ func TestFooterAsksForTheNextPage(t *testing.T) {
 			Revision: 812345}},
 		More: true,
 	})
-	first := ws(t, config, "search", "duck's pond", "--posts-only",
-		"--after", "2026-10-09T04:00:00Z", "--no-project", "x", "-n", "1",
-		"--include-superseded")
-	lines := strings.Split(strings.TrimSpace(first.stdout), "\n")
-	footer, ok := strings.CutPrefix(lines[len(lines)-1], "Next: ws ")
-	if !first.ok || !ok {
-		t.Fatalf("search printed no footer: %+v", first)
-	}
-	words, err := shellWords(strings.TrimSuffix(footer,
-		" (more older matches)"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if next := ws(t, config, words...); !next.ok {
-		t.Fatalf("the footer's command failed: %+v", next)
-	}
+	env := []string{"WORKSTREAM_CONFIG=" + config, "TZ=Asia/Singapore"}
+	for _, after := range []string{"2026-10-09T04:00:00.25Z", "2h"} {
+		first := runBinary(t, wsBinary, env, "search", "duck's pond",
+			"--posts-only", "--after", after, "--no-project", "x", "-n",
+			"1", "--include-superseded")
+		lines := strings.Split(strings.TrimSpace(first.stdout), "\n")
+		footer, ok := strings.CutPrefix(lines[len(lines)-1], "Next: ws ")
+		if !first.ok || !ok {
+			t.Fatalf("search printed no footer: %+v", first)
+		}
+		footer = strings.TrimSuffix(footer, " (more older matches)")
+		if !regexp.MustCompile(`--after \S*\+08:00 `).MatchString(footer) {
+			t.Fatalf("the footer gave --after %s as %q, want local time",
+				after, footer)
+		}
+		words, err := shellWords(footer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if next := runBinary(t, wsBinary, env, words...); !next.ok {
+			t.Fatalf("the footer's command failed: %+v", next)
+		}
 
-	sent := queries()
-	if sent[1].Get("before") != "@812345" {
-		t.Fatalf("the next page sent before %q, want @812345",
-			sent[1].Get("before"))
-	}
-	sent[1].Del("before")
-	if !reflect.DeepEqual(sent[0], sent[1]) {
-		t.Fatalf("the next page sent %v, want %v and before", sent[1],
-			sent[0])
+		all := queries()
+		sent := all[len(all)-2:]
+		if sent[1].Get("before") != "@812345" {
+			t.Fatalf("the next page sent before %q, want @812345",
+				sent[1].Get("before"))
+		}
+		sent[1].Del("before")
+		if !reflect.DeepEqual(sent[0], sent[1]) {
+			t.Fatalf("the next page sent %v, want %v and before", sent[1],
+				sent[0])
+		}
 	}
 }
 
@@ -1150,7 +1159,7 @@ func TestChangesShowEachAtItsLatestChange(t *testing.T) {
 }
 
 // A date, or a date and time, reads in local time, a span counts back
-// from now, and @ names a revision.
+// from now to a whole second, and @ names a revision.
 func TestBoundFlagsReadLocalDatesSpansAndRevisions(t *testing.T) {
 	now := time.Date(2026, 10, 11, 9, 30, 0, 0, time.UTC)
 	for value, want := range map[string]api.Bound{
@@ -1176,6 +1185,13 @@ func TestBoundFlagsReadLocalDatesSpansAndRevisions(t *testing.T) {
 		"@0", "@", "@-3", "@12a"} {
 		if _, err := parseBoundFlag("--after", value, now); err == nil {
 			t.Errorf("%q was accepted", value)
+		}
+	}
+	for _, value := range []string{"2d", "90m"} {
+		got, err := parseBoundFlag("--after", value,
+			now.Add(999*time.Millisecond))
+		if err != nil || got.Time.Nanosecond() != 0 {
+			t.Errorf("%q = %v, %v, want a whole second", value, got, err)
 		}
 	}
 }

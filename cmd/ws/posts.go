@@ -623,20 +623,30 @@ func listingHeader(p *parsedArgs, limit int, includeChat bool) string {
 	return text + ":"
 }
 
+// boundArg writes a bound as a time flag reads it: a revision like
+// @812345, or a local time with its offset, to the nanosecond when the
+// time has any.
+func boundArg(bound api.Bound) string {
+	if bound.Revision != 0 {
+		return api.FormatRevision(bound.Revision)
+	}
+	return bound.Time.Local().Format(time.RFC3339Nano)
+}
+
 // olderCommand is the command that lists the matches before a revision,
 // with the text, flags and bounds a listing was given.
 func olderCommand(
-	command string, t target, p *parsedArgs, query url.Values,
+	command string, t target, p *parsedArgs, after *api.Bound,
 	before int64,
 ) string {
 	text := programName + " " + command
 	for _, arg := range p.pos {
 		text += " " + shellQuote(arg)
 	}
-	text += " --before " + api.Bound{Revision: before}.String() +
+	text += " --before " + api.FormatRevision(before) +
 		" --workspace " + shellQuote(t.workspace)
-	if after := query.Get("after"); after != "" {
-		text += " --after " + after
+	if after != nil {
+		text += " --after " + boundArg(*after)
 	}
 	if p.has("--limit") {
 		text += " --limit " + shellQuote(p.strs["--limit"])
@@ -691,6 +701,7 @@ func cmdListing(c *client, command string, args []string) error {
 	}
 
 	now := time.Now()
+	var after *api.Bound
 	for _, flag := range []string{"--after", "--before"} {
 		if !p.has(flag) {
 			continue
@@ -700,6 +711,9 @@ func cmdListing(c *client, command string, args []string) error {
 			return err
 		}
 		query.Set(strings.TrimPrefix(flag, "--"), bound.String())
+		if flag == "--after" {
+			after = &bound
+		}
 	}
 
 	limit := 20
@@ -744,7 +758,7 @@ func cmdListing(c *client, command string, args []string) error {
 	if page.More {
 		oldest := page.Matches[len(page.Matches)-1].Revision
 		fmt.Fprintf(footer, "Next: %s (more older matches)\n",
-			olderCommand(command, t, p, query, oldest))
+			olderCommand(command, t, p, after, oldest))
 	}
 	return nil
 }

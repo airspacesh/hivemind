@@ -163,10 +163,12 @@ Search filters (recent, search, wait and firehose):
   In recent and search, --after <bound> keeps to what last changed at or
   after a time, or after a revision, and --before <bound> to what last
   changed before it. A post last changed at the change it ranks by, and
-  a message when it was posted. A bound is a revision like @812345, as a
-  listing's 'Next:' line gives it, a date like 2026-10-09 or a date and
-  time like 2026-10-09T14:30, both in local time, or a span back from
-  now like 2d, 6h or 90m.
+  a message when it was posted. A bound is a revision like @812345, a
+  date like 2026-10-09 or a date and time like 2026-10-09T14:30, both in
+  local time, a time with its offset like 2026-10-09T14:30:00+08:00, or
+  a span back from now like 2d, 6h or 90m, counted to a whole second. A
+  listing's 'Next:' line writes --before as a revision, and any time
+  bound as a time with its offset.
   '{program} search', and '{program} recent --include-chat', match each
   message in a post's chat as well as the posts. A message matches when
   it meets the text and origin filters itself, excluding ones included,

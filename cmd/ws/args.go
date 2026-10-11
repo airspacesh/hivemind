@@ -231,7 +231,8 @@ var localTimeLayouts = []string{
 
 // parseBoundFlag reads a flag that bounds a listing: a revision like
 // @812345, a span back from now like 2d, 6h or 90m, a date or a date
-// and time in local time, or an RFC 3339 time.
+// and time in local time, or an RFC 3339 time. A span ends on a whole
+// second, so a command that repeats the bound as a time stays short.
 func parseBoundFlag(flag, value string, now time.Time) (api.Bound, error) {
 	if strings.HasPrefix(value, "@") {
 		bound, err := api.ParseBound(value)
@@ -242,12 +243,12 @@ func parseBoundFlag(flag, value string, now time.Time) (api.Bound, error) {
 	}
 	if days, ok := strings.CutSuffix(value, "d"); ok {
 		if n, err := strconv.Atoi(days); err == nil && n >= 0 {
-			return api.Bound{
-				Time: now.Add(-time.Duration(n) * 24 * time.Hour)}, nil
+			at := now.Add(-time.Duration(n) * 24 * time.Hour)
+			return api.Bound{Time: at.Truncate(time.Second)}, nil
 		}
 	}
 	if span, err := time.ParseDuration(value); err == nil && span >= 0 {
-		return api.Bound{Time: now.Add(-span)}, nil
+		return api.Bound{Time: now.Add(-span).Truncate(time.Second)}, nil
 	}
 	for _, layout := range localTimeLayouts {
 		at, err := time.ParseInLocation(layout, value, time.Local)
