@@ -37,7 +37,7 @@ func readChat(
 ) api.ChatPage {
 	t.Helper()
 	page, err := store.Messages(context.Background(), store.mustKey(entry),
-		since, limit)
+		since, Filter{}, nil, limit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,8 +154,49 @@ func TestChatReadsPageAfterTheCursor(t *testing.T) {
 	}
 	if _, err := store.Messages(context.Background(),
 		Key{Workspace: workspaceID(t, store, "default"), ID: 99},
-		0, 2); !errors.Is(err, ErrEntryNotFound) {
+		0, Filter{}, nil, 2); !errors.Is(err, ErrEntryNotFound) {
 		t.Fatalf("reading a missing entry's chat = %v", err)
+	}
+}
+
+func TestFilteredChatCursorPassesWhatDoesNotMatch(t *testing.T) {
+	store := openTestStore(t)
+	entry := mustAdd(t, store, "thread", "", nil)
+	lead := api.Origin{User: testUser, ClaudeSession: "lead"}
+	postFrom(t, store, entry.Ref, "asked", lead)
+	postFrom(t, store, entry.Ref, "quack", api.Origin{User: "heron"})
+	postFrom(t, store, entry.Ref, "asked again", lead)
+	postFrom(t, store, entry.Ref, "quack quack", api.Origin{User: testUser})
+	postFrom(t, store, entry.Ref, "noted", lead)
+	notLead := &OriginKey{User: testUser, ClaudeSession: "lead"}
+	quack := Filter{Content: []FieldCond{{Value: "QUACK"}}}
+
+	for _, test := range []struct {
+		since   int64
+		filter  Filter
+		exclude *OriginKey
+		limit   int
+		want    string
+	}{
+		{0, Filter{}, notLead, 10,
+			"e1-m2:quack e1-m4:quack quack cursor=5 remaining=0"},
+		{0, Filter{}, notLead, 1, "e1-m2:quack cursor=2 remaining=3"},
+		{2, Filter{}, notLead, 1, "e1-m4:quack quack cursor=4 remaining=1"},
+		{4, Filter{}, notLead, 1, " cursor=5 remaining=0"},
+		{0, quack, &OriginKey{User: testUser}, 10,
+			"e1-m2:quack cursor=5 remaining=0"},
+		{9, quack, nil, 10, " cursor=9 remaining=0"},
+	} {
+		page, err := store.Messages(context.Background(),
+			store.mustKey(entry.Ref), test.since, test.filter, test.exclude,
+			test.limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := chatText(page); got != test.want {
+			t.Fatalf("since %d excluding %+v limit %d = %q, want %q",
+				test.since, test.exclude, test.limit, got, test.want)
+		}
 	}
 }
 

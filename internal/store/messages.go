@@ -181,13 +181,16 @@ func (s *Store) EditMessage(
 }
 
 // readChatPage reads the messages a query selects into a page, oldest
-// first, then counts the messages after the last one read, or after
-// since when none are.
+// first. The query reads at most limit messages after since, so a full
+// page ends at its last message, and a page short of it has checked
+// every message after since, so its cursor passes them all. Remaining
+// counts the messages after the cursor.
 func (s *Store) readChatPage(
 	ctx context.Context,
 	tx *sql.Tx,
 	entry Key,
 	since int64,
+	limit int,
 	query string,
 	args ...any,
 ) (api.ChatPage, error) {
@@ -196,7 +199,7 @@ func (s *Store) readChatPage(
 		return api.ChatPage{}, fmt.Errorf("reading chat: %w", err)
 	}
 	defer rows.Close()
-	page := api.ChatPage{Messages: []api.Message{}, Cursor: since}
+	page := api.ChatPage{Messages: []api.Message{}}
 	for rows.Next() {
 		message, err := s.scanMessage(rows)
 		if err != nil {
@@ -210,10 +213,20 @@ func (s *Store) readChatPage(
 	slices.SortFunc(page.Messages, func(a, b api.Message) int {
 		return cmp.Compare(a.Number, b.Number)
 	})
-	if len(page.Messages) > 0 {
-		page.Cursor = page.Messages[len(page.Messages)-1].Number
-	}
 
+	if len(page.Messages) < limit {
+		var last int64
+		if err := tx.QueryRowContext(ctx, `
+			SELECT coalesce(max(id), 0) FROM entry_messages
+			WHERE workspace_id = ? AND entry_id = ?`,
+			entry.Workspace, entry.ID,
+		).Scan(&last); err != nil {
+			return api.ChatPage{}, fmt.Errorf("reading chat: %w", err)
+		}
+		page.Cursor = max(since, last)
+		return page, nil
+	}
+	page.Cursor = page.Messages[len(page.Messages)-1].Number
 	if err := tx.QueryRowContext(ctx, `
 		SELECT count(*) FROM entry_messages
 		WHERE workspace_id = ? AND entry_id = ? AND id > ?`,
@@ -225,10 +238,30 @@ func (s *Store) readChatPage(
 }
 
 // Messages returns up to limit messages of an entry's chat after the
-// cursor since, oldest first.
+// cursor since that match a filter, oldest first, leaving out those
+// whose origin has the key exclude, when there is one. The filter's
+// text matches each message.
+//
+// The page's cursor is the highest message number the read checked.
+// Every message up to it is in the page or did not match, so a read
+// from the cursor misses none, even when the page is empty.
 func (s *Store) Messages(
-	ctx context.Context, entry Key, since int64, limit int,
+	ctx context.Context,
+	entry Key,
+	since int64,
+	filter Filter,
+	exclude *OriginKey,
+	limit int,
 ) (api.ChatPage, error) {
+	where, err := buildMessageWhere(filter)
+	if err != nil {
+		return api.ChatPage{}, err
+	}
+	where.excludeOrigin("m", exclude)
+	where.clauses = append(where.clauses, `m.workspace_id = ?`,
+		`m.entry_id = ?`, `m.id > ?`)
+	where.args = append(where.args, entry.Workspace, entry.ID, since)
+
 	tx, err := s.reads.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return api.ChatPage{}, fmt.Errorf("reading chat: %w", err)
@@ -238,11 +271,12 @@ func (s *Store) Messages(
 	if err := v.checkEntryExists(ctx, entry); err != nil {
 		return api.ChatPage{}, err
 	}
-	return s.readChatPage(ctx, tx, entry, since, `
-		SELECT `+messageColumns+` FROM entry_messages AS m
-		WHERE m.workspace_id = ? AND m.entry_id = ? AND m.id > ?
-		ORDER BY m.id LIMIT ?`,
-		entry.Workspace, entry.ID, since, limit)
+	return s.readChatPage(ctx, tx, entry, since, limit, `
+		SELECT `+messageColumns+`
+		FROM entry_messages AS m CROSS JOIN entries AS e
+			ON e.workspace_id = m.workspace_id AND e.id = m.entry_id`+
+		where.sql()+`
+		ORDER BY m.id LIMIT ?`, append(where.args, limit)...)
 }
 
 // LatestMessages returns the newest count messages of an entry's chat,
@@ -259,7 +293,7 @@ func (s *Store) LatestMessages(
 	if err := v.checkEntryExists(ctx, entry); err != nil {
 		return api.ChatPage{}, err
 	}
-	return s.readChatPage(ctx, tx, entry, 0, `
+	return s.readChatPage(ctx, tx, entry, 0, count, `
 		SELECT `+messageColumns+` FROM entry_messages AS m
 		WHERE m.workspace_id = ? AND m.entry_id = ?
 		ORDER BY m.id DESC LIMIT ?`,

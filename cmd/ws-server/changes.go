@@ -13,11 +13,12 @@ const (
 )
 
 // changes returns a page of a workspace's changes after the revision
-// since, or an empty page whose cursor is the latest revision, given
-// since=now.
+// since that match the query's conditions, or an empty page whose
+// cursor is the latest revision, given since=now.
 func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
-	query, ok := parseQueryOf(w, r, "since", "limit")
-	if !ok {
+	query, ok := parseQuery(w, r)
+	if !ok || !validateQuery(w, query, repeatedQueryParameters,
+		changesQueryParameters) {
 		return
 	}
 	text := query.Get("since")
@@ -34,6 +35,16 @@ func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
+	filter, err := conditionsFilter(query)
+	if err != nil {
+		writeBadRequest(w, err.Error())
+		return
+	}
+	exclude, err := excludedOrigin(query)
+	if err != nil {
+		writeBadRequest(w, err.Error())
+		return
+	}
 	access, ok := h.access(w, r)
 	if !ok {
 		return
@@ -42,6 +53,13 @@ func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if values := query["under"]; len(values) != 0 {
+		under, ok := h.entryKey(w, access, values[0])
+		if !ok {
+			return
+		}
+		filter.Under = &under
+	}
 
 	var page api.ChangesPage
 	if now {
@@ -49,7 +67,7 @@ func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 		page.Cursor, err = h.store.LatestRevision(r.Context())
 	} else {
 		page, err = h.store.Changes(r.Context(), access, workspace.ID,
-			since, int(limit))
+			since, filter, exclude, int(limit))
 	}
 	if err != nil {
 		writeStoreError(w, err)

@@ -222,6 +222,23 @@ func buildWhere(filter Filter) (whereBuilder, error) {
 	return builder, nil
 }
 
+// buildMessageWhere builds the where clause a message m in the chat of
+// entry e meets when it matches a filter. The filter's text matches the
+// message, and the rest of the filter matches its entry.
+func buildMessageWhere(filter Filter) (whereBuilder, error) {
+	entryFilter := filter
+	entryFilter.Content = nil
+	where, err := buildWhere(entryFilter)
+	if err != nil {
+		return whereBuilder{}, err
+	}
+	if err := where.addField("content", "lower(m.body)",
+		matchAnywhere(filter.Content)); err != nil {
+		return whereBuilder{}, err
+	}
+	return where, nil
+}
+
 func (builder whereBuilder) sql() string {
 	if len(builder.clauses) == 0 {
 		return ""
@@ -436,14 +453,8 @@ func matchQuery(
 		return query + ` ORDER BY at DESC`, args, nil
 	}
 
-	entryFilter := filter
-	entryFilter.Content = nil
-	messageWhere, err := buildWhere(entryFilter)
+	messageWhere, err := buildMessageWhere(filter)
 	if err != nil {
-		return "", nil, err
-	}
-	if err := messageWhere.addField("content", "lower(m.body)",
-		matchAnywhere(filter.Content)); err != nil {
 		return "", nil, err
 	}
 	messageWhere.keepTo(workspace, filter)

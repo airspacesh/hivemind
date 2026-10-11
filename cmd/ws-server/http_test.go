@@ -414,6 +414,42 @@ func TestChatReadsOverHTTP(t *testing.T) {
 	}
 }
 
+// An empty session on the wire names the changes written outside a
+// session, not every change by the user.
+func TestExcludedSessionlessKeyOverHTTP(t *testing.T) {
+	s := startServer(t, testConfig(t))
+	s.must(t, "POST", "/api/workspaces/default/entries", entryBody("chat"),
+		"", http.StatusCreated)
+	for _, session := range []string{"", "lead", ""} {
+		s.must(t, "POST", "/api/entries/e1/messages",
+			`{"body":"quack","origin":{"user":"duck","claude_session":"`+
+				session+`"}}`, "", http.StatusCreated)
+	}
+
+	exclude := "exclude-user=duck&exclude-claude-session="
+	var chat api.ChatPage
+	text := s.must(t, "GET", "/api/entries/e1/messages?since=0&"+exclude,
+		"", "", http.StatusOK)
+	if err := json.Unmarshal([]byte(text), &chat); err != nil {
+		t.Fatal(err)
+	}
+	if len(chat.Messages) != 1 || chat.Messages[0].Number != 2 ||
+		chat.Cursor != 3 {
+		t.Fatalf("chat excluding duck with no session = %s", text)
+	}
+
+	var changes api.ChangesPage
+	text = s.must(t, "GET", "/api/workspaces/default/changes?since=0&"+
+		exclude, "", "", http.StatusOK)
+	if err := json.Unmarshal([]byte(text), &changes); err != nil {
+		t.Fatal(err)
+	}
+	if len(changes.Changes) != 1 || changes.Changes[0].Message == nil ||
+		changes.Changes[0].Message.Number != 2 || changes.Cursor != 4 {
+		t.Fatalf("changes excluding duck with no session = %s", text)
+	}
+}
+
 func TestRequestLogKeepsNoClientText(t *testing.T) {
 	var logs bytes.Buffer
 	oldOutput := log.Writer()

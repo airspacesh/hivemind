@@ -45,12 +45,31 @@ var singleQueryParameters = map[string]bool{
 	"under":              true,
 }
 
-// chatQueryParameters are the parameters of a chat read, and of the
-// changes feed.
+// changesQueryParameters are the parameters of the changes feed,
+// besides its conditions.
+var changesQueryParameters = map[string]bool{
+	"since":                  true,
+	"limit":                  true,
+	"under":                  true,
+	"exclude-user":           true,
+	"exclude-claude-session": true,
+}
+
+// messageConditionParameters are the conditions of a chat read, which
+// each message must meet.
+var messageConditionParameters = map[string]bool{
+	"content":    true,
+	"no-content": true,
+}
+
+// chatQueryParameters are the parameters of a chat read, besides its
+// conditions.
 var chatQueryParameters = map[string]bool{
-	"since":  true,
-	"latest": true,
-	"limit":  true,
+	"since":                  true,
+	"latest":                 true,
+	"limit":                  true,
+	"exclude-user":           true,
+	"exclude-claude-session": true,
 }
 
 // projectsQueryParameters are the parameters of a projects listing.
@@ -60,10 +79,16 @@ var projectsQueryParameters = map[string]bool{
 
 func knownQueryParameter(name string) bool {
 	return repeatedQueryParameters[name] || singleQueryParameters[name] ||
-		chatQueryParameters[name] || projectsQueryParameters[name]
+		changesQueryParameters[name] || chatQueryParameters[name] ||
+		projectsQueryParameters[name]
 }
 
-func validateSearchQuery(w http.ResponseWriter, query url.Values) bool {
+// validateQuery checks a query holds only the given parameters, each
+// single one at most once, and at most the allowed number of
+// conditions.
+func validateQuery(
+	w http.ResponseWriter, query url.Values, repeated, single map[string]bool,
+) bool {
 	keys := make([]string, 0, len(query))
 	conditionCount := 0
 	for key := range query {
@@ -73,9 +98,9 @@ func validateSearchQuery(w http.ResponseWriter, query url.Values) bool {
 	for _, key := range keys {
 		values := query[key]
 		switch {
-		case repeatedQueryParameters[key]:
+		case repeated[key]:
 			conditionCount += len(values)
-		case singleQueryParameters[key]:
+		case single[key]:
 			if len(values) != 1 {
 				writeBadRequest(w, key+" must be given once")
 				return false
@@ -148,9 +173,8 @@ func metaConditions(query url.Values) ([]store.MetaCond, error) {
 	return conditions, nil
 }
 
-// searchFilter reads the filter a search query asks for, apart from
-// the subtree it may be under.
-func searchFilter(query url.Values) (store.Filter, error) {
+// conditionsFilter reads the conditions a query asks for.
+func conditionsFilter(query url.Values) (store.Filter, error) {
 	metadata, err := metaConditions(query)
 	if err != nil {
 		return store.Filter{}, err
@@ -161,6 +185,43 @@ func searchFilter(query url.Values) (store.Filter, error) {
 				return store.Filter{}, err
 			}
 		}
+	}
+	return store.Filter{
+		Subject:             fieldConditions(query, "subject"),
+		Body:                fieldConditions(query, "body"),
+		Project:             fieldConditions(query, "project"),
+		Key:                 fieldConditions(query, "key"),
+		Content:             fieldConditions(query, "content"),
+		Meta:                metadata,
+		OriginUser:          fieldConditions(query, "origin-user"),
+		OriginHost:          fieldConditions(query, "origin-host"),
+		OriginDir:           fieldConditions(query, "origin-dir"),
+		OriginClaudeSession: fieldConditions(query, "origin-claude-session"),
+	}, nil
+}
+
+// excludedOrigin reads the origin key whose changes a query leaves
+// out, or nil when it leaves out none.
+func excludedOrigin(query url.Values) (*store.OriginKey, error) {
+	user, hasUser := query["exclude-user"]
+	session, hasSession := query["exclude-claude-session"]
+	if !hasUser && !hasSession {
+		return nil, nil
+	}
+	if !hasUser || !hasSession {
+		return nil, fmt.Errorf("exclude-user and exclude-claude-session " +
+			"go together, with an empty session for changes written " +
+			"outside one")
+	}
+	return &store.OriginKey{User: user[0], ClaudeSession: session[0]}, nil
+}
+
+// searchFilter reads the filter a search query asks for, apart from
+// the subtree it may be under.
+func searchFilter(query url.Values) (store.Filter, error) {
+	filter, err := conditionsFilter(query)
+	if err != nil {
+		return store.Filter{}, err
 	}
 	limit, err := queryInteger(query, "limit", 20, 1, store.MaxSearchLimit)
 	if err != nil {
@@ -178,22 +239,10 @@ func searchFilter(query url.Values) (store.Filter, error) {
 	if err != nil {
 		return store.Filter{}, err
 	}
-	filter := store.Filter{
-		Subject:             fieldConditions(query, "subject"),
-		Body:                fieldConditions(query, "body"),
-		Project:             fieldConditions(query, "project"),
-		Key:                 fieldConditions(query, "key"),
-		Content:             fieldConditions(query, "content"),
-		Meta:                metadata,
-		OriginUser:          fieldConditions(query, "origin-user"),
-		OriginHost:          fieldConditions(query, "origin-host"),
-		OriginDir:           fieldConditions(query, "origin-dir"),
-		OriginClaudeSession: fieldConditions(query, "origin-claude-session"),
-		IncludeSuperseded:   includeSuperseded,
-		EntriesOnly:         entriesOnly,
-		Limit:               int(limit),
-		Offset:              int(offset),
-	}
+	filter.IncludeSuperseded = includeSuperseded
+	filter.EntriesOnly = entriesOnly
+	filter.Limit = int(limit)
+	filter.Offset = int(offset)
 	if values := query["view"]; len(values) != 0 {
 		switch values[0] {
 		case "flat":
@@ -219,7 +268,8 @@ func searchFilter(query url.Values) (store.Filter, error) {
 
 func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 	query, ok := parseQuery(w, r)
-	if !ok || !validateSearchQuery(w, query) {
+	if !ok || !validateQuery(w, query, repeatedQueryParameters,
+		singleQueryParameters) {
 		return
 	}
 	filter, err := searchFilter(query)

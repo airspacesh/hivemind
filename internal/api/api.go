@@ -143,8 +143,9 @@ type EditMessageRequest struct {
 }
 
 // ChatPage holds messages from one chat, oldest first. Cursor is the
-// number of the last message in the page, or the cursor read from
-// when the page is empty. Remaining counts the messages after Cursor.
+// highest message number the server checked, so every message up to it
+// is in the page or did not match the request's filters. Remaining
+// counts the messages after Cursor.
 type ChatPage struct {
 	Messages  []Message `json:"messages"`
 	Cursor    int64     `json:"cursor"`
@@ -175,9 +176,10 @@ type Change struct {
 }
 
 // ChangesPage holds a workspace's changes after a revision, oldest
-// first. Cursor is the revision of the last change in the page, or the
-// revision read from when the page is empty. More says whether changes
-// follow it.
+// first. Cursor is the highest revision the server checked, so every
+// change up to it is in the page or did not match the request's
+// filters. More says whether changes after Cursor are still to be
+// checked.
 type ChangesPage struct {
 	Changes []Change `json:"changes"`
 	Cursor  int64    `json:"cursor"`
