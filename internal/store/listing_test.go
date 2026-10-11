@@ -57,8 +57,13 @@ func (w *forestWriter) add() {
 		links = append(links, link(api.SupersedesLink,
 			w.entries[w.random.Intn(len(w.entries))].Ref))
 	}
+	// Project c is rare, so a listing of it reads its entries by key.
+	project := []string{"a", "b"}[w.random.Intn(2)]
+	if w.writes%13 == 0 {
+		project = "c"
+	}
 	entry := addTo(w.t, w.store, workspace, api.AddEntryRequest{
-		Project: []string{"a", "b"}[w.random.Intn(2)],
+		Project: project,
 		Subject: fmt.Sprintf("entry %d %s", w.writes, w.word()),
 		Links:   links,
 		Origin:  api.Origin{User: []string{"ines", "omar"}[w.random.Intn(2)]},
@@ -492,7 +497,8 @@ func TestListingMatchesTheReference(t *testing.T) {
 
 		for _, base := range []listingCase{
 			{}, {project: "a"}, {user: "ines"}, {content: "heron"},
-			{project: "b", user: "omar"},
+			{project: "b", user: "omar"}, {project: "c"},
+			{project: "c", content: "duck"}, {project: "nothing"},
 		} {
 			for _, under := range append([]int64{0}, unders...) {
 				for _, span := range spans {

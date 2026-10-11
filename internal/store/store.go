@@ -128,10 +128,11 @@ const createSubjectIndex = `
 CREATE INDEX entries_subject_search ON entries(subject_lower)`
 
 // createProjectIndex finds a workspace's projects, and each one's
-// latest activity, by seeking rather than reading the entries. No
-// index serves the project filters. A listing reads entries newest
-// first and stops at a full page, which an index on project_lower would
-// turn into reading and sorting every entry of the project.
+// latest activity, by seeking rather than reading the entries. The
+// project filters reach the project indexes only through the search's
+// lookup of candidates. A listing reads entries newest first and stops
+// at a full page, which an index on project_lower would turn into
+// reading and sorting every entry of the project.
 const createProjectIndex = `
 CREATE INDEX entries_project_activity
 ON entries(workspace_id, project, activity_utc)`

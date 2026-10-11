@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -447,31 +448,119 @@ func (v view) findOriginCandidates(
 	return found, true, nil
 }
 
+// candidateReadCost is what reading a project's entry by key, and the
+// messages in its chat, costs a listing, in entries read newest first.
+const candidateReadCost = 8
+
+// projectCandidateLimit bounds the entries a listing reads by key when
+// the project filters narrow it to those. A listing that reads entries
+// newest first reads about limit*total/n of a workspace's total to
+// find a page among n that match, if they are spread evenly, so it
+// reads by key only while candidateReadCost*n costs less.
+func (v view) projectCandidateLimit(
+	ctx context.Context, workspace int64, limit int,
+) (int, error) {
+	// Entries are never removed and their ids count up from 1 in each
+	// workspace, so the largest id is the workspace's entry count.
+	var total int
+	if err := v.tx.QueryRowContext(ctx, `
+		SELECT coalesce(max(id), 0) FROM entries WHERE workspace_id = ?`,
+		workspace).Scan(&total); err != nil {
+		return 0, fmt.Errorf("counting entries: %w", err)
+	}
+	return int(math.Sqrt(float64(limit*total) / candidateReadCost)), nil
+}
+
+// findProjectCandidates lists the entries of a workspace in the
+// projects the project filters match, and when the search covers chat,
+// the messages in their chats. It matches the filters against the
+// workspace's project names, then finds each matching project's entries
+// in the project indexes. The candidates come sorted. It reports false
+// when there are no project filters, when a lookup finds more than
+// limit rows, or when the projects hold too many entries to read them
+// sooner than a page found newest first, as projectCandidateLimit has
+// it.
+func (v view) findProjectCandidates(
+	ctx context.Context, workspace int64, filter Filter, limit int,
+) (candidateSet, bool, error) {
+	if len(filter.Project) == 0 {
+		return candidateSet{}, false, nil
+	}
+	var where whereBuilder
+	if err := where.addField("project", "lower(names.project)",
+		filter.Project); err != nil {
+		return candidateSet{}, false, err
+	}
+	entryLimit, err := v.projectCandidateLimit(ctx, workspace,
+		filter.Limit)
+	if err != nil {
+		return candidateSet{}, false, err
+	}
+
+	var found candidateSet
+	var ok bool
+	// projectNames takes the workspace as ?1, so the patterns after it
+	// take ?2 on.
+	found.entries, ok, err = v.readCandidates(ctx, projectNames+`
+		SELECT e.id FROM names CROSS JOIN entries AS e
+			ON e.workspace_id = ?1 AND e.project = names.project`+
+		where.sql()+` LIMIT ?`,
+		min(limit, entryLimit), append([]any{workspace}, where.args...)...)
+	if err != nil {
+		return candidateSet{}, false, fmt.Errorf(
+			"looking up projects: %w", err)
+	}
+	if !ok {
+		return candidateSet{}, false, nil
+	}
+	if filter.IncludeChat {
+		found.messages, ok, err = v.readChatCandidates(ctx, workspace,
+			found.entries, limit)
+		if err != nil {
+			return candidateSet{}, false, err
+		}
+		if !ok {
+			return candidateSet{}, false, nil
+		}
+	}
+	slices.Sort(found.entries)
+	slices.Sort(found.messages)
+	return found, true, nil
+}
+
 // findIndexedCandidates lists the entries and messages of a workspace
-// a search may match, as the text and origin user indexes find them.
-// It reports false when neither index narrows the search to at most
-// limit rows of each.
+// a search may match, as the text and origin user indexes and the
+// project lookup find them. It reports false when none of them narrows
+// the search to at most limit rows of each.
 func (v view) findIndexedCandidates(
 	ctx context.Context, workspace int64, filter Filter, limit int,
 ) (candidateSet, bool, error) {
-	text, textFound, err := v.findTextCandidates(ctx, workspace, filter,
+	candidates, found, err := v.findTextCandidates(ctx, workspace, filter,
 		limit)
 	if err != nil {
 		return candidateSet{}, false, err
 	}
-	origin, originFound, err := v.findOriginCandidates(ctx, workspace,
-		filter, limit)
-	if err != nil {
-		return candidateSet{}, false, err
+	// These lookups list their candidates sorted, as within needs.
+	for _, find := range []func(
+		context.Context, int64, Filter, int,
+	) (candidateSet, bool, error){
+		v.findOriginCandidates, v.findProjectCandidates,
+	} {
+		others, othersFound, err := find(ctx, workspace, filter, limit)
+		if err != nil {
+			return candidateSet{}, false, err
+		}
+		switch {
+		case !othersFound:
+		case !found:
+			candidates, found = others, true
+		default:
+			// Each lookup finds every match, so the matches are among
+			// both.
+			candidates = candidates.within(others)
+		}
 	}
-	if !originFound {
-		return text, textFound, nil
-	}
-	if !textFound {
-		return origin, true, nil
-	}
-	// Each index finds every match, so the matches are among both.
-	return text.within(origin), true, nil
+	return candidates, found, nil
 }
 
 // messagesByPostOrder reads the messages with the given post orders,
