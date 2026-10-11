@@ -230,11 +230,9 @@ func (s *Store) changes(
 			if err != nil {
 				return api.ChangesPage{}, err
 			}
-			posts, err := v.listPosts(ctx, []api.Post{found})
-			if err != nil {
+			if post, err = v.listPost(ctx, found); err != nil {
 				return api.ChangesPage{}, err
 			}
-			post = posts[0]
 			listed[postKey] = post
 		}
 		change := api.Change{Post: post}

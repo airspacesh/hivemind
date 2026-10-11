@@ -260,24 +260,6 @@ func (v view) supersedersOf(
 	return refs, nil
 }
 
-// attachLinks fills in each post's outgoing links and the posts that
-// supersede it.
-func (v view) attachLinks(ctx context.Context, posts []api.Post) error {
-	for i := range posts {
-		key := v.store.mustKey(posts[i].Ref)
-		links, err := v.linksFrom(ctx, key)
-		if err != nil {
-			return err
-		}
-		supersededBy, err := v.supersedersOf(ctx, key)
-		if err != nil {
-			return err
-		}
-		posts[i].Links = links
-		posts[i].SupersededBy = supersededBy
-	}
-	return nil
-}
 
 // postRef describes a post by its ref, and by its subject, whether it
 // is deleted, and its superseders when the request can read it.
@@ -364,11 +346,11 @@ func (s *Store) Detail(
 	if err != nil {
 		return api.PostDetail{}, err
 	}
-	listed, err := v.listPosts(ctx, []api.Post{post})
+	listed, err := v.listPost(ctx, post)
 	if err != nil {
 		return api.PostDetail{}, err
 	}
-	detail := api.PostDetail{ListedPost: listed[0]}
+	detail := api.PostDetail{ListedPost: listed}
 	if detail.Backlinks, err = v.linksTo(ctx, key); err != nil {
 		return api.PostDetail{}, err
 	}

@@ -116,11 +116,13 @@ func (v view) getPost(ctx context.Context, key Key) (api.Post, error) {
 	if post.Metadata, err = v.metadataFor(ctx, key); err != nil {
 		return api.Post{}, err
 	}
-	posts := []api.Post{post}
-	if err := v.attachLinks(ctx, posts); err != nil {
+	if post.Links, err = v.linksFrom(ctx, key); err != nil {
 		return api.Post{}, err
 	}
-	return posts[0], nil
+	if post.SupersededBy, err = v.supersedersOf(ctx, key); err != nil {
+		return api.Post{}, err
+	}
+	return post, nil
 }
 
 func (v view) writeMetadata(
