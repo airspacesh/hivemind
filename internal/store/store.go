@@ -186,8 +186,8 @@ ON post_links(source_workspace_id, source_id) WHERE name = 'parent'`
 
 // createMessages defines the chat attached to posts. A message's id
 // counts from 1 within its post. post_order numbers every message on
-// the server in the order it was posted, so the chat overview orders by
-// it rather than by a clock. An edit overwrites the body, so no earlier
+// the server, so the message text index and a search's candidates name
+// a message by one number. An edit overwrites the body, so no earlier
 // text is kept. revision is the revision of the posting or of the
 // latest edit, and posted_revision the revision of the posting, which
 // edits leave alone. deleted is 1 once a delete has cleared the body,
@@ -215,13 +215,9 @@ CREATE TABLE post_messages (
 	FOREIGN KEY (workspace_id, post_id) REFERENCES posts(workspace_id, id)
 )`
 
-const createMessageOrderIndex = `
-CREATE INDEX post_messages_workspace_order
-ON post_messages(workspace_id, post_order)`
-
 // createMessagePostedIndex reads a workspace's messages newest first
-// by when they were posted, as a listing with chat ranks them, with the
-// time a span keeps to at hand.
+// by when they were posted, as the chat overview and a listing with
+// chat rank them, with the time a span keeps to at hand.
 const createMessagePostedIndex = `
 CREATE INDEX post_messages_posted
 ON post_messages(workspace_id, posted_revision, created_utc)`
@@ -344,8 +340,7 @@ var schemaSteps = []schemaStep{
 			createRevisionIndex, createProjectIndex,
 			createProjectCreatedIndex, createOriginUserIndex, createLinks,
 			createLinkTargetIndex, createOneParentIndex, createMessages,
-			createMessageOrderIndex, createMessagePostedIndex,
-			createMessageRevisionIndex, createMessageOriginUserIndex,
+			createMessagePostedIndex, createMessageRevisionIndex, createMessageOriginUserIndex,
 			createPostText, securePostText, createPostTextInsert,
 			createPostTextUpdate, createMessageText, secureMessageText,
 			createMessageTextInsert, createMessageTextUpdate,
@@ -371,8 +366,6 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createMessageOriginUserIndex)},
 			{"index", "post_messages_revision", "post_messages",
 				normalizeSchemaSQL(createMessageRevisionIndex)},
-			{"index", "post_messages_workspace_order", "post_messages",
-				normalizeSchemaSQL(createMessageOrderIndex)},
 			{"index", "post_metadata_key", "post_metadata",
 				normalizeSchemaSQL(createMetadataKeyIndex)},
 			{"table", "posts", "posts",

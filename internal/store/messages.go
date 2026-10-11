@@ -368,7 +368,7 @@ func (s *Store) Overview(
 	rows, err := v.tx.QueryContext(ctx, `
 		SELECT `+messageColumns+` FROM post_messages AS m
 		WHERE m.workspace_id = ?
-		ORDER BY m.post_order DESC LIMIT ?`, workspace, limit,
+		ORDER BY m.posted_revision DESC LIMIT ?`, workspace, limit,
 	)
 	if err != nil {
 		return api.ChatOverview{}, fmt.Errorf("reading chats: %w", err)
