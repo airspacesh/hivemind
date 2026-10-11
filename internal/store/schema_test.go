@@ -180,7 +180,7 @@ func TestOpenRejectsUnrecognizedDatabases(t *testing.T) {
 			"changed schema",
 			func(t *testing.T, path string) {
 				createValidDatabase(t, path)
-				rawExec(t, path, `DROP INDEX posts_subject_search`)
+				rawExec(t, path, `DROP INDEX posts_revision`)
 			},
 			"schema does not match",
 		},

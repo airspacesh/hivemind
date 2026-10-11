@@ -132,9 +132,6 @@ ON posts(workspace_id, activity_revision, activity_utc)`
 const createRevisionIndex = `
 CREATE INDEX posts_revision ON posts(workspace_id, revision)`
 
-const createSubjectIndex = `
-CREATE INDEX posts_subject_search ON posts(subject_lower)`
-
 // createProjectIndex finds a workspace's projects, and each one's
 // latest activity, by seeking rather than reading the posts. The
 // project filters reach the project indexes only through the search's
@@ -344,7 +341,7 @@ var schemaSteps = []schemaStep{
 			createWorkspaces, createRevisionCounter,
 			startRevisionCounter, createPosts, createMetadata,
 			createMetadataKeyIndex, createActivityIndex,
-			createRevisionIndex, createSubjectIndex, createProjectIndex,
+			createRevisionIndex, createProjectIndex,
 			createProjectCreatedIndex, createOriginUserIndex, createLinks,
 			createLinkTargetIndex, createOneParentIndex, createMessages,
 			createMessageOrderIndex, createMessagePostedIndex,
@@ -364,8 +361,6 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createProjectIndex)},
 			{"index", "posts_project_created", "posts",
 				normalizeSchemaSQL(createProjectCreatedIndex)},
-			{"index", "posts_subject_search", "posts",
-				normalizeSchemaSQL(createSubjectIndex)},
 			{"index", "post_links_one_parent", "post_links",
 				normalizeSchemaSQL(createOneParentIndex)},
 			{"index", "post_links_target", "post_links",
