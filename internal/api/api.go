@@ -260,6 +260,21 @@ type MatchPage struct {
 	More    bool    `json:"more"`
 }
 
+// SearchFields name what a search condition can match. Each is a query
+// parameter of a listing and of the changes feed, and with no- before
+// it, one that leaves out what it matches.
+var SearchFields = []string{
+	"subject", "body", "content", "project", "key", "meta",
+	"origin-user", "origin-host", "origin-dir", "origin-claude-session",
+}
+
+// MessageFields are the SearchFields a chat message matches on its own,
+// and the conditions a chat read takes.
+var MessageFields = []string{
+	"content",
+	"origin-user", "origin-host", "origin-dir", "origin-claude-session",
+}
+
 // ErrorCode says what kind of failure an error response reports, so a
 // client can tell them apart without reading the message.
 type ErrorCode string

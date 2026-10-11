@@ -423,7 +423,7 @@ func cmdChatWait(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
 		strs:   []string{"--after", "--timeout"},
 		bools:  mineFlags,
-		repeat: filterFlags(messageFields...),
+		repeat: filterFlags(api.MessageFields...),
 	})
 	if err != nil {
 		return err

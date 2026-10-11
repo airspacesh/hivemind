@@ -10,29 +10,20 @@ import (
 	"github.com/airspacesh/workstream/internal/store"
 )
 
-var repeatedQueryParameters = map[string]bool{
-	"subject":    true,
-	"no-subject": true,
-	"body":       true,
-	"no-body":    true,
-	"project":    true,
-	"no-project": true,
-	"key":        true,
-	"no-key":     true,
-	"content":    true,
-	"no-content": true,
-	"meta":       true,
-	"no-meta":    true,
-
-	"origin-user":              true,
-	"no-origin-user":           true,
-	"origin-host":              true,
-	"no-origin-host":           true,
-	"origin-dir":               true,
-	"no-origin-dir":            true,
-	"origin-claude-session":    true,
-	"no-origin-claude-session": true,
+// conditionParameters names the query parameters of conditions on
+// fields, each with its no- form.
+func conditionParameters(fields []string) map[string]bool {
+	parameters := map[string]bool{}
+	for _, field := range fields {
+		parameters[field] = true
+		parameters["no-"+field] = true
+	}
+	return parameters
 }
+
+// searchConditionParameters are the conditions of a search or the
+// changes feed.
+var searchConditionParameters = conditionParameters(api.SearchFields)
 
 // searchQueryParameters are the parameters of a search, besides its
 // conditions.
@@ -57,19 +48,7 @@ var changesQueryParameters = map[string]bool{
 
 // messageConditionParameters are the conditions of a chat read, which
 // each message must meet.
-var messageConditionParameters = map[string]bool{
-	"content":    true,
-	"no-content": true,
-
-	"origin-user":              true,
-	"no-origin-user":           true,
-	"origin-host":              true,
-	"no-origin-host":           true,
-	"origin-dir":               true,
-	"no-origin-dir":            true,
-	"origin-claude-session":    true,
-	"no-origin-claude-session": true,
-}
+var messageConditionParameters = conditionParameters(api.MessageFields)
 
 // chatQueryParameters are the parameters of a chat read, besides its
 // conditions.
@@ -102,7 +81,7 @@ var treeQueryParameters = map[string]bool{
 // the request log can name it.
 func knownQueryParameter(name string) bool {
 	for _, parameters := range []map[string]bool{
-		repeatedQueryParameters, searchQueryParameters,
+		searchConditionParameters, searchQueryParameters,
 		changesQueryParameters, messageConditionParameters,
 		chatQueryParameters, overviewQueryParameters,
 		projectsQueryParameters, treeQueryParameters,
@@ -246,7 +225,7 @@ func searchFilter(query url.Values) (store.Filter, error) {
 }
 
 func (h *handler) search(w http.ResponseWriter, r *http.Request) {
-	query, ok := parseQueryOf(w, r, repeatedQueryParameters,
+	query, ok := parseQueryOf(w, r, searchConditionParameters,
 		searchQueryParameters)
 	if !ok {
 		return

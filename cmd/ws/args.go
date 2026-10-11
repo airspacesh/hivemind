@@ -108,17 +108,6 @@ func parseArgs(args []string, spec flagSpec) (*parsedArgs, error) {
 	return p, nil
 }
 
-var searchFields = []string{
-	"subject", "body", "content", "project", "key", "meta",
-	"origin-user", "origin-host", "origin-dir", "origin-claude-session",
-}
-
-// messageFields are the search fields a message matches on its own.
-var messageFields = []string{
-	"content",
-	"origin-user", "origin-host", "origin-dir", "origin-claude-session",
-}
-
 // shorthandKeys are metadata keys with a convenience flag on add,
 // edit, and search: --jira QUACK-1 is --meta jira=QUACK-1.
 var shorthandKeys = []string{"jira", "confluence"}
@@ -135,7 +124,7 @@ func filterFlags(filters ...string) []string {
 // searchFilterFlags are the flags of every search filter, the
 // metadata shorthands included.
 func searchFilterFlags() []string {
-	return filterFlags(append(slices.Clone(searchFields),
+	return filterFlags(append(slices.Clone(api.SearchFields),
 		shorthandKeys...)...)
 }
 
