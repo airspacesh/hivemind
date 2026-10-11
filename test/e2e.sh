@@ -277,13 +277,13 @@ check_equal "recent shows the newest posts with their paths" \
     "[e$((pond_n + 2))] $(id -un) in $root: Pond 3
 [e$((pond_n + 1))] $(id -un) in $root: Pond 2
 [$pond_1] $(id -un) in $root: Pond 1
---- more older matches: ws recent --before @R --workspace general --limit 3 --project views ---" \
+Next: ws recent --before @R --workspace general --limit 3 --project views (more older matches)" \
     "$(ws recent --project views -n 3 | untimed)"
 check_equal "recent says on stderr what it ran" \
     "Newest 3 posts matching --project views:" \
     "$(ws recent --project views -n 3 2>&1 >/dev/null)"
 older="$(ws recent --project views -n 3 | tail -1 |
-    sed -E 's/^--- more older matches: (.*) ---$/\1/')"
+    sed -E 's/^Next: (.*) \(more older matches\)$/\1/')"
 check_equal "the footer's command lists the next page" \
     "[e$((${recount#e} + 3))] $(id -un) in $root.$pond_a.$recount: Recount 3
 [e$((${recount#e} + 2))] $(id -un) in $root.$pond_a.$recount: Recount 2
@@ -457,7 +457,7 @@ check_equal "recent counts the messages posted since its oldest match" \
 check_equal "recent with chat shares the limit with messages" \
     "[$chat-m4] $(id -un): Woken
 [$race-m27] $(id -un): Within the hour
---- more older matches: ws recent --before @R --workspace general --limit 2 --include-chat --project chat ---" \
+Next: ws recent --before @R --workspace general --limit 2 --include-chat --project chat (more older matches)" \
     "$(ws recent --project chat --include-chat -n 2 | untimed)"
 check "search shows the matching messages" "[$chat-m4] $(id -un): Woken" \
     "$(ws search Woken | untimed)"

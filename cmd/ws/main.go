@@ -135,7 +135,7 @@ Listings:
   [e44-m3] 07:50 omar in e1.e34: text, and a post ranks by its own
   latest change. '{program} search' lists the same way, with chat unless
   --posts-only. Posts and messages share --limit. A listing says what it
-  ran on stderr. When older matches may remain, the last line gives the
+  ran on stderr. When older matches may remain, a 'Next:' line gives the
   command that lists them, which repeats the flags with --before set to
   the revision of the oldest match shown. --under <ref> keeps recent or
   search to a post and what is beneath it.
@@ -143,8 +143,10 @@ Listings:
   most --limit posts, marking where it was cut.
   '{program} list-projects' lists the --limit most recently active
   projects, each with the number of its posts created in the last 90
-  days, and their share of the workspace's. Times show as 13:20 when an
-  output's times all fall on one day, or else as 23/07/2025 13:20.
+  days, and their share of the workspace's. When the limit leaves some
+  out, a 'Next:' line gives the command that lists them all. Times show
+  as 13:20 when an output's times all fall on one day, or else as
+  23/07/2025 13:20.
 
 Search filters (recent, search, wait and firehose):
   --subject --body --content --project --key --meta <key>=<value>
@@ -162,7 +164,7 @@ Search filters (recent, search, wait and firehose):
   after a time, or after a revision, and --before <bound> to what last
   changed before it. A post last changed at the change it ranks by, and
   a message when it was posted. A bound is a revision like @812345, as a
-  listing's last line gives it, a date like 2026-10-09 or a date and
+  listing's 'Next:' line gives it, a date like 2026-10-09 or a date and
   time like 2026-10-09T14:30, both in local time, or a span back from
   now like 2d, 6h or 90m.
   '{program} search', and '{program} recent --include-chat', match each

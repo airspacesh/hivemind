@@ -336,7 +336,7 @@ duck-pond   10/10/2026 20:41   1,204 posts   38%
 heron       09/10/2026 14:10       4 posts   <1%
 nest        08/10/2026 09:15       1 post    <1%
 old-lake    01/05/2026 10:00       0 posts    0%
---- 2 more projects (use --limit 6 to view all) ---
+Next: ws list-projects --limit 6 --workspace general (2 more projects)
 `
 	if !got.ok || got.stdout != want {
 		t.Fatalf("list-projects printed\n%s\nwant\n%s%s", got.stdout, want,
@@ -581,7 +581,7 @@ func TestListingShowsAMatchALine(t *testing.T) {
     lines
 [f7] 08:40 omar in f4: (deleted) (1 new message)
 [f6-m2] 08:38 ines in f4.f5 (deleted)
---- more older matches: ws recent --before @81 --workspace general --after @12 --limit 4 --project ai ---
+Next: ws recent --before @81 --workspace general --after @12 --limit 4 --project ai (more older matches)
 `
 	if !got.ok || got.stdout != want {
 		t.Fatalf("recent =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
@@ -669,12 +669,12 @@ func TestFooterAsksForTheNextPage(t *testing.T) {
 		"--after", "2026-10-09T04:00:00Z", "--no-project", "x", "-n", "1",
 		"--include-superseded")
 	lines := strings.Split(strings.TrimSpace(first.stdout), "\n")
-	footer, ok := strings.CutPrefix(lines[len(lines)-1],
-		"--- more older matches: ws ")
+	footer, ok := strings.CutPrefix(lines[len(lines)-1], "Next: ws ")
 	if !first.ok || !ok {
 		t.Fatalf("search printed no footer: %+v", first)
 	}
-	words, err := shellWords(strings.TrimSuffix(footer, " ---"))
+	words, err := shellWords(strings.TrimSuffix(footer,
+		" (more older matches)"))
 	if err != nil {
 		t.Fatal(err)
 	}

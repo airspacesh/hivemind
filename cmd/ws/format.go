@@ -462,15 +462,6 @@ func printProjects(result api.ProjectsResponse) {
 			withThousands(project.RecentPosts), noun,
 			shareOf(project.RecentPosts, result.RecentPosts))
 	}
-	more := result.Count - len(result.Projects)
-	noun := "projects"
-	if more == 1 {
-		noun = "project"
-	}
-	if more > 0 {
-		fmt.Printf("--- %d more %s (use --limit %d to view all) ---\n",
-			more, noun, result.Count)
-	}
 }
 
 // printChanges prints changes oldest first, a line each, as a listing

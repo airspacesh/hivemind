@@ -738,7 +738,7 @@ func cmdListing(c *client, command string, args []string) error {
 	printMatches(page.Matches)
 	if page.More {
 		oldest := page.Matches[len(page.Matches)-1].Revision
-		fmt.Printf("--- more older matches: %s ---\n",
+		fmt.Printf("Next: %s (more older matches)\n",
 			olderCommand(command, t, p, query, oldest))
 	}
 	return nil
@@ -773,5 +773,15 @@ func cmdListProjects(c *client, args []string) error {
 		return nil
 	}
 	printProjects(result)
+	more := result.Count - len(result.Projects)
+	noun := "projects"
+	if more == 1 {
+		noun = "project"
+	}
+	if more > 0 {
+		fmt.Printf("Next: %s list-projects --limit %d --workspace %s "+
+			"(%d more %s)\n", programName, result.Count,
+			shellQuote(workspace.name), more, noun)
+	}
 	return nil
 }
