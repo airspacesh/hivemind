@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 
 	"github.com/airspacesh/workstream/internal/api"
@@ -35,7 +34,9 @@ var repeatedQueryParameters = map[string]bool{
 	"no-origin-claude-session": true,
 }
 
-var singleQueryParameters = map[string]bool{
+// searchQueryParameters are the parameters of a search, besides its
+// conditions.
+var searchQueryParameters = map[string]bool{
 	"limit":              true,
 	"include-superseded": true,
 	"include-chat":       true,
@@ -80,53 +81,37 @@ var chatQueryParameters = map[string]bool{
 	"exclude-claude-session": true,
 }
 
+// overviewQueryParameters are the parameters of a chat overview.
+var overviewQueryParameters = map[string]bool{
+	"limit": true,
+}
+
 // projectsQueryParameters are the parameters of a projects listing.
 var projectsQueryParameters = map[string]bool{
-	"name": true,
+	"name":  true,
+	"limit": true,
 }
 
+// treeQueryParameters are the parameters of a tree.
+var treeQueryParameters = map[string]bool{
+	"limit":              true,
+	"include-superseded": true,
+}
+
+// knownQueryParameter reports whether any route takes a parameter, so
+// the request log can name it.
 func knownQueryParameter(name string) bool {
-	return repeatedQueryParameters[name] || singleQueryParameters[name] ||
-		changesQueryParameters[name] || chatQueryParameters[name] ||
-		projectsQueryParameters[name]
-}
-
-// validateQuery checks a query holds only the given parameters, each
-// single one at most once, and at most the allowed number of
-// conditions.
-func validateQuery(
-	w http.ResponseWriter, query url.Values, repeated, single map[string]bool,
-) bool {
-	keys := make([]string, 0, len(query))
-	conditionCount := 0
-	for key := range query {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		values := query[key]
-		switch {
-		case repeated[key]:
-			conditionCount += len(values)
-		case single[key]:
-			if len(values) != 1 {
-				writeBadRequest(w, key+" must be given once")
-				return false
-			}
-		default:
-			writeBadRequest(w,
-				fmt.Sprintf("unknown query parameter %q", key))
-			return false
+	for _, parameters := range []map[string]bool{
+		repeatedQueryParameters, searchQueryParameters,
+		changesQueryParameters, messageConditionParameters,
+		chatQueryParameters, overviewQueryParameters,
+		projectsQueryParameters, treeQueryParameters,
+	} {
+		if parameters[name] {
+			return true
 		}
 	}
-	if conditionCount > store.MaxSearchConditions {
-		writeBadRequest(w, fmt.Sprintf(
-			"at most %d search conditions are allowed",
-			store.MaxSearchConditions,
-		))
-		return false
-	}
-	return true
+	return false
 }
 
 func fieldConditions(query url.Values, field string) []store.FieldCond {
@@ -261,9 +246,9 @@ func searchFilter(query url.Values) (store.Filter, error) {
 }
 
 func (h *handler) search(w http.ResponseWriter, r *http.Request) {
-	query, ok := parseQuery(w, r)
-	if !ok || !validateQuery(w, query, repeatedQueryParameters,
-		singleQueryParameters) {
+	query, ok := parseQueryOf(w, r, repeatedQueryParameters,
+		searchQueryParameters)
+	if !ok {
 		return
 	}
 	filter, err := searchFilter(query)

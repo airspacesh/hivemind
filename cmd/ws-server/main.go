@@ -208,7 +208,7 @@ func (h *handler) routes() http.Handler {
 }
 
 func requireNoQuery(w http.ResponseWriter, r *http.Request) bool {
-	_, ok := parseQueryOf(w, r)
+	_, ok := parseQueryOf(w, r, nil, nil)
 	return ok
 }
 
@@ -242,7 +242,7 @@ func (h *handler) listWorkspaces(w http.ResponseWriter, r *http.Request) {
 const defaultProjectLimit = 30
 
 func (h *handler) projects(w http.ResponseWriter, r *http.Request) {
-	query, ok := parseQueryOf(w, r, "name", "limit")
+	query, ok := parseQueryOf(w, r, nil, projectsQueryParameters)
 	if !ok {
 		return
 	}
@@ -389,7 +389,7 @@ func (h *handler) deletePost(w http.ResponseWriter, r *http.Request) {
 const defaultTreeLimit = 30
 
 func (h *handler) tree(w http.ResponseWriter, r *http.Request) {
-	query, ok := parseQueryOf(w, r, "limit", "include-superseded")
+	query, ok := parseQueryOf(w, r, nil, treeQueryParameters)
 	if !ok {
 		return
 	}

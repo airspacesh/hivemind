@@ -106,9 +106,9 @@ func (h *handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 // listMessages returns a page of the messages after the query's after
 // that match its conditions, or the newest messages, given latest.
 func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
-	query, ok := parseQuery(w, r)
-	if !ok || !validateQuery(w, query, messageConditionParameters,
-		chatQueryParameters) {
+	query, ok := parseQueryOf(w, r, messageConditionParameters,
+		chatQueryParameters)
+	if !ok {
 		return
 	}
 	_, hasLatest := query["latest"]
@@ -167,7 +167,7 @@ func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 // overview returns the newest messages across a workspace, grouped by
 // post.
 func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
-	query, ok := parseQueryOf(w, r, "limit")
+	query, ok := parseQueryOf(w, r, nil, overviewQueryParameters)
 	if !ok {
 		return
 	}

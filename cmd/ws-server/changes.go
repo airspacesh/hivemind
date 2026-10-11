@@ -15,9 +15,9 @@ const (
 // the query's after names that match its conditions, or an empty page
 // whose cursor is the latest revision, given no after.
 func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
-	query, ok := parseQuery(w, r)
-	if !ok || !validateQuery(w, query, repeatedQueryParameters,
-		changesQueryParameters) {
+	query, ok := parseQueryOf(w, r, repeatedQueryParameters,
+		changesQueryParameters)
+	if !ok {
 		return
 	}
 	_, hasAfter := query["after"]

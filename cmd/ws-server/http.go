@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -409,33 +410,41 @@ func decodeBody(w http.ResponseWriter, r *http.Request, value any) bool {
 	return true
 }
 
-func parseQuery(w http.ResponseWriter, r *http.Request) (url.Values, bool) {
+// parseQueryOf parses a query that may hold only the given parameters,
+// each single one at most once, and the repeated ones, which are search
+// conditions, at most store.MaxSearchConditions times in all.
+func parseQueryOf(
+	w http.ResponseWriter, r *http.Request, repeated, single map[string]bool,
+) (url.Values, bool) {
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
 		writeBadRequest(w, "invalid query: "+err.Error())
 		return nil, false
 	}
-	return query, true
-}
 
-// parseQueryOf parses a query that may hold only the given parameters,
-// each at most once.
-func parseQueryOf(
-	w http.ResponseWriter, r *http.Request, allowed ...string,
-) (url.Values, bool) {
-	query, ok := parseQuery(w, r)
-	if !ok {
-		return nil, false
+	conditionCount := 0
+	for _, key := range slices.Sorted(maps.Keys(query)) {
+		values := query[key]
+		switch {
+		case repeated[key]:
+			conditionCount += len(values)
+		case single[key]:
+			if len(values) != 1 {
+				writeBadRequest(w, key+" must be given once")
+				return nil, false
+			}
+		default:
+			writeBadRequest(w,
+				fmt.Sprintf("unknown query parameter %q", key))
+			return nil, false
+		}
 	}
-	for key, values := range query {
-		if !slices.Contains(allowed, key) {
-			writeBadRequest(w, fmt.Sprintf("unknown query parameter %q", key))
-			return nil, false
-		}
-		if len(values) != 1 {
-			writeBadRequest(w, key+" must be given once")
-			return nil, false
-		}
+	if conditionCount > store.MaxSearchConditions {
+		writeBadRequest(w, fmt.Sprintf(
+			"at most %d search conditions are allowed",
+			store.MaxSearchConditions,
+		))
+		return nil, false
 	}
 	return query, true
 }
