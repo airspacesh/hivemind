@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -461,5 +462,111 @@ func TestWritesProceedWhileAReadIsOpen(t *testing.T) {
 		ctx, `DELETE FROM post_metadata`,
 	); err == nil {
 		t.Fatal("a read connection accepted a write")
+	}
+}
+
+// holdWriter starts a write that holds the write connection and the
+// database's write lock until it is rolled back.
+func holdWriter(t *testing.T, store *Store) *sql.Tx {
+	t.Helper()
+	ctx := context.Background()
+	write, err := store.begin(ctx, everyAccess(store), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { write.tx.Rollback() })
+	if _, err := write.tx.ExecContext(ctx,
+		`UPDATE revision_counter SET revision = revision`); err != nil {
+		t.Fatal(err)
+	}
+	return write.tx
+}
+
+// The polls of waits and chats, and every other read, answer while a
+// write holds the write connection.
+func TestReadsProceedWhileAWriteIsOpen(t *testing.T) {
+	store := openTestStore(t)
+	post := mustAdd(t, store, "polled", "", nil)
+	mustPostMessage(t, store, post.Ref, "a message")
+	key := store.mustKey(post.Ref)
+	access := everyAccess(store)
+	exclude := &OriginKey{User: "someone else"}
+	holdWriter(t, store)
+
+	reads := map[string]func(context.Context) error{
+		"changes": func(ctx context.Context) error {
+			_, err := store.Changes(ctx, access, key.Workspace, 0,
+				Filter{}, exclude, 10)
+			return err
+		},
+		"latest revision": func(ctx context.Context) error {
+			_, err := store.LatestRevision(ctx)
+			return err
+		},
+		"chat": func(ctx context.Context) error {
+			_, err := store.Messages(ctx, key, api.ChatBound{}, Filter{},
+				exclude, 10)
+			return err
+		},
+		"latest chat": func(ctx context.Context) error {
+			_, err := store.LatestMessages(ctx, key, 10)
+			return err
+		},
+		"chat overview": func(ctx context.Context) error {
+			_, err := store.Overview(ctx, key.Workspace, 10)
+			return err
+		},
+		"search": func(ctx context.Context) error {
+			_, err := store.Search(ctx, access, key.Workspace,
+				Filter{Limit: 10, IncludeChat: true})
+			return err
+		},
+		"detail": func(ctx context.Context) error {
+			_, err := store.Detail(ctx, access, key)
+			return err
+		},
+		"tree": func(ctx context.Context) error {
+			_, err := store.Tree(ctx, access, key, true, 10)
+			return err
+		},
+		"projects": func(ctx context.Context) error {
+			_, err := store.Projects(ctx, key.Workspace, 10, time.Now())
+			return err
+		},
+		"ping": store.Ping,
+	}
+	for name, read := range reads {
+		ctx, cancel := context.WithTimeout(context.Background(),
+			2*time.Second)
+		if err := read(ctx); err != nil {
+			t.Errorf("%s while a write is open: %v", name, err)
+		}
+		cancel()
+	}
+}
+
+// A write that waits for the write connection gives up when its
+// context ends, and is not left queued to commit once the connection
+// frees.
+func TestWriteAbandonedWhileWaitingNeverCommits(t *testing.T) {
+	store := openTestStore(t)
+	post := mustAdd(t, store, "busy", "", nil)
+	key := store.mustKey(post.Ref)
+	write := holdWriter(t, store)
+
+	ctx, cancel := context.WithTimeout(context.Background(),
+		100*time.Millisecond)
+	defer cancel()
+	_, err := store.PostMessage(ctx, key,
+		api.PostMessageRequest{Body: "abandoned"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("post error = %v, want context.DeadlineExceeded", err)
+	}
+	if err := write.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if got := readChat(t, store, post.Ref, 0, 10); len(got.Messages) != 0 {
+		t.Fatalf("the abandoned write committed %d messages",
+			len(got.Messages))
 	}
 }
