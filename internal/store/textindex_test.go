@@ -118,7 +118,7 @@ func TestTextIndexKeepsGlobSemantics(t *testing.T) {
 					field.filter([]FieldCond{{Value: pattern}}))
 				var got []int64
 				for _, match := range result.Matches {
-					got = append(got, match.Entry.Ref.ID)
+					got = append(got, match.Post.Ref.ID)
 				}
 				slices.Sort(got)
 				got = slices.Compact(got)
@@ -137,7 +137,7 @@ func TestTextIndexFollowsEdits(t *testing.T) {
 	message := mustPost(t, store, entry.Ref, "Saw an egret")
 	subject, body := "Count the ducks", "On the pond"
 	if _, err := store.Edit(ctx, everyAccess(store),
-		store.mustKey(entry.Ref), api.EditEntryRequest{
+		store.mustKey(entry.Ref), api.EditPostRequest{
 			Subject: &subject, Body: &body, User: testUser,
 		}); err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestTextIndexForgetsOverwrittenText(t *testing.T) {
 	message := mustPost(t, store, entry.Ref, "Egret "+secret)
 	subject := "Heron"
 	if _, err := store.Edit(ctx, everyAccess(store),
-		store.mustKey(entry.Ref), api.EditEntryRequest{
+		store.mustKey(entry.Ref), api.EditPostRequest{
 			Subject: &subject, User: testUser,
 		}); err != nil {
 		t.Fatal(err)

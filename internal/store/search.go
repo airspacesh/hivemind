@@ -854,8 +854,8 @@ func (v view) readPage(
 	matches []match,
 	includeChat bool,
 ) (api.MatchPage, error) {
-	entries := map[int64]api.Entry{}
-	paths := map[int64][]api.EntryRef{}
+	entries := map[int64]api.Post{}
+	paths := map[int64][]api.PostRef{}
 	var ids, postOrders []int64
 	for _, m := range matches {
 		if m.postOrder != 0 {
@@ -904,7 +904,7 @@ func (v view) readPage(
 			return api.MatchPage{}, err
 		}
 		page.Matches = append(page.Matches, api.Match{
-			Entry: entries[m.entry], Ancestors: paths[m.entry],
+			Post: entries[m.entry], Ancestors: paths[m.entry],
 			Message: byPostOrder[m.postOrder], Revision: m.revision, At: at,
 			NewMessages: newMessages[m.entry],
 		})

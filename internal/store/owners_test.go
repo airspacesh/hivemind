@@ -10,9 +10,9 @@ import (
 
 func addAs(
 	t *testing.T, store *Store, user, subject string, links ...api.Link,
-) api.Entry {
+) api.Post {
 	t.Helper()
-	return addTo(t, store, "general", api.AddEntryRequest{
+	return addTo(t, store, "general", api.AddPostRequest{
 		Subject: subject, Links: links,
 		Origin: api.Origin{User: user},
 	})
@@ -48,7 +48,7 @@ func TestOnlyThePosterCanEditOrDeleteAnEntry(t *testing.T) {
 	refusal := "e1 was posted by alice, so only alice can edit or " +
 		"delete it"
 
-	for _, req := range []api.EditEntryRequest{
+	for _, req := range []api.EditPostRequest{
 		{Subject: &subject, User: "bob"},
 		{Subject: &subject, User: "Alice"},
 		{Metadata: map[string]string{"jira": "QUACK-1"}, User: "bob"},
@@ -68,7 +68,7 @@ func TestOnlyThePosterCanEditOrDeleteAnEntry(t *testing.T) {
 	}
 
 	edited, err := store.Edit(ctx, everyAccess(store), key,
-		api.EditEntryRequest{Subject: &subject, User: "alice"})
+		api.EditPostRequest{Subject: &subject, User: "alice"})
 	if err != nil || edited.Subject != subject {
 		t.Fatalf("the poster's own edit = %+v, %v", edited, err)
 	}
@@ -130,7 +130,7 @@ func TestNobodyCanEditOrDeleteWhatRecordsNoUser(t *testing.T) {
 	store := openTestStore(t)
 	entry, err := store.Add(ctx, everyAccess(store),
 		workspaceID(t, store, "general"),
-		api.AddEntryRequest{Subject: "anonymous"})
+		api.AddPostRequest{Subject: "anonymous"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestNobodyCanEditOrDeleteWhatRecordsNoUser(t *testing.T) {
 		"delete it"
 	for _, user := range []string{"duck", ""} {
 		_, err := store.Edit(ctx, everyAccess(store), key,
-			api.EditEntryRequest{Subject: &subject, User: user})
+			api.EditPostRequest{Subject: &subject, User: user})
 		assertNotOwner(t, err, entryRefusal)
 		_, err = store.Delete(ctx, everyAccess(store), key,
 			api.DeleteRequest{User: user})

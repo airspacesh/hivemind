@@ -48,7 +48,7 @@ func TestOneNameLinksSeveralTargetsButOneParent(t *testing.T) {
 func TestLinksJoinWorkspacesOnOneServer(t *testing.T) {
 	store := openTestStore(t)
 	work := mustAdd(t, store, "work", "", nil)
-	private := addTo(t, store, "personal", api.AddEntryRequest{
+	private := addTo(t, store, "personal", api.AddPostRequest{
 		Subject: "private",
 		Links:   []api.Link{link("see", work.Ref)},
 	})
@@ -71,12 +71,12 @@ func TestLinksJoinWorkspacesOnOneServer(t *testing.T) {
 func TestParentsStayInTheirWorkspace(t *testing.T) {
 	store := openTestStore(t)
 	work := mustAdd(t, store, "work", "", nil)
-	private := addTo(t, store, "personal", api.AddEntryRequest{
+	private := addTo(t, store, "personal", api.AddPostRequest{
 		Subject: "private",
 	})
 
 	_, err := store.Add(context.Background(), everyAccess(store),
-		workspaceID(t, store, "personal"), api.AddEntryRequest{
+		workspaceID(t, store, "personal"), api.AddPostRequest{
 			Subject: "child",
 			Links:   []api.Link{link(api.ParentLink, work.Ref)},
 		})
@@ -239,7 +239,7 @@ func TestLinkEditsAndTheirFailures(t *testing.T) {
 	store := openTestStore(t)
 	a := mustAdd(t, store, "a", "", nil)
 	b := mustAdd(t, store, "b", "", nil)
-	edit := func(req api.EditEntryRequest) error {
+	edit := func(req api.EditPostRequest) error {
 		req.User = testUser
 		_, err := store.Edit(ctx, everyAccess(store), store.mustKey(a.Ref),
 			req)
@@ -254,12 +254,12 @@ func TestLinkEditsAndTheirFailures(t *testing.T) {
 		api.Ref{Prefix: "x", ID: 1})); !errors.Is(err, ErrUnknownPrefix) {
 		t.Fatalf("link to an unknown prefix = %v", err)
 	}
-	if err := edit(api.EditEntryRequest{
+	if err := edit(api.EditPostRequest{
 		RemoveLinks: []api.Link{link("see", b.Ref)},
 	}); !errors.Is(err, ErrLinkNotFound) {
 		t.Fatalf("removing a missing link = %v", err)
 	}
-	if err := edit(api.EditEntryRequest{
+	if err := edit(api.EditPostRequest{
 		RemoveLinkNames: []string{"parent"},
 	}); err != nil {
 		t.Fatalf("removing every parent of an unparented entry: %v", err)

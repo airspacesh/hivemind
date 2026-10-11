@@ -77,7 +77,7 @@ func writeStoreError(w http.ResponseWriter, err error) {
 			api.CodeUnknownPrefix, err.Error()
 	case errors.Is(err, store.ErrEntryNotFound):
 		status, code, message = http.StatusNotFound,
-			api.CodeEntryNotFound, err.Error()
+			api.CodePostNotFound, err.Error()
 	case errors.Is(err, store.ErrMessageNotFound):
 		status, code, message = http.StatusNotFound,
 			api.CodeMessageNotFound, err.Error()

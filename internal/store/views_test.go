@@ -13,9 +13,9 @@ import (
 
 func addChild(
 	t *testing.T, store *Store, subject string, parent api.Ref,
-) api.Entry {
+) api.Post {
 	t.Helper()
-	return addTo(t, store, "general", api.AddEntryRequest{
+	return addTo(t, store, "general", api.AddPostRequest{
 		Subject: subject,
 		Links:   []api.Link{link(api.ParentLink, parent)},
 	})
@@ -37,7 +37,7 @@ func readTree(
 // treeText shows a tree's entries in order by subject, with its cuts.
 func treeText(tree api.TreeResponse) string {
 	var lines []string
-	for _, entry := range tree.Entries {
+	for _, entry := range tree.Posts {
 		line := entry.Subject
 		if entry.MoreBelow > 0 {
 			line += fmt.Sprintf(" (%d more below)", entry.MoreBelow)
@@ -149,12 +149,12 @@ func TestTreeFillsLevelByLevelAndSaysWhereItCut(t *testing.T) {
 func TestSearchUnderASubtree(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	root := addTo(t, store, "general", api.AddEntryRequest{
+	root := addTo(t, store, "general", api.AddPostRequest{
 		Subject: "duck root", Project: "pond"})
-	child := addTo(t, store, "general", api.AddEntryRequest{
+	child := addTo(t, store, "general", api.AddPostRequest{
 		Subject: "duck child", Project: "lake",
 		Links: []api.Link{link(api.ParentLink, root.Ref)}})
-	addTo(t, store, "general", api.AddEntryRequest{
+	addTo(t, store, "general", api.AddPostRequest{
 		Subject: "duck elsewhere", Project: "lake"})
 
 	under := store.mustKey(root.Ref)
@@ -178,7 +178,7 @@ func TestCountsLeaveOutSupersededEntries(t *testing.T) {
 	store := openTestStore(t)
 	question := mustAdd(t, store, "Why?", "", nil)
 	old := addChild(t, store, "old answer", question.Ref)
-	addTo(t, store, "general", api.AddEntryRequest{
+	addTo(t, store, "general", api.AddPostRequest{
 		Subject: "new answer",
 		Links: []api.Link{link(api.ParentLink, question.Ref),
 			link(api.SupersedesLink, old.Ref)},

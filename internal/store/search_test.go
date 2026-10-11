@@ -13,11 +13,11 @@ import (
 
 type searchEntries struct {
 	store  *Store
-	first  api.Entry
-	second api.Entry
-	third  api.Entry
-	fourth api.Entry
-	fifth  api.Entry
+	first  api.Post
+	second api.Post
+	third  api.Post
+	fourth api.Post
+	fifth  api.Post
 }
 
 func newSearchEntries(t *testing.T) searchEntries {
@@ -25,9 +25,9 @@ func newSearchEntries(t *testing.T) searchEntries {
 	store := openTestStore(t)
 	add := func(
 		project, subject, body string, metadata map[string]string,
-	) api.Entry {
+	) api.Post {
 		t.Helper()
-		return addTo(t, store, "general", api.AddEntryRequest{
+		return addTo(t, store, "general", api.AddPostRequest{
 			Project: project, Subject: subject, Body: body,
 			Metadata: metadata,
 		})
@@ -76,7 +76,7 @@ func assertMatches(t *testing.T, page api.MatchPage, want ...string) {
 
 // messageRef names a message of an entry, like e1-m2.
 func messageRef(entry api.Ref, number int64) string {
-	return api.MessageRef{Entry: entry, Number: number}.String()
+	return api.MessageRef{Post: entry, Number: number}.String()
 }
 
 func TestSearchUsesRawCaseFoldedGlobPatterns(t *testing.T) {
@@ -180,7 +180,7 @@ func TestSearchContentPagingAndMetadata(t *testing.T) {
 		t.Fatal("more after the last of 3 matches")
 	}
 	assertEntryRefs(t, result, entries.first.Ref)
-	if got := result.Matches[0].Entry.Metadata["jira"]; got != "QUACK-1" {
+	if got := result.Matches[0].Post.Metadata["jira"]; got != "QUACK-1" {
 		t.Fatalf("paged metadata jira = %q, want QUACK-1", got)
 	}
 }
@@ -195,7 +195,7 @@ func TestSearchRanksAnEditedEntryFirst(t *testing.T) {
 	}
 	if _, err := entries.store.Edit(
 		context.Background(), everyAccess(entries.store),
-		entries.store.mustKey(entries.first.Ref), api.EditEntryRequest{
+		entries.store.mustKey(entries.first.Ref), api.EditPostRequest{
 			Metadata: map[string]string{"jira": "QUACK-9"},
 			User:     testUser,
 		},
@@ -204,7 +204,7 @@ func TestSearchRanksAnEditedEntryFirst(t *testing.T) {
 	}
 
 	result := runSearch(t, entries.store, Filter{})
-	if got := result.Matches[0].Entry.Ref; got != entries.first.Ref {
+	if got := result.Matches[0].Post.Ref; got != entries.first.Ref {
 		t.Fatalf("first entry = %s, want the edited %s", got,
 			entries.first.Ref)
 	}
@@ -259,9 +259,9 @@ func TestSearchRejectsInvalidBoundsAndNUL(t *testing.T) {
 
 func TestSearchByOrigin(t *testing.T) {
 	store := openTestStore(t)
-	add := func(subject string, origin api.Origin) api.Entry {
+	add := func(subject string, origin api.Origin) api.Post {
 		t.Helper()
-		return addTo(t, store, "general", api.AddEntryRequest{
+		return addTo(t, store, "general", api.AddPostRequest{
 			Subject: subject, Origin: origin,
 		})
 	}
@@ -302,7 +302,7 @@ func TestSearchByOrigin(t *testing.T) {
 func TestSearchMetadataStaysInItsWorkspace(t *testing.T) {
 	store := openTestStore(t)
 	inGeneral := mustAdd(t, store, "in general", "", nil)
-	addTo(t, store, "personal", api.AddEntryRequest{
+	addTo(t, store, "personal", api.AddPostRequest{
 		Subject: "in personal", Project: "secret",
 		Metadata: map[string]string{"jira": "QUACK-9"},
 	})
@@ -414,9 +414,9 @@ func TestSearchMatchesEachMessageOnItsOwn(t *testing.T) {
 // other filters through its entry.
 func TestSearchMatchesMessagesByOrigin(t *testing.T) {
 	store := openTestStore(t)
-	add := func(user, project, subject string) api.Entry {
+	add := func(user, project, subject string) api.Post {
 		t.Helper()
-		return addTo(t, store, "general", api.AddEntryRequest{
+		return addTo(t, store, "general", api.AddPostRequest{
 			Project: project, Subject: subject,
 			Origin: api.Origin{User: user},
 		})
@@ -492,9 +492,9 @@ func TestSearchMatchesMessagesByOriginInEntriesTheIndexFinds(t *testing.T) {
 // message's, and keep the GLOB semantics of the walk.
 func TestOriginUserIndexKeepsGlobSemantics(t *testing.T) {
 	store := openTestStore(t)
-	add := func(user string) api.Entry {
+	add := func(user string) api.Post {
 		t.Helper()
-		return addTo(t, store, "general", api.AddEntryRequest{
+		return addTo(t, store, "general", api.AddPostRequest{
 			Project: "pond", Subject: "Duck", Origin: api.Origin{User: user},
 		})
 	}
@@ -522,7 +522,7 @@ func TestOriginUserIndexKeepsGlobSemantics(t *testing.T) {
 			})
 			var got []int64
 			for _, match := range result.Matches {
-				got = append(got, match.Entry.Ref.ID)
+				got = append(got, match.Post.Ref.ID)
 			}
 			slices.Sort(got)
 			got = slices.Compact(got)
@@ -632,10 +632,10 @@ func TestSearchKeepsToASpan(t *testing.T) {
 func TestSearchUnderASubtreeInABigWorkspace(t *testing.T) {
 	store := openTestStore(t)
 	root := mustAdd(t, store, "Heron nest", "", nil)
-	child := addTo(t, store, "general", api.AddEntryRequest{
+	child := addTo(t, store, "general", api.AddPostRequest{
 		Project: "pond", Subject: "Reeds",
 		Links: []api.Link{link(api.ParentLink, root.Ref)}})
-	grandchild := addTo(t, store, "general", api.AddEntryRequest{
+	grandchild := addTo(t, store, "general", api.AddPostRequest{
 		Project: "pond", Subject: "Heron eggs",
 		Links: []api.Link{link(api.ParentLink, child.Ref)}})
 	postAs(t, store, "ines", child.Ref, "a heron landed")

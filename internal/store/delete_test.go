@@ -9,7 +9,7 @@ import (
 	"github.com/airspacesh/workstream/internal/api"
 )
 
-func mustDelete(t *testing.T, store *Store, ref api.Ref) api.Entry {
+func mustDelete(t *testing.T, store *Store, ref api.Ref) api.Post {
 	t.Helper()
 	entry, err := store.Delete(context.Background(), everyAccess(store),
 		store.mustKey(ref), api.DeleteRequest{User: testUser})
@@ -24,7 +24,7 @@ func mustDeleteMessage(
 ) api.Message {
 	t.Helper()
 	message, err := store.DeleteMessage(context.Background(),
-		store.mustKey(ref.Entry), ref.Number,
+		store.mustKey(ref.Post), ref.Number,
 		api.DeleteRequest{User: testUser})
 	if err != nil {
 		t.Fatalf("deleting %s: %v", ref, err)
@@ -36,7 +36,7 @@ func TestDeleteClearsAnEntryButKeepsItsPlace(t *testing.T) {
 	store := openTestStore(t)
 	parent := mustAdd(t, store, "parent", "", nil)
 	old := mustAdd(t, store, "old", "", nil)
-	entry := addTo(t, store, "general", api.AddEntryRequest{
+	entry := addTo(t, store, "general", api.AddPostRequest{
 		Project: "pond", Subject: "secret plan", Body: "the details",
 		Metadata: map[string]string{"jira": "QUACK-1", "pr": "12"},
 		Origin: api.Origin{User: testUser, Host: "nest", Dir: "/pond",
@@ -144,7 +144,7 @@ func TestNobodyCanEditWhatIsDeleted(t *testing.T) {
 	key := store.mustKey(entry.Ref)
 
 	subject := "back"
-	for _, req := range []api.EditEntryRequest{
+	for _, req := range []api.EditPostRequest{
 		{Subject: &subject, User: testUser},
 		{AddLinks: []api.Link{link("see", other.Ref)}, User: testUser},
 	} {

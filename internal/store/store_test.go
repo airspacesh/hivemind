@@ -93,8 +93,8 @@ const testUser = "duck"
 
 // addTo adds an entry, posted by testUser unless req names a user.
 func addTo(
-	t *testing.T, store *Store, workspace string, req api.AddEntryRequest,
-) api.Entry {
+	t *testing.T, store *Store, workspace string, req api.AddPostRequest,
+) api.Post {
 	t.Helper()
 	if req.Origin.User == "" {
 		req.Origin.User = testUser
@@ -114,9 +114,9 @@ func mustAdd(
 	subject string,
 	body string,
 	metadata map[string]string,
-) api.Entry {
+) api.Post {
 	t.Helper()
-	return addTo(t, store, "general", api.AddEntryRequest{
+	return addTo(t, store, "general", api.AddPostRequest{
 		Subject: subject, Body: body, Metadata: metadata,
 	})
 }
@@ -131,11 +131,11 @@ func addLinks(
 	t.Helper()
 	_, err := store.Edit(context.Background(), everyAccess(store),
 		store.mustKey(ref),
-		api.EditEntryRequest{AddLinks: links, User: testUser})
+		api.EditPostRequest{AddLinks: links, User: testUser})
 	return err
 }
 
-func mustGet(t *testing.T, store *Store, ref api.Ref) api.EntryDetail {
+func mustGet(t *testing.T, store *Store, ref api.Ref) api.PostDetail {
 	t.Helper()
 	detail, err := store.Detail(context.Background(), everyAccess(store),
 		store.mustKey(ref))
@@ -153,7 +153,7 @@ func matchRefs(page api.MatchPage) []string {
 		if m.Message != nil {
 			refs = append(refs, m.Message.Ref().String())
 		} else {
-			refs = append(refs, m.Entry.Ref.String())
+			refs = append(refs, m.Post.Ref.String())
 		}
 	}
 	return refs
@@ -173,7 +173,7 @@ func TestEntryIDsCountFromOnePerWorkspace(t *testing.T) {
 	for _, workspace := range []string{"general", "personal", "general",
 		"general", "personal"} {
 		entry := addTo(t, store, workspace,
-			api.AddEntryRequest{Subject: "s"})
+			api.AddPostRequest{Subject: "s"})
 		got = append(got, entry.Ref.String())
 	}
 	want := fmt.Sprint([]string{"e1", "p1", "e2", "e3", "p2"})
@@ -194,7 +194,7 @@ func TestConcurrentAddsGetUniqueIDsCountingFromOne(t *testing.T) {
 			workspace := []string{"general", "personal"}[i%2]
 			entry, err := store.Add(context.Background(),
 				everyAccess(store), workspaceID(t, store, workspace),
-				api.AddEntryRequest{Subject: "s"})
+				api.AddPostRequest{Subject: "s"})
 			if err != nil {
 				t.Errorf("adding entry: %v", err)
 				return
@@ -259,7 +259,7 @@ func TestGeneratedColumnsFollowWrites(t *testing.T) {
 	subject := "CHANGED Æ"
 	body := "CHANGED Σ"
 	if _, err := store.Edit(ctx, everyAccess(store),
-		store.mustKey(entry.Ref), api.EditEntryRequest{
+		store.mustKey(entry.Ref), api.EditPostRequest{
 			Subject: &subject, Body: &body,
 			Metadata: map[string]string{"jira": "CHANGED Æ"},
 			User:     testUser,
@@ -283,7 +283,7 @@ func TestMutationRollsBackWhenResultCannotBeRead(t *testing.T) {
 	}
 	_, err = store.Add(ctx, everyAccess(store),
 		workspaceID(t, store, "general"),
-		api.AddEntryRequest{Subject: "must roll back"})
+		api.AddPostRequest{Subject: "must roll back"})
 	if err == nil {
 		t.Fatal("add succeeded despite unreadable result")
 	}
@@ -339,7 +339,7 @@ func TestMetadataEditsRefreshModifiedAndApply(t *testing.T) {
 			}
 			got, err := store.Edit(ctx, everyAccess(store),
 				store.mustKey(entry.Ref),
-				api.EditEntryRequest{Metadata: test.set, User: testUser})
+				api.EditPostRequest{Metadata: test.set, User: testUser})
 			if err != nil {
 				t.Fatalf("changing metadata: %v", err)
 			}
@@ -359,7 +359,7 @@ func TestCanceledMutationDoesNotWrite(t *testing.T) {
 	cancel()
 	_, err := store.Add(ctx, everyAccess(store),
 		workspaceID(t, store, "general"),
-		api.AddEntryRequest{Subject: "canceled"})
+		api.AddPostRequest{Subject: "canceled"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("add error = %v, want context.Canceled", err)
 	}
@@ -392,7 +392,7 @@ func TestBusyDatabaseIsRecognized(t *testing.T) {
 	}
 	_, err = second.Add(ctx, everyAccess(second),
 		workspaceID(t, second, "general"),
-		api.AddEntryRequest{Subject: "blocked"})
+		api.AddPostRequest{Subject: "blocked"})
 	if !IsBusy(err) {
 		t.Fatalf("add error = %v, want SQLite busy/locked", err)
 	}
@@ -410,7 +410,7 @@ func TestMetadataLimitStopsEntryGrowth(t *testing.T) {
 	entry := mustAdd(t, store, "bounded", "", metadata)
 	ctx := context.Background()
 	key := store.mustKey(entry.Ref)
-	_, err := store.Edit(ctx, everyAccess(store), key, api.EditEntryRequest{
+	_, err := store.Edit(ctx, everyAccess(store), key, api.EditPostRequest{
 		Metadata: map[string]string{"overflow": "value"},
 		User:     testUser,
 	})
@@ -419,7 +419,7 @@ func TestMetadataLimitStopsEntryGrowth(t *testing.T) {
 	}
 
 	edited, err := store.Edit(ctx, everyAccess(store), key,
-		api.EditEntryRequest{
+		api.EditPostRequest{
 			Metadata: map[string]string{"key-0": "replaced"},
 			User:     testUser,
 		})
@@ -452,7 +452,7 @@ func TestWritesProceedWhileAReadIsOpen(t *testing.T) {
 	writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if _, err := store.Add(writeCtx, everyAccess(store),
-		workspaceID(t, store, "general"), api.AddEntryRequest{
+		workspaceID(t, store, "general"), api.AddPostRequest{
 			Subject: "during the read",
 		}); err != nil {
 		t.Fatalf("adding while a read is open: %v", err)

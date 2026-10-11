@@ -180,9 +180,9 @@ check_status "the API version is required" "400" \
     "$main_url/api/workspaces"
 check_status "a protected workspace needs its secret" "401" \
     -H "Workstream-API-Version: $api_version" \
-    "$main_url/api/workspaces/personal/entries"
+    "$main_url/api/workspaces/personal/posts"
 check_status "old routes are absent" "404" \
-    -H "Workstream-API-Version: $api_version" "$main_url/api/entries"
+    -H "Workstream-API-Version: $api_version" "$main_url/api/posts"
 
 # Search filters reach the server as given.
 ws add "Find a Stock Image of a Duck" --project Duck-Pond >/dev/null # e1
@@ -353,7 +353,7 @@ check "add takes its parent's workspace" "Added entry [p3]." \
 curl -fsS -X POST -H "Workstream-API-Version: $api_version" \
     -H "Authorization: Bearer $test_secret" \
     --data "{\"subject\":\"Open linking protected\",\"project\":\"views\",\"origin\":{},\"links\":[{\"name\":\"see\",\"ref\":\"p1\"}]}" \
-    "$main_url/api/workspaces/general/entries" >/dev/null
+    "$main_url/api/workspaces/general/posts" >/dev/null
 under_protected="$(ws search 'Open linking protected' --id-only)"
 check "a protected link shows as its bare id" "see p1" \
     "$(ws entry "$under_protected")"
@@ -469,7 +469,7 @@ post_as_heron() {
     curl -fsS -X POST -H "Workstream-API-Version: $api_version" \
         --data "$2" "$main_url/api/$1" >/dev/null
 }
-post_as_heron workspaces/general/entries \
+post_as_heron workspaces/general/posts \
     '{"subject":"Heron topic","project":"owners","origin":{"user":"heron"}}'
 heron="$(ws search 'Heron topic' --id-only)"
 check "an edit of another user's entry names its owner and the next step" \
@@ -483,7 +483,7 @@ check "anyone can add under another user's entry" "[$reply]" \
     "$(ws tree "$heron")"
 check_equal "anyone can chat on another user's entry" "Sent [$heron-m1]." \
     "$(ws chat send "$heron" "Please fix the subject")"
-post_as_heron "entries/$heron/messages" \
+post_as_heron "posts/$heron/messages" \
     '{"body":"Fixed soon","origin":{"user":"heron"}}'
 check "an origin filter finds that user's messages" \
     "[$heron-m2] heron: Fixed soon" \
@@ -699,7 +699,7 @@ ws search SEARCHMARK >/dev/null
 check_status "an unknown field is refused" "400" \
     -X POST -H "Workstream-API-Version: $api_version" \
     --data '{"subject":"note","UNKNOWNFIELDMARK":1}' \
-    "$main_url/api/workspaces/general/entries"
+    "$main_url/api/workspaces/general/posts"
 check_equal "the server log holds no client text" "" \
     "$(grep -oE '[A-Z]*MARK' -- "$test_dir/main.log" || true)"
 check "the server log records each issued entry id" "issued $chat" \
@@ -722,11 +722,11 @@ forum_entry="$(cd "$test_dir/private-project" &&
 check_equal "forum records the user alone" \
     "\"origin\":{\"user\":\"$(id -un)\"}" \
     "$(curl -fsS -H "Workstream-API-Version: $api_version" \
-        "$main_url/api/entries/$forum_entry" | grep -o '"origin":{[^}]*}')"
+        "$main_url/api/posts/$forum_entry" | grep -o '"origin":{[^}]*}')"
 forum chat send "$forum_entry" "Forum reply" >/dev/null
 check_equal "the private context never reached the server" "" \
     "$(curl -fsS -H "Workstream-API-Version: $api_version" \
-        "$main_url/api/entries/$forum_entry/messages?after=0" |
+        "$main_url/api/posts/$forum_entry/messages?after=0" |
         grep -oE 'private-[a-z-]*|"host"|"dir"' || true)"
 check "forum help names forum" "  forum add <subject>" \
     "$(forum help)"

@@ -6,20 +6,20 @@ import "time"
 
 const MaxResponseBytes = 64 << 20
 
-// ProjectKey is reserved as a metadata key, since every entry has a
+// ProjectKey is reserved as a metadata key, since every post has a
 // project field, and a pair of that name would read as a second one.
 const ProjectKey = "project"
 
-// Link names with a meaning to the server. Every other name only
-// links. An entry has at most one parent, in its own workspace, and a
-// superseded entry is hidden from listings unless they ask for it.
+// Link names with a meaning to the server. Every other name only links.
+// A post has at most one parent, in its own workspace, and a superseded
+// post is hidden from listings unless they ask for it.
 const (
 	ParentLink     = "parent"
 	SupersedesLink = "supersedes"
 )
 
-// Workspace is a named collection of entries on a server, picked in an
-// entry id by its prefix.
+// Workspace is a named collection of posts on a server, picked in a
+// post id by its prefix.
 type Workspace struct {
 	Name   string `json:"name"`
 	Prefix string `json:"prefix"`
@@ -29,15 +29,15 @@ type WorkspacesResponse struct {
 	Workspaces []Workspace `json:"workspaces"`
 }
 
-// Link is a named relationship between entries, possibly in different
-// workspaces on one server. On an entry it names the target. In
-// backlinks it names the source.
+// Link is a named relationship between posts, possibly in different
+// workspaces on one server. On a post it names the target. In backlinks
+// it names the source.
 type Link struct {
 	Name string `json:"name"`
 	Ref  Ref    `json:"ref"`
 }
 
-// Origin records who created an entry or message and, as far as the
+// Origin records who created a post or message and, as far as the
 // client's metadata capture allows, where: the OS user, plus the host,
 // working directory and Claude Code session id of the client. Any field
 // may be empty.
@@ -48,9 +48,9 @@ type Origin struct {
 	ClaudeSession string `json:"claude_session,omitempty"`
 }
 
-// Entry is an entry with its own fields. A deleted entry has no
-// subject, body or metadata, and cannot be edited.
-type Entry struct {
+// Post is a post with its own fields. A deleted post has no subject,
+// body or metadata, and cannot be edited.
+type Post struct {
 	Ref      Ref               `json:"ref"`
 	Created  time.Time         `json:"created"`
 	Modified time.Time         `json:"modified"`
@@ -61,38 +61,38 @@ type Entry struct {
 	Origin   Origin            `json:"origin"`
 	Links    []Link            `json:"links,omitempty"`
 	Deleted  bool              `json:"deleted,omitempty"`
-	// SupersededBy lists the entries that supersede this one.
+	// SupersededBy lists the posts that supersede this one.
 	SupersededBy []Ref `json:"superseded_by,omitempty"`
 }
 
-// EntryRef names an entry in a path of ancestors or a chat overview.
-// An entry the request cannot read carries its ref alone.
-type EntryRef struct {
+// PostRef names a post in a path of ancestors or a chat overview. A
+// post the request cannot read carries its ref alone.
+type PostRef struct {
 	Ref          Ref    `json:"ref"`
 	Subject      string `json:"subject,omitempty"`
 	Deleted      bool   `json:"deleted,omitempty"`
 	SupersededBy []Ref  `json:"superseded_by,omitempty"`
 }
 
-// ListedEntry is an entry with the facts derived from its place in its
+// ListedPost is a post with the facts derived from its place in its
 // tree.
-type ListedEntry struct {
-	Entry
-	// Ancestors runs from the root down to the entry's parent.
-	Ancestors []EntryRef `json:"ancestors,omitempty"`
-	// Activity is the latest change anywhere in the entry's subtree,
-	// itself and chat included. Modified stays the entry's own edit
+type ListedPost struct {
+	Post
+	// Ancestors runs from the root down to the post's parent.
+	Ancestors []PostRef `json:"ancestors,omitempty"`
+	// Activity is the latest change anywhere in the post's subtree,
+	// itself and chat included. Modified stays the post's own edit
 	// time.
 	Activity time.Time `json:"activity"`
-	// Descendants counts the current entries under the entry, leaving
-	// out superseded ones.
+	// Descendants counts the current posts under the post, leaving out
+	// superseded ones.
 	Descendants int `json:"descendants"`
 }
 
-// EntryDetail adds the links that point at an entry, how many current
-// entries are its children, and a summary of its chat.
-type EntryDetail struct {
-	ListedEntry
+// PostDetail adds the links that point at a post, how many current
+// posts are its children, and a summary of its chat.
+type PostDetail struct {
+	ListedPost
 	Backlinks []Link `json:"backlinks,omitempty"`
 	Children  int    `json:"children"`
 	Messages  int    `json:"messages"`
@@ -100,30 +100,30 @@ type EntryDetail struct {
 	LastMessage int64 `json:"last_message"`
 }
 
-// TreeEntry is an entry in a tree, with where the tree was cut below
-// it. MoreBelow counts the entries under it when none of its children
-// are shown. MoreUnder counts the entries under it that are not shown
-// when some of its children are.
-type TreeEntry struct {
-	ListedEntry
+// TreePost is a post in a tree, with where the tree was cut below it.
+// MoreBelow counts the posts under it when none of its children are
+// shown. MoreUnder counts the posts under it that are not shown when
+// some of its children are.
+type TreePost struct {
+	ListedPost
 	MoreBelow int `json:"more_below,omitempty"`
 	MoreUnder int `json:"more_under,omitempty"`
 }
 
-// TreeResponse is an entry's subtree with the path to it. Entries come
-// depth first, each entry's children oldest first, and each entry's
+// TreeResponse is a post's subtree with the path to it. Posts come
+// depth first, each post's children oldest first, and each post's
 // parent link places it in the tree.
 type TreeResponse struct {
-	Ancestors []EntryRef  `json:"ancestors,omitempty"`
-	Entries   []TreeEntry `json:"entries"`
+	Ancestors []PostRef  `json:"ancestors,omitempty"`
+	Posts     []TreePost `json:"posts"`
 }
 
-// Message is one message in an entry's chat, numbered from 1 within
-// it in the order they were posted. An edit overwrites Body, keeps the
+// Message is one message in a post's chat, numbered from 1 within it in
+// the order they were posted. An edit overwrites Body, keeps the
 // message's place, and no earlier text is kept. A deleted message has
 // no body, and cannot be edited.
 type Message struct {
-	Entry    Ref       `json:"entry"`
+	Post     Ref       `json:"post"`
 	Number   int64     `json:"number"`
 	Created  time.Time `json:"created"`
 	Modified time.Time `json:"modified"`
@@ -133,7 +133,7 @@ type Message struct {
 }
 
 func (m Message) Ref() MessageRef {
-	return MessageRef{Entry: m.Entry, Number: m.Number}
+	return MessageRef{Post: m.Post, Number: m.Number}
 }
 
 type PostMessageRequest struct {
@@ -148,8 +148,8 @@ type EditMessageRequest struct {
 	User string `json:"user"`
 }
 
-// DeleteRequest carries the user deleting an entry or message, who
-// must be the user that posted it.
+// DeleteRequest carries the user deleting a post or message, who must
+// be the user that posted it.
 type DeleteRequest struct {
 	User string `json:"user"`
 }
@@ -164,28 +164,28 @@ type ChatPage struct {
 	Remaining int       `json:"remaining"`
 }
 
-// EntryChat is the newest messages of one entry in a chat overview,
+// PostChat is the newest messages of one post in a chat overview,
 // oldest first.
-type EntryChat struct {
-	Entry    EntryRef  `json:"entry"`
+type PostChat struct {
+	Post     PostRef   `json:"post"`
 	Messages []Message `json:"messages"`
 }
 
-// ChatOverview holds the newest messages across a workspace, grouped
-// by entry. Entries come in order of their newest message, the most
-// recent last.
+// ChatOverview holds the newest messages across a workspace, grouped by
+// post. Posts come in order of their newest message, the most recent
+// last.
 type ChatOverview struct {
-	Chats []EntryChat `json:"chats"`
+	Chats []PostChat `json:"chats"`
 }
 
-// Change is an entry added, edited or deleted, or a message posted,
-// edited or deleted in an entry's chat. Message is nil for a change to
-// the entry itself. Each carries its current content, so an entry or
+// Change is a post added, edited or deleted, or a message posted,
+// edited or deleted in a post's chat. Message is nil for a change to
+// the post itself. Each carries its current content, so a post or
 // message changed twice after a cursor appears once, at its latest
 // change.
 type Change struct {
-	Entry   ListedEntry `json:"entry"`
-	Message *Message    `json:"message,omitempty"`
+	Post    ListedPost `json:"post"`
+	Message *Message   `json:"message,omitempty"`
 }
 
 // ChangesPage holds a workspace's changes after a revision, oldest
@@ -199,7 +199,7 @@ type ChangesPage struct {
 	More    bool     `json:"more"`
 }
 
-type AddEntryRequest struct {
+type AddPostRequest struct {
 	Project  string            `json:"project"`
 	Subject  string            `json:"subject"`
 	Body     string            `json:"body,omitempty"`
@@ -208,13 +208,13 @@ type AddEntryRequest struct {
 	Links    []Link            `json:"links,omitempty"`
 }
 
-// EditEntryRequest uses pointers so a field can be updated to the
-// empty string (e.g. clearing the body) while absent fields are left
+// EditPostRequest uses pointers so a field can be updated to the empty
+// string (e.g. clearing the body) while absent fields are left
 // untouched. A metadata key given an empty value is removed.
 //
 // Links are removed before they are added. A parent that is added
-// replaces the old one, since an entry has at most one.
-type EditEntryRequest struct {
+// replaces the old one, since a post has at most one.
+type EditPostRequest struct {
 	Project  *string           `json:"project,omitempty"`
 	Subject  *string           `json:"subject,omitempty"`
 	Body     *string           `json:"body,omitempty"`
@@ -225,32 +225,32 @@ type EditEntryRequest struct {
 	RemoveLinks     []Link   `json:"remove_links,omitempty"`
 	RemoveLinkNames []string `json:"remove_link_names,omitempty"`
 	// User is the user making the edit, who must be the user that
-	// posted the entry.
+	// added the post.
 	User string `json:"user"`
 }
 
-// ChangesContent reports whether the edit changes the entry itself,
+// ChangesContent reports whether the edit changes the post itself,
 // rather than only its links.
-func (r EditEntryRequest) ChangesContent() bool {
+func (r EditPostRequest) ChangesContent() bool {
 	return r.Project != nil || r.Subject != nil || r.Body != nil ||
 		len(r.Metadata) > 0
 }
 
-// Match is a match on a page of a listing. It is an entry, or a
-// message in the entry's chat when Message is set. Ancestors runs from
-// the root down to the entry's parent. Revision and At are the revision
-// and time of the change the match ranks by. That is the message's
-// post, or the entry's own latest change in a listing with chat, or
-// else the latest change to the entry or its chat. NewMessages counts,
-// in a listing without chat, the messages posted in the entry's chat
-// at or after the revision of the page's oldest match.
+// Match is a match on a page of a listing. It is a post, or a message
+// in the post's chat when Message is set. Ancestors runs from the root
+// down to the post's parent. Revision and At are the revision and time
+// of the change the match ranks by. That is the posting of the
+// message, or the post's own latest change in a listing with chat, or
+// else the latest change to the post or its chat. NewMessages counts,
+// in a listing without chat, the messages posted in the post's chat at
+// or after the revision of the page's oldest match.
 type Match struct {
-	Entry       Entry      `json:"entry"`
-	Ancestors   []EntryRef `json:"ancestors,omitempty"`
-	Message     *Message   `json:"message,omitempty"`
-	Revision    int64      `json:"revision"`
-	At          time.Time  `json:"at"`
-	NewMessages int        `json:"new_messages,omitempty"`
+	Post        Post      `json:"post"`
+	Ancestors   []PostRef `json:"ancestors,omitempty"`
+	Message     *Message  `json:"message,omitempty"`
+	Revision    int64     `json:"revision"`
+	At          time.Time `json:"at"`
+	NewMessages int       `json:"new_messages,omitempty"`
 }
 
 // MatchPage is a page of a listing, newest first. More says whether
@@ -270,7 +270,7 @@ const (
 	CodeUnauthorized       ErrorCode = "unauthorized"
 	CodeUnknownWorkspace   ErrorCode = "unknown_workspace"
 	CodeUnknownPrefix      ErrorCode = "unknown_prefix"
-	CodeEntryNotFound      ErrorCode = "entry_not_found"
+	CodePostNotFound       ErrorCode = "post_not_found"
 	CodeMessageNotFound    ErrorCode = "message_not_found"
 	CodeLinkNotFound       ErrorCode = "link_not_found"
 	CodeLinkTargetNotFound ErrorCode = "link_target_not_found"
@@ -290,16 +290,16 @@ type ErrorResponse struct {
 
 type Project struct {
 	Name string `json:"name"`
-	// Latest is the latest change to an entry of the project or to
-	// its chat.
+	// Latest is the latest change to a post of the project or to its
+	// chat.
 	Latest time.Time `json:"latest"`
-	// RecentEntries counts the project's entries created since the
+	// RecentPosts counts the project's posts created since the
 	// response's RecentSince.
-	RecentEntries int `json:"recent_entries"`
-	// Entries counts every entry of the project. Only a request that
-	// names the project gets it, since counting every project's entries
-	// takes time in proportion to the workspace.
-	Entries *int `json:"entries,omitempty"`
+	RecentPosts int `json:"recent_posts"`
+	// Posts counts every post of the project. Only a request that names
+	// the project gets it, since counting every project's posts takes
+	// time in proportion to the workspace.
+	Posts *int `json:"posts,omitempty"`
 }
 
 // ProjectsResponse lists projects, the most recently active first.
@@ -309,9 +309,9 @@ type ProjectsResponse struct {
 	// any the limit left out.
 	Count       int       `json:"count"`
 	RecentSince time.Time `json:"recent_since"`
-	// RecentEntries sums the RecentEntries of every project the request
+	// RecentPosts sums the RecentPosts of every project the request
 	// matched, including any the limit left out.
-	RecentEntries int `json:"recent_entries"`
+	RecentPosts int `json:"recent_posts"`
 }
 
 type StatusResponse struct {

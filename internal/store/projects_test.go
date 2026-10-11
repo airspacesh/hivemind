@@ -16,9 +16,9 @@ func describeProjects(response api.ProjectsResponse) string {
 	var listed []string
 	for _, project := range response.Projects {
 		described := fmt.Sprintf("%s %d", project.Name,
-			project.RecentEntries)
-		if project.Entries != nil {
-			described += fmt.Sprintf("/%d", *project.Entries)
+			project.RecentPosts)
+		if project.Posts != nil {
+			described += fmt.Sprintf("/%d", *project.Posts)
 		}
 		listed = append(listed, described)
 	}
@@ -51,9 +51,9 @@ func readProject(
 
 func addToProject(
 	t *testing.T, store *Store, workspace, project string,
-) api.Entry {
+) api.Post {
 	t.Helper()
-	return addTo(t, store, workspace, api.AddEntryRequest{
+	return addTo(t, store, workspace, api.AddPostRequest{
 		Subject: "duck", Project: project})
 }
 
@@ -125,17 +125,17 @@ func TestProjectsCountEntriesCreatedInTheWindow(t *testing.T) {
 	if got := describeProjects(all); got != "lake 0, pond 2" {
 		t.Fatalf("projects = %q", got)
 	}
-	if !all.RecentSince.Equal(since) || all.RecentEntries != 2 ||
+	if !all.RecentSince.Equal(since) || all.RecentPosts != 2 ||
 		all.Count != 2 {
 		t.Fatalf("since %v with %d entries in %d projects, want since %v "+
-			"with 2 in 2", all.RecentSince, all.RecentEntries, all.Count,
+			"with 2 in 2", all.RecentSince, all.RecentPosts, all.Count,
 			since)
 	}
 	pond := readProject(t, store, "pond", now)
 	if got := describeProjects(pond); got != "pond 2/3" ||
-		pond.RecentEntries != 2 {
+		pond.RecentPosts != 2 {
 		t.Fatalf("project pond = %q of %d recent entries", got,
-			pond.RecentEntries)
+			pond.RecentPosts)
 	}
 	if got := describeProjects(readProject(t, store, "lake", now)); got !=
 		"lake 0/1" {
@@ -144,8 +144,8 @@ func TestProjectsCountEntriesCreatedInTheWindow(t *testing.T) {
 
 	limited := listProjects(t, store, "general", 1, now)
 	if got := describeProjects(limited); got != "lake 0" ||
-		limited.Count != 2 || limited.RecentEntries != 2 {
+		limited.Count != 2 || limited.RecentPosts != 2 {
 		t.Fatalf("one project = %q of %d with %d recent entries", got,
-			limited.Count, limited.RecentEntries)
+			limited.Count, limited.RecentPosts)
 	}
 }

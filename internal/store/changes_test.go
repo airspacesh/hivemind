@@ -32,7 +32,7 @@ func changeIDs(page api.ChangesPage) []string {
 		if change.Message != nil {
 			ids = append(ids, change.Message.Ref().String())
 		} else {
-			ids = append(ids, change.Entry.Ref.String())
+			ids = append(ids, change.Post.Ref.String())
 		}
 	}
 	return ids
@@ -81,11 +81,11 @@ func TestChangesListAChangeAgainOnlyWhenItChangesAfterTheCursor(t *testing.T) {
 	_, cursor := readAllChanges(t, store, 0, 10)
 
 	unseen := mustAdd(t, store, "unseen", "", nil)
-	for _, entry := range []api.Entry{unseen, seen, unseen} {
+	for _, entry := range []api.Post{unseen, seen, unseen} {
 		subject := "edited"
 		if _, err := store.Edit(ctx, everyAccess(store),
 			store.mustKey(entry.Ref),
-			api.EditEntryRequest{Subject: &subject, User: testUser},
+			api.EditPostRequest{Subject: &subject, User: testUser},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -109,7 +109,7 @@ func TestChangesLeaveOutEditsToLinksAlone(t *testing.T) {
 	_, cursor := readAllChanges(t, store, 0, 10)
 
 	if _, err := store.Edit(context.Background(), everyAccess(store),
-		store.mustKey(child.Ref), api.EditEntryRequest{
+		store.mustKey(child.Ref), api.EditPostRequest{
 			AddLinks: []api.Link{link("parent", parent.Ref)},
 			User:     testUser,
 		}); err != nil {
@@ -124,7 +124,7 @@ func TestLatestRevisionSkipsEveryChangeSoFar(t *testing.T) {
 	store := openTestStore(t)
 	entry := mustAdd(t, store, "first", "", nil)
 	mustPost(t, store, entry.Ref, "hi")
-	addTo(t, store, "personal", api.AddEntryRequest{Subject: "private"})
+	addTo(t, store, "personal", api.AddPostRequest{Subject: "private"})
 	latest, err := store.LatestRevision(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func TestRefusedEditsTakeNoRevision(t *testing.T) {
 
 	subject := "taken"
 	if _, err := store.Edit(ctx, everyAccess(store),
-		store.mustKey(entry.Ref), api.EditEntryRequest{
+		store.mustKey(entry.Ref), api.EditPostRequest{
 			Subject: &subject, User: "heron"}); err == nil {
 		t.Fatal("another user edited the entry")
 	}
@@ -225,13 +225,13 @@ func TestChangesReadDuringWritesMissNone(t *testing.T) {
 func TestChangesStayInTheirWorkspace(t *testing.T) {
 	store := openTestStore(t)
 	open := mustAdd(t, store, "open", "", nil)
-	private := addTo(t, store, "personal", api.AddEntryRequest{
+	private := addTo(t, store, "personal", api.AddPostRequest{
 		Subject: "PRIVATEMARK",
 		Links:   []api.Link{link("see", open.Ref)},
 	})
 	mustPost(t, store, private.Ref, "PRIVATEMARK")
 	if _, err := store.Edit(context.Background(), everyAccess(store),
-		store.mustKey(open.Ref), api.EditEntryRequest{
+		store.mustKey(open.Ref), api.EditPostRequest{
 			AddLinks: []api.Link{link("see", private.Ref)},
 			User:     testUser,
 		}); err != nil {
@@ -307,20 +307,20 @@ func TestFilteredChangesShowEachMatchOnceAtAnyLimitAndSpan(t *testing.T) {
 	lead := api.Origin{User: testUser, ClaudeSession: "lead"}
 	bare := api.Origin{User: testUser}
 	heron := api.Origin{User: "heron", ClaudeSession: "lead"}
-	pond := addTo(t, store, "general", api.AddEntryRequest{
+	pond := addTo(t, store, "general", api.AddPostRequest{
 		Project: "pond", Subject: "pond", Origin: lead})
-	addTo(t, store, "personal", api.AddEntryRequest{Subject: "elsewhere"})
-	lake := addTo(t, store, "general", api.AddEntryRequest{
+	addTo(t, store, "personal", api.AddPostRequest{Subject: "elsewhere"})
+	lake := addTo(t, store, "general", api.AddPostRequest{
 		Project: "lake", Subject: "lake", Origin: bare})
 	postFrom(t, store, pond.Ref, "quack", lead)
 	postFrom(t, store, lake.Ref, "quack", heron)
 	postFrom(t, store, pond.Ref, "honk", bare)
-	addTo(t, store, "general", api.AddEntryRequest{
+	addTo(t, store, "general", api.AddPostRequest{
 		Project: "pond", Subject: "reeds", Origin: heron})
 	// An edit stores no origin, so the entry keeps its creator's key.
 	subject := "pond, edited"
 	if _, err := store.Edit(context.Background(), everyAccess(store),
-		store.mustKey(pond.Ref), api.EditEntryRequest{
+		store.mustKey(pond.Ref), api.EditPostRequest{
 			Subject: &subject, User: testUser}); err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +376,7 @@ func TestFilteredChangesShowEachMatchOnceAtAnyLimitAndSpan(t *testing.T) {
 func TestChangesCursorPassesWhatDoesNotMatch(t *testing.T) {
 	store := openTestStore(t)
 	duck := Filter{Project: []FieldCond{{Value: "duck"}}}
-	entry := addTo(t, store, "general", api.AddEntryRequest{
+	entry := addTo(t, store, "general", api.AddPostRequest{
 		Project: "heron", Subject: "not a duck"})
 	mustPost(t, store, entry.Ref, "still not")
 	latest := latestRevision(t, store)
@@ -390,7 +390,7 @@ func TestChangesCursorPassesWhatDoesNotMatch(t *testing.T) {
 		t.Fatalf("read %+v, want no changes and cursor %d", page, latest)
 	}
 
-	addTo(t, store, "general", api.AddEntryRequest{
+	addTo(t, store, "general", api.AddPostRequest{
 		Project: "duck", Subject: "a duck"})
 	got, _ := readAllMatching(t, store, page.Cursor, duck, nil, 10,
 		revisionsPerRead)
@@ -402,12 +402,12 @@ func TestChangesCursorPassesWhatDoesNotMatch(t *testing.T) {
 func TestChangesCursorAtAFullPageIsItsLastMatch(t *testing.T) {
 	store := openTestStore(t)
 	duck := Filter{Project: []FieldCond{{Value: "duck"}}}
-	addTo(t, store, "general", api.AddEntryRequest{
+	addTo(t, store, "general", api.AddPostRequest{
 		Project: "duck", Subject: "first"})
 	first := latestRevision(t, store)
-	addTo(t, store, "general", api.AddEntryRequest{
+	addTo(t, store, "general", api.AddPostRequest{
 		Project: "heron", Subject: "between"})
-	addTo(t, store, "general", api.AddEntryRequest{
+	addTo(t, store, "general", api.AddPostRequest{
 		Project: "duck", Subject: "second"})
 
 	page, err := store.Changes(context.Background(), everyAccess(store),
@@ -431,7 +431,7 @@ func TestExcludedOriginKeysMatchExactly(t *testing.T) {
 		{User: "Duck", ClaudeSession: "lead"},
 		{User: testUser, ClaudeSession: "Lead"},
 	}
-	entry := addTo(t, store, "general", api.AddEntryRequest{
+	entry := addTo(t, store, "general", api.AddPostRequest{
 		Subject: "chat", Origin: api.Origin{User: "nobody"}})
 	for i, origin := range origins {
 		postFrom(t, store, entry.Ref, fmt.Sprint(i+1), origin)
@@ -462,9 +462,9 @@ func TestExcludedOriginKeysMatchExactly(t *testing.T) {
 func TestChangesUnderAnEntryKeepToItsSubtree(t *testing.T) {
 	store := openTestStore(t)
 	root := mustAdd(t, store, "root", "", nil)
-	child := addTo(t, store, "general", api.AddEntryRequest{
+	child := addTo(t, store, "general", api.AddPostRequest{
 		Subject: "child", Links: []api.Link{link("parent", root.Ref)}})
-	grandchild := addTo(t, store, "general", api.AddEntryRequest{
+	grandchild := addTo(t, store, "general", api.AddPostRequest{
 		Subject: "grandchild", Links: []api.Link{link("parent", child.Ref)}})
 	other := mustAdd(t, store, "other", "", nil)
 	mustPost(t, store, grandchild.Ref, "deep")

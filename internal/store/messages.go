@@ -34,7 +34,7 @@ func (s *Store) scanMessage(
 	if err != nil {
 		return api.Message{}, err
 	}
-	message.Entry = s.mustRef(key)
+	message.Post = s.mustRef(key)
 	if message.Created, err = parseTime(created); err != nil {
 		return api.Message{}, err
 	}
@@ -53,7 +53,7 @@ func (s *Store) getMessage(
 		entry.Workspace, entry.ID, number,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
-		ref := api.MessageRef{Entry: s.mustRef(entry), Number: number}
+		ref := api.MessageRef{Post: s.mustRef(entry), Number: number}
 		return api.Message{}, fmt.Errorf("%w: %s", ErrMessageNotFound, ref)
 	}
 	if err != nil {
@@ -393,19 +393,19 @@ func (s *Store) Overview(
 
 	// Walking newest first meets each entry at its newest message, so
 	// reversing the chats afterwards leaves the most recent last.
-	overview := api.ChatOverview{Chats: []api.EntryChat{}}
+	overview := api.ChatOverview{Chats: []api.PostChat{}}
 	chatOf := map[api.Ref]int{}
 	for _, message := range newestFirst {
-		if _, ok := chatOf[message.Entry]; !ok {
-			described, err := v.entryRef(ctx, s.mustKey(message.Entry))
+		if _, ok := chatOf[message.Post]; !ok {
+			described, err := v.entryRef(ctx, s.mustKey(message.Post))
 			if err != nil {
 				return api.ChatOverview{}, err
 			}
-			chatOf[message.Entry] = len(overview.Chats)
+			chatOf[message.Post] = len(overview.Chats)
 			overview.Chats = append(overview.Chats,
-				api.EntryChat{Entry: described})
+				api.PostChat{Post: described})
 		}
-		chat := &overview.Chats[chatOf[message.Entry]]
+		chat := &overview.Chats[chatOf[message.Post]]
 		chat.Messages = append(chat.Messages, message)
 	}
 	slices.Reverse(overview.Chats)

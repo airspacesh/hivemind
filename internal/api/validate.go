@@ -8,9 +8,8 @@ import (
 )
 
 // Field length limits, in characters (runes). The subject is a short
-// headline; body holds any longer detail and is hidden from list
-// views. The caps keep entries from turning the stream into a data
-// store.
+// headline; body holds any longer detail and is hidden from list views.
+// The caps keep posts from turning the stream into a data store.
 const (
 	MaxProjectLen = 256
 	MaxSubjectLen = 72
@@ -81,7 +80,7 @@ func validateSlug(field, name string) error {
 
 func validateKey(key string) error {
 	if key == ProjectKey {
-		return fmt.Errorf("%s is not a metadata key. Every entry has a "+
+		return fmt.Errorf("%s is not a metadata key. Every post has a "+
 			"project field of its own, so set that instead", ProjectKey)
 	}
 	return validateSlug("metadata key", key)
@@ -125,7 +124,7 @@ func validateMetadata(md map[string]string) error {
 // validateMetadataEdits checks the metadata an edit sets. An empty
 // value asks for the key to be removed, so it carries no value to
 // check. Counting is left to the store, which is the only side that
-// knows how many pairs the entry ends up with.
+// knows how many pairs the post ends up with.
 func validateMetadataEdits(md map[string]string) error {
 	for key, value := range md {
 		if value == "" {
@@ -222,7 +221,7 @@ func validateLink(link Link) error {
 		return err
 	}
 	if link.Ref.ID == 0 {
-		return fmt.Errorf("link %s needs an entry id", link.Name)
+		return fmt.Errorf("link %s needs a post id", link.Name)
 	}
 	return nil
 }
@@ -236,7 +235,7 @@ func validateLinks(links []Link) error {
 	return nil
 }
 
-// Validate checks the provenance an entry carries. Every field is
+// Validate checks the provenance a post carries. Every field is
 // optional, and none may contain control characters.
 func (o Origin) Validate() error {
 	fields := []struct {
@@ -261,7 +260,7 @@ func (o Origin) Validate() error {
 	return nil
 }
 
-func (r AddEntryRequest) Validate() error {
+func (r AddPostRequest) Validate() error {
 	if r.Subject == "" {
 		return fmt.Errorf("subject is required")
 	}
@@ -293,7 +292,7 @@ func (r AddEntryRequest) Validate() error {
 	return r.Origin.Validate()
 }
 
-func (r EditEntryRequest) Validate() error {
+func (r EditPostRequest) Validate() error {
 	if !r.ChangesContent() && len(r.AddLinks) == 0 &&
 		len(r.RemoveLinks) == 0 && len(r.RemoveLinkNames) == 0 {
 		return fmt.Errorf("nothing to edit: provide project, subject, " +

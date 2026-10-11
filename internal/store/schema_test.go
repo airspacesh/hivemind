@@ -226,9 +226,9 @@ func TestOpenSyncsWorkspacesWithTheConfig(t *testing.T) {
 	first := reopen(api.Workspace{Name: "general", Prefix: "e"},
 		api.Workspace{Name: "personal", Prefix: "p"})
 	work := addTo(t, first, "general",
-		api.AddEntryRequest{Subject: "work"})
+		api.AddPostRequest{Subject: "work"})
 	private := addTo(t, first, "personal",
-		api.AddEntryRequest{Subject: "private"})
+		api.AddPostRequest{Subject: "private"})
 	ids := map[string]int64{}
 	for _, workspace := range first.Workspaces() {
 		ids[workspace.Name] = workspace.ID

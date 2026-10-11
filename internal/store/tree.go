@@ -62,9 +62,9 @@ func (v view) readTreeFacts(ctx context.Context, key Key) (treeFacts, error) {
 
 // listEntries adds each entry's ancestors and subtree facts.
 func (v view) listEntries(
-	ctx context.Context, entries []api.Entry,
-) ([]api.ListedEntry, error) {
-	listed := make([]api.ListedEntry, len(entries))
+	ctx context.Context, entries []api.Post,
+) ([]api.ListedPost, error) {
+	listed := make([]api.ListedPost, len(entries))
 	for i, entry := range entries {
 		key := v.store.mustKey(entry.Ref)
 		path, err := v.ancestors(ctx, key)
@@ -75,8 +75,8 @@ func (v view) listEntries(
 		if err != nil {
 			return nil, err
 		}
-		listed[i] = api.ListedEntry{
-			Entry:       entry,
+		listed[i] = api.ListedPost{
+			Post:        entry,
 			Ancestors:   path,
 			Activity:    facts.activity,
 			Descendants: facts.descendants,
@@ -273,15 +273,15 @@ func (s *Store) Tree(
 		if err != nil {
 			return api.TreeResponse{}, err
 		}
-		listed, err := v.listEntries(ctx, []api.Entry{entry})
+		listed, err := v.listEntries(ctx, []api.Post{entry})
 		if err != nil {
 			return api.TreeResponse{}, err
 		}
 		moreBelow, moreUnder := treeCuts(node)
-		response.Entries = append(response.Entries, api.TreeEntry{
-			ListedEntry: listed[0],
-			MoreBelow:   moreBelow,
-			MoreUnder:   moreUnder,
+		response.Posts = append(response.Posts, api.TreePost{
+			ListedPost: listed[0],
+			MoreBelow:  moreBelow,
+			MoreUnder:  moreUnder,
 		})
 	}
 	response.Ancestors, err = v.ancestors(ctx, key)

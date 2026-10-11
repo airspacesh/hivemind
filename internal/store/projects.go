@@ -65,7 +65,7 @@ func (s *Store) Projects(
 		var project api.Project
 		var latest string
 		if err := rows.Scan(
-			&project.Name, &latest, &project.RecentEntries,
+			&project.Name, &latest, &project.RecentPosts,
 		); err != nil {
 			return api.ProjectsResponse{}, fmt.Errorf(
 				"listing projects: %w", err)
@@ -74,7 +74,7 @@ func (s *Store) Projects(
 			return api.ProjectsResponse{}, err
 		}
 		response.Count++
-		response.RecentEntries += project.RecentEntries
+		response.RecentPosts += project.RecentPosts
 		if len(response.Projects) < limit {
 			response.Projects = append(response.Projects, project)
 		}
@@ -113,7 +113,7 @@ func (s *Store) Project(
 		return response, nil
 	}
 	project := api.Project{
-		Name: name, RecentEntries: recent, Entries: &entries,
+		Name: name, RecentPosts: recent, Posts: &entries,
 	}
 	var err error
 	if project.Latest, err = parseTime(latest.String); err != nil {
@@ -121,6 +121,6 @@ func (s *Store) Project(
 	}
 	response.Projects = append(response.Projects, project)
 	response.Count = 1
-	response.RecentEntries = recent
+	response.RecentPosts = recent
 	return response, nil
 }

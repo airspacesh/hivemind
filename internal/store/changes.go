@@ -221,7 +221,7 @@ func (s *Store) changes(
 		keys = keys[:limit]
 		page.Cursor = keys[limit-1].revision
 	}
-	listed := map[Key]api.ListedEntry{}
+	listed := map[Key]api.ListedPost{}
 	for _, key := range keys {
 		entryKey := Key{Workspace: workspace, ID: key.entry}
 		entry, ok := listed[entryKey]
@@ -230,14 +230,14 @@ func (s *Store) changes(
 			if err != nil {
 				return api.ChangesPage{}, err
 			}
-			entries, err := v.listEntries(ctx, []api.Entry{found})
+			entries, err := v.listEntries(ctx, []api.Post{found})
 			if err != nil {
 				return api.ChangesPage{}, err
 			}
 			entry = entries[0]
 			listed[entryKey] = entry
 		}
-		change := api.Change{Entry: entry}
+		change := api.Change{Post: entry}
 		if key.message != 0 {
 			message, err := s.getMessage(ctx, v.tx, entryKey, key.message)
 			if err != nil {

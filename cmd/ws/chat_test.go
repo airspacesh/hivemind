@@ -128,7 +128,7 @@ func TestWaitResetsBackoffAfterAnAnswer(t *testing.T) {
 
 func TestWaitStopsAtOnceOnARefusal(t *testing.T) {
 	refused := &serverError{server: "http://pond", status: 404,
-		code: api.CodeEntryNotFound, message: "entry not found: e3"}
+		code: api.CodePostNotFound, message: "entry not found: e3"}
 	clk := &fakeClock{}
 	_, err := waitFor(polls(refused), time.Hour, clk)
 	if !errors.Is(err, refused) || len(clk.sleeps) != 0 {

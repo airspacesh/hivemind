@@ -155,10 +155,10 @@ func hosting(next http.HandlerFunc, workspaces ...string) http.HandlerFunc {
 	}
 }
 
-func entryDetail(ref string) api.EntryDetail {
+func entryDetail(ref string) api.PostDetail {
 	parsed, _ := api.ParseRef(ref)
 	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
-	return api.EntryDetail{ListedEntry: api.ListedEntry{Entry: api.Entry{
+	return api.PostDetail{ListedPost: api.ListedPost{Post: api.Post{
 		Ref: parsed, Created: when, Modified: when,
 		Subject: "Count the ducklings",
 	}, Activity: when}}
@@ -166,7 +166,7 @@ func entryDetail(ref string) api.EntryDetail {
 
 func answering(ref string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/entries/"+ref {
+		if r.URL.Path == "/api/posts/"+ref {
 			reply(w, http.StatusOK, entryDetail(ref))
 			return
 		}
@@ -315,16 +315,16 @@ func TestListProjectsShowsSharesOfRecentEntries(t *testing.T) {
 		reply(w, http.StatusOK, api.ProjectsResponse{
 			Projects: []api.Project{
 				{Name: "duck-pond", Latest: at("2026-10-10 20:41"),
-					RecentEntries: 1204},
+					RecentPosts: 1204},
 				{Name: "heron", Latest: at("2026-10-09 14:10"),
-					RecentEntries: 4},
+					RecentPosts: 4},
 				{Name: "nest", Latest: at("2026-10-08 09:15"),
-					RecentEntries: 1},
+					RecentPosts: 1},
 				{Name: "old-lake", Latest: at("2026-05-01 10:00")},
 			},
-			Count:         6,
-			RecentSince:   time.Now().Add(-90 * 24 * time.Hour),
-			RecentEntries: 3200,
+			Count:       6,
+			RecentSince: time.Now().Add(-90 * 24 * time.Hour),
+			RecentPosts: 3200,
 		})
 	})
 	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
@@ -353,7 +353,7 @@ func TestConfiguredPrefixSkipsAskingServers(t *testing.T) {
 	if got := ws(t, config, "entry", "r7"); !got.ok {
 		t.Fatal(got)
 	}
-	if got := second.recorded(); len(got) != 1 || got[0].path != "/api/entries/r7" {
+	if got := second.recorded(); len(got) != 1 || got[0].path != "/api/posts/r7" {
 		t.Fatalf("the prefix's server got %v", got)
 	}
 }
@@ -364,8 +364,8 @@ func TestAddTakesItsParentsWorkspace(t *testing.T) {
 	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "POST" &&
-			r.URL.Path == "/api/workspaces/personal/entries":
-			reply(w, http.StatusCreated, entryDetail("p4").Entry)
+			r.URL.Path == "/api/workspaces/personal/posts":
+			reply(w, http.StatusCreated, entryDetail("p4").Post)
 		case r.URL.Path == "/api/workspaces/personal/projects":
 			reply(w, http.StatusOK, api.ProjectsResponse{
 				Projects: []api.Project{}})
@@ -382,7 +382,7 @@ func TestAddTakesItsParentsWorkspace(t *testing.T) {
 		t.Fatal(got)
 	}
 	if posted := server.recorded()[0]; posted.path !=
-		"/api/workspaces/personal/entries" {
+		"/api/workspaces/personal/posts" {
 		t.Fatalf("the add went to %s", posted.path)
 	}
 }
@@ -392,7 +392,7 @@ func TestAddTakesItsParentsWorkspace(t *testing.T) {
 func TestSearchUnderTakesItsEntrysWorkspace(t *testing.T) {
 	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/workspaces/personal/entries":
+		case "/api/workspaces/personal/posts":
 			reply(w, http.StatusOK, api.MatchPage{})
 		default:
 			refuse(w, http.StatusNotFound, api.CodeRouteNotFound, "no route")
@@ -414,13 +414,13 @@ func TestSearchUnderTakesItsEntrysWorkspace(t *testing.T) {
 func TestOverviewMarksEarlierMessages(t *testing.T) {
 	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
 	message := func(number int64) api.Message {
-		return api.Message{Entry: api.Ref{Prefix: "e", ID: 1},
+		return api.Message{Post: api.Ref{Prefix: "e", ID: 1},
 			Number: number, Created: when, Modified: when, Body: "quack",
 			Origin: api.Origin{User: "duck"}}
 	}
 	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
-		reply(w, http.StatusOK, api.ChatOverview{Chats: []api.EntryChat{
-			{Entry: api.EntryRef{Ref: api.Ref{Prefix: "e", ID: 1},
+		reply(w, http.StatusOK, api.ChatOverview{Chats: []api.PostChat{
+			{Post: api.PostRef{Ref: api.Ref{Prefix: "e", ID: 1},
 				Subject: "Why?"},
 				Messages: []api.Message{message(7), message(8)}},
 		}})
@@ -445,7 +445,7 @@ func sendAfterServer(t *testing.T, sent, newest int64) string {
 		if number == sent {
 			user = "duck"
 		}
-		return api.Message{Entry: api.Ref{Prefix: "e", ID: 1},
+		return api.Message{Post: api.Ref{Prefix: "e", ID: 1},
 			Number: number, Created: when, Modified: when, Body: "quack",
 			Origin: api.Origin{User: user}}
 	}
@@ -516,7 +516,7 @@ func listingServer(
 	var mu sync.Mutex
 	var queries []url.Values
 	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/workspaces/general/entries" {
+		if r.URL.Path != "/api/workspaces/general/posts" {
 			t.Errorf("request to %s", r.URL.Path)
 		}
 		mu.Lock()
@@ -542,24 +542,24 @@ func TestListingShowsAMatchALine(t *testing.T) {
 	}
 	ref := func(id int64) api.Ref { return api.Ref{Prefix: "f", ID: id} }
 	by := func(user string) api.Origin { return api.Origin{User: user} }
-	releases := api.EntryRef{Ref: ref(4), Subject: "toolkit releases"}
-	release := api.EntryRef{Ref: ref(5), Subject: "toolkit 2.4.0"}
+	releases := api.PostRef{Ref: ref(4), Subject: "toolkit releases"}
+	release := api.PostRef{Ref: ref(5), Subject: "toolkit 2.4.0"}
 	config, queries := listingServer(t, api.MatchPage{
 		Matches: []api.Match{
-			{Entry: api.Entry{Ref: ref(21), Subject: "Fixture rules",
+			{Post: api.Post{Ref: ref(21), Subject: "Fixture rules",
 				Origin: by("ruth")}, Revision: 90, At: at(59),
 				NewMessages: 4},
-			{Entry: api.Entry{Ref: ref(6), Origin: by("lena")},
-				Ancestors: []api.EntryRef{releases, release},
-				Message: &api.Message{Entry: ref(6), Number: 4,
+			{Post: api.Post{Ref: ref(6), Origin: by("lena")},
+				Ancestors: []api.PostRef{releases, release},
+				Message: &api.Message{Post: ref(6), Number: 4,
 					Created: at(58), Modified: at(59), Body: "two\nlines",
 					Origin: by("lena")}, Revision: 89, At: at(58)},
-			{Entry: api.Entry{Ref: ref(7), Deleted: true,
-				Origin: by("omar")}, Ancestors: []api.EntryRef{releases},
+			{Post: api.Post{Ref: ref(7), Deleted: true,
+				Origin: by("omar")}, Ancestors: []api.PostRef{releases},
 				Revision: 85, At: at(40), NewMessages: 1},
-			{Entry: api.Entry{Ref: ref(6), Origin: by("lena")},
-				Ancestors: []api.EntryRef{releases, release},
-				Message: &api.Message{Entry: ref(6), Number: 2,
+			{Post: api.Post{Ref: ref(6), Origin: by("lena")},
+				Ancestors: []api.PostRef{releases, release},
+				Message: &api.Message{Post: ref(6), Number: 2,
 					Created: at(38), Modified: at(38), Deleted: true,
 					Origin: by("ines")}, Revision: 81, At: at(38)},
 		},
@@ -641,7 +641,7 @@ func shellWords(command string) ([]string, error) {
 // shown, with the same text, filters and bounds.
 func TestFooterAsksForTheNextPage(t *testing.T) {
 	config, queries := listingServer(t, api.MatchPage{
-		Matches: []api.Match{{Entry: api.Entry{
+		Matches: []api.Match{{Post: api.Post{
 			Ref: api.Ref{Prefix: "e", ID: 3}, Subject: "Pond"},
 			Revision: 812345}},
 		More: true,
@@ -696,7 +696,7 @@ func TestResolutionMovesOnOnlyForAnAbsentPrefix(t *testing.T) {
 	}
 	want = []request{
 		{"GET", "/api/workspaces", ""},
-		{"GET", "/api/entries/p3", "Bearer second-secret"},
+		{"GET", "/api/posts/p3", "Bearer second-secret"},
 	}
 	if got := second.recorded(); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("second server got %v, want %v", got, want)
@@ -777,7 +777,7 @@ func TestFailuresAreNeverAnUnknownPrefix(t *testing.T) {
 		want    string
 	}{
 		"missing entry": {func(w http.ResponseWriter, r *http.Request) {
-			refuse(w, http.StatusNotFound, api.CodeEntryNotFound,
+			refuse(w, http.StatusNotFound, api.CodePostNotFound,
 				"entry not found: p3")
 		}, "entry not found: p3"},
 		"auth failure": {func(w http.ResponseWriter, r *http.Request) {
@@ -904,7 +904,7 @@ func listing(times ...time.Time) http.HandlerFunc {
 		var page api.MatchPage
 		for i, when := range times {
 			page.Matches = append(page.Matches, api.Match{
-				Entry: api.Entry{
+				Post: api.Post{
 					Ref:     api.Ref{Prefix: "e", ID: int64(i + 1)},
 					Created: when, Modified: when, Subject: "Duck"},
 				At: when,

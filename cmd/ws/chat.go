@@ -128,10 +128,10 @@ func parseChatAfter(
 	entry api.Ref, value string, now time.Time,
 ) (api.ChatBound, error) {
 	if cursor, err := api.ParseMessageCursor(value); err == nil {
-		if cursor.Entry != entry {
+		if cursor.Post != entry {
 			return api.ChatBound{}, fmt.Errorf("--after %s is a message "+
 				"of %s, but this is the chat of %s. Pass a message of %s, "+
-				"like %s-m3", value, cursor.Entry, entry, entry, entry)
+				"like %s-m3", value, cursor.Post, entry, entry, entry)
 		}
 		return api.ChatBound{Number: cursor.Number}, nil
 	}
@@ -151,7 +151,7 @@ func describeChatAfter(entry api.Ref, after api.ChatBound) string {
 	if !after.Time.IsZero() {
 		return "at or after " + after.Time.Local().Format(dateClockLayout)
 	}
-	return "after " + api.MessageRef{Entry: entry, Number: after.Number}.
+	return "after " + api.MessageRef{Post: entry, Number: after.Number}.
 		String()
 }
 
@@ -241,7 +241,7 @@ func cmdChatSend(c *client, args []string) error {
 	}
 	// Message numbers count from 1 in each entry and none are removed,
 	// so the first number shown says how many after since are left out.
-	cursor := api.MessageRef{Entry: ref, Number: since}
+	cursor := api.MessageRef{Post: ref, Number: since}
 	earlier := page.Messages[0].Number - 1 - since
 	if earlier > 0 {
 		fmt.Printf("... %d earlier (%s chat read %s --after %s)\n",
@@ -267,16 +267,16 @@ func cmdChatEdit(c *client, args []string) error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
-	t, err := c.resolve(ref.Entry)
+	t, err := c.resolve(ref.Post)
 	if err != nil {
 		return err
 	}
 
 	var message api.Message
-	path := entryPath(ref.Entry, fmt.Sprintf("/messages/%d", ref.Number))
+	path := entryPath(ref.Post, fmt.Sprintf("/messages/%d", ref.Number))
 	if err := c.do(t, "PATCH", path, request, &message); err != nil {
-		return uncertainWrite(explainNotOwner(err, ref.Entry), "The edit",
-			programName+" chat recent "+ref.Entry.String())
+		return uncertainWrite(explainNotOwner(err, ref.Post), "The edit",
+			programName+" chat recent "+ref.Post.String())
 	}
 	fmt.Printf("Edited [%s].\n", message.Ref())
 	return nil
@@ -294,16 +294,16 @@ func cmdChatDelete(c *client, args []string) error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
-	t, err := c.resolve(ref.Entry)
+	t, err := c.resolve(ref.Post)
 	if err != nil {
 		return err
 	}
 
 	var message api.Message
-	path := entryPath(ref.Entry, fmt.Sprintf("/messages/%d", ref.Number))
+	path := entryPath(ref.Post, fmt.Sprintf("/messages/%d", ref.Number))
 	if err := c.do(t, "DELETE", path, request, &message); err != nil {
-		return uncertainWrite(explainNotOwner(err, ref.Entry), "The delete",
-			programName+" chat recent "+ref.Entry.String())
+		return uncertainWrite(explainNotOwner(err, ref.Post), "The delete",
+			programName+" chat recent "+ref.Post.String())
 	}
 	fmt.Printf("Deleted [%s].\n", message.Ref())
 	return nil

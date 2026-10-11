@@ -263,7 +263,7 @@ func (v view) supersedersOf(
 
 // attachLinks fills in each entry's outgoing links and the entries that
 // supersede it.
-func (v view) attachLinks(ctx context.Context, entries []api.Entry) error {
+func (v view) attachLinks(ctx context.Context, entries []api.Post) error {
 	for i := range entries {
 		key := v.store.mustKey(entries[i].Ref)
 		links, err := v.linksFrom(ctx, key)
@@ -282,8 +282,8 @@ func (v view) attachLinks(ctx context.Context, entries []api.Entry) error {
 
 // entryRef describes an entry by its ref, and by its subject, whether
 // it is deleted, and its superseders when the request can read it.
-func (v view) entryRef(ctx context.Context, key Key) (api.EntryRef, error) {
-	described := api.EntryRef{Ref: v.store.mustRef(key)}
+func (v view) entryRef(ctx context.Context, key Key) (api.PostRef, error) {
+	described := api.PostRef{Ref: v.store.mustRef(key)}
 	if !v.access.CanRead(key.Workspace) {
 		return described, nil
 	}
@@ -291,7 +291,7 @@ func (v view) entryRef(ctx context.Context, key Key) (api.EntryRef, error) {
 		SELECT subject, deleted FROM entries
 		WHERE workspace_id = ? AND id = ?`, key.Workspace, key.ID,
 	).Scan(&described.Subject, &described.Deleted); err != nil {
-		return api.EntryRef{}, fmt.Errorf("reading %s: %w",
+		return api.PostRef{}, fmt.Errorf("reading %s: %w",
 			described.Ref, err)
 	}
 	var err error
@@ -334,13 +334,13 @@ func (v view) pathUp(ctx context.Context, key Key) ([]Key, error) {
 // parent.
 func (v view) ancestors(
 	ctx context.Context, key Key,
-) ([]api.EntryRef, error) {
+) ([]api.PostRef, error) {
 	upward, err := v.pathUp(ctx, key)
 	if err != nil {
 		return nil, err
 	}
 
-	path := make([]api.EntryRef, len(upward))
+	path := make([]api.PostRef, len(upward))
 	for i, ancestor := range upward {
 		described, err := v.entryRef(ctx, ancestor)
 		if err != nil {
@@ -355,24 +355,24 @@ func (v view) ancestors(
 // point at it, its child count, and a summary of its chat.
 func (s *Store) Detail(
 	ctx context.Context, access Access, key Key,
-) (api.EntryDetail, error) {
+) (api.PostDetail, error) {
 	v, err := s.begin(ctx, access, true)
 	if err != nil {
-		return api.EntryDetail{}, fmt.Errorf("getting entry: %w", err)
+		return api.PostDetail{}, fmt.Errorf("getting entry: %w", err)
 	}
 	defer v.tx.Rollback()
 
 	entry, err := v.getEntry(ctx, key)
 	if err != nil {
-		return api.EntryDetail{}, err
+		return api.PostDetail{}, err
 	}
-	listed, err := v.listEntries(ctx, []api.Entry{entry})
+	listed, err := v.listEntries(ctx, []api.Post{entry})
 	if err != nil {
-		return api.EntryDetail{}, err
+		return api.PostDetail{}, err
 	}
-	detail := api.EntryDetail{ListedEntry: listed[0]}
+	detail := api.PostDetail{ListedPost: listed[0]}
 	if detail.Backlinks, err = v.linksTo(ctx, key); err != nil {
-		return api.EntryDetail{}, err
+		return api.PostDetail{}, err
 	}
 	if err := v.tx.QueryRowContext(ctx, `
 		SELECT count(*) FROM entry_links AS l JOIN entries AS e
@@ -381,16 +381,16 @@ func (s *Store) Detail(
 			AND l.name = 'parent' AND NOT `+supersededClause,
 		key.Workspace, key.ID,
 	).Scan(&detail.Children); err != nil {
-		return api.EntryDetail{}, fmt.Errorf("counting children: %w", err)
+		return api.PostDetail{}, fmt.Errorf("counting children: %w", err)
 	}
 	if err := v.tx.QueryRowContext(ctx, `
 		SELECT count(*), coalesce(max(id), 0) FROM entry_messages
 		WHERE workspace_id = ? AND entry_id = ?`, key.Workspace, key.ID,
 	).Scan(&detail.Messages, &detail.LastMessage); err != nil {
-		return api.EntryDetail{}, fmt.Errorf("reading chat summary: %w", err)
+		return api.PostDetail{}, fmt.Errorf("reading chat summary: %w", err)
 	}
 	if err := v.tx.Commit(); err != nil {
-		return api.EntryDetail{}, fmt.Errorf("finishing entry read: %w", err)
+		return api.PostDetail{}, fmt.Errorf("finishing entry read: %w", err)
 	}
 	return detail, nil
 }

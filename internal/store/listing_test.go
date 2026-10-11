@@ -28,7 +28,7 @@ type forestWriter struct {
 	t           *testing.T
 	store       *Store
 	random      *rand.Rand
-	entries     []api.Entry
+	entries     []api.Post
 	messages    []api.Message
 	inWorkspace map[string][]api.Ref
 	deleted     map[string]bool
@@ -72,7 +72,7 @@ func (w *forestWriter) add() {
 	if w.writes%9 == 0 {
 		metadata["jira-2"] = "PROJ-9"
 	}
-	entry := addTo(w.t, w.store, workspace, api.AddEntryRequest{
+	entry := addTo(w.t, w.store, workspace, api.AddPostRequest{
 		Project:  project,
 		Subject:  fmt.Sprintf("entry %d %s", w.writes, w.word()),
 		Metadata: metadata,
@@ -101,7 +101,7 @@ func (w *forestWriter) write() {
 	switch choice := w.random.Intn(16); {
 	case choice < 3 && !w.deleted[entry.Ref.String()]:
 		subject := fmt.Sprintf("edited %d %s", w.writes, w.word())
-		edit := api.EditEntryRequest{Subject: &subject,
+		edit := api.EditPostRequest{Subject: &subject,
 			User: entry.Origin.User}
 		switch choice {
 		case 0:
@@ -121,7 +121,7 @@ func (w *forestWriter) write() {
 		w.deleted[entry.Ref.String()] = true
 	case choice < 8 && len(w.messages) > 0:
 		message := w.messages[w.random.Intn(len(w.messages))]
-		messageKey := w.store.mustKey(message.Entry)
+		messageKey := w.store.mustKey(message.Post)
 		if w.deleted[message.Ref().String()] {
 			return
 		}
@@ -459,7 +459,7 @@ func checkListingPage(
 	var got []referenceMatch
 	gotNew := map[int64]int{}
 	for _, m := range page.Matches {
-		key := store.mustKey(m.Entry.Ref)
+		key := store.mustKey(m.Post.Ref)
 		match := referenceMatch{m.Revision, key.ID, 0}
 		if m.Message != nil {
 			for _, message := range messages {
@@ -660,12 +660,12 @@ func TestPagingBackListsEachMatchOnceWhileWritesLand(t *testing.T) {
 // filter finds an entry at any level.
 func TestListingRanksEachEntryByItsOwnActivity(t *testing.T) {
 	store := openTestStore(t)
-	root := addTo(t, store, "general", api.AddEntryRequest{
+	root := addTo(t, store, "general", api.AddPostRequest{
 		Subject: "root", Origin: api.Origin{User: "omar"}})
-	child := addTo(t, store, "general", api.AddEntryRequest{
+	child := addTo(t, store, "general", api.AddPostRequest{
 		Subject: "child", Origin: api.Origin{User: "ines"},
 		Links: []api.Link{link(api.ParentLink, root.Ref)}})
-	grandchild := addTo(t, store, "general", api.AddEntryRequest{
+	grandchild := addTo(t, store, "general", api.AddPostRequest{
 		Subject: "grandchild", Origin: api.Origin{User: "omar"},
 		Links: []api.Link{link(api.ParentLink, child.Ref)}})
 	other := mustAdd(t, store, "other", "", nil)

@@ -187,19 +187,19 @@ func (h *handler) routes() http.Handler {
 	}
 	route("GET /api/status", h.status)
 	route("GET /api/workspaces", h.listWorkspaces)
-	route("GET /api/workspaces/{workspace}/entries", h.search)
-	route("POST /api/workspaces/{workspace}/entries", h.addEntry)
+	route("GET /api/workspaces/{workspace}/posts", h.search)
+	route("POST /api/workspaces/{workspace}/posts", h.addEntry)
 	route("GET /api/workspaces/{workspace}/projects", h.projects)
 	route("GET /api/workspaces/{workspace}/messages", h.overview)
 	route("GET /api/workspaces/{workspace}/changes", h.changes)
-	route("GET /api/entries/{ref}", h.getEntry)
-	route("PATCH /api/entries/{ref}", h.editEntry)
-	route("DELETE /api/entries/{ref}", h.deleteEntry)
-	route("GET /api/entries/{ref}/tree", h.tree)
-	route("POST /api/entries/{ref}/messages", h.postMessage)
-	route("GET /api/entries/{ref}/messages", h.listMessages)
-	route("PATCH /api/entries/{ref}/messages/{n}", h.editMessage)
-	route("DELETE /api/entries/{ref}/messages/{n}", h.deleteMessage)
+	route("GET /api/posts/{ref}", h.getEntry)
+	route("PATCH /api/posts/{ref}", h.editEntry)
+	route("DELETE /api/posts/{ref}", h.deleteEntry)
+	route("GET /api/posts/{ref}/tree", h.tree)
+	route("POST /api/posts/{ref}/messages", h.postMessage)
+	route("GET /api/posts/{ref}/messages", h.listMessages)
+	route("PATCH /api/posts/{ref}/messages/{n}", h.editMessage)
+	route("DELETE /api/posts/{ref}/messages/{n}", h.deleteMessage)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, api.CodeRouteNotFound,
 			"route not found")
@@ -292,7 +292,7 @@ func (h *handler) addEntry(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var request api.AddEntryRequest
+	var request api.AddPostRequest
 	if !decodeBody(w, r, &request) {
 		return
 	}
@@ -346,7 +346,7 @@ func (h *handler) editEntry(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var request api.EditEntryRequest
+	var request api.EditPostRequest
 	if !decodeBody(w, r, &request) {
 		return
 	}

@@ -87,7 +87,7 @@ func explainNotOwner(err error, entry api.Ref) error {
 }
 
 func entryPath(ref api.Ref, rest string) string {
-	return "/api/entries/" + ref.String() + rest
+	return "/api/posts/" + ref.String() + rest
 }
 
 func workspacePath(t target, rest string) string {
@@ -96,7 +96,7 @@ func workspacePath(t target, rest string) string {
 
 func (c *client) search(t target, query url.Values) (api.MatchPage, error) {
 	var page api.MatchPage
-	err := c.do(t, "GET", workspacePath(t, "/entries?"+query.Encode()), nil,
+	err := c.do(t, "GET", workspacePath(t, "/posts?"+query.Encode()), nil,
 		&page)
 	return page, err
 }
@@ -117,7 +117,7 @@ func (c *client) printRecentAfterChange(t target, changed api.Ref) error {
 
 	var others []api.Match
 	for _, m := range page.Matches {
-		if m.Entry.Ref != changed && len(others) < recentAfterChangeCount {
+		if m.Post.Ref != changed && len(others) < recentAfterChangeCount {
 			others = append(others, m)
 		}
 	}
@@ -255,7 +255,7 @@ func (c *client) noticeNewProject(t target, project string) error {
 		return err
 	}
 	for _, existing := range result.Projects {
-		if existing.Name == project && *existing.Entries == 1 {
+		if existing.Name == project && *existing.Posts == 1 {
 			fmt.Printf("This is the first entry in project %q. Run '%s "+
 				"list-projects' if you meant an existing one.\n", project,
 				programName)
@@ -323,7 +323,7 @@ func cmdAdd(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	request := api.AddEntryRequest{
+	request := api.AddPostRequest{
 		Project:  p.strs["--project"],
 		Subject:  p.pos[0],
 		Body:     p.strs["--body"],
@@ -335,8 +335,8 @@ func cmdAdd(c *client, args []string) error {
 		return err
 	}
 
-	var entry api.Entry
-	err = c.do(t, "POST", workspacePath(t, "/entries"), request, &entry)
+	var entry api.Post
+	err = c.do(t, "POST", workspacePath(t, "/posts"), request, &entry)
 	if err != nil {
 		return uncertainWrite(err, "The entry",
 			programName+" recent --flat --workspace "+t.workspace)
@@ -379,7 +379,7 @@ func cmdEdit(c *client, args []string) error {
 		return err
 	}
 
-	request := api.EditEntryRequest{}
+	request := api.EditPostRequest{}
 	if p.has("--project") {
 		project := p.strs["--project"]
 		request.Project = &project
@@ -432,7 +432,7 @@ func cmdEdit(c *client, args []string) error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
-	var entry api.Entry
+	var entry api.Post
 	if err := c.do(t, "PATCH", entryPath(ref, ""), request, &entry); err != nil {
 		return uncertainWrite(explainNotOwner(err, ref), "The edit",
 			programName+" entry "+ref.String())
@@ -465,7 +465,7 @@ func cmdDelete(c *client, args []string) error {
 		return err
 	}
 
-	var entry api.Entry
+	var entry api.Post
 	if err := c.do(t, "DELETE", entryPath(ref, ""), request,
 		&entry); err != nil {
 		return uncertainWrite(explainNotOwner(err, ref), "The delete",
@@ -487,7 +487,7 @@ func cmdEntry(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	var detail api.EntryDetail
+	var detail api.PostDetail
 	if err := c.do(t, "GET", entryPath(ref, ""), nil, &detail); err != nil {
 		return err
 	}

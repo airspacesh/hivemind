@@ -61,7 +61,7 @@ func TestMessageNumbersCountFromOnePerEntry(t *testing.T) {
 	first := mustAdd(t, store, "first", "", nil)
 	second := mustAdd(t, store, "second", "", nil)
 	private := addTo(t, store, "personal",
-		api.AddEntryRequest{Subject: "private"})
+		api.AddPostRequest{Subject: "private"})
 
 	var got []string
 	for _, entry := range []api.Ref{first.Ref, second.Ref, first.Ref,
@@ -320,7 +320,7 @@ func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
 
 	project := "lake"
 	if _, err := store.Edit(ctx, everyAccess(store), store.mustKey(nest.Ref),
-		api.EditEntryRequest{Project: &project, User: testUser}); err != nil {
+		api.EditPostRequest{Project: &project, User: testUser}); err != nil {
 		t.Fatal(err)
 	}
 	checkActivity("editing an entry")
@@ -338,7 +338,7 @@ func TestOverviewGroupsTheNewestMessagesByEntry(t *testing.T) {
 	b := mustAdd(t, store, "b", "", nil)
 	c := mustAdd(t, store, "c", "", nil)
 	private := addTo(t, store, "personal",
-		api.AddEntryRequest{Subject: "private"})
+		api.AddPostRequest{Subject: "private"})
 	first := mustPost(t, store, a.Ref, "a1")
 	mustPost(t, store, b.Ref, "b1")
 	mustPost(t, store, a.Ref, "a2")
@@ -356,7 +356,7 @@ func TestOverviewGroupsTheNewestMessagesByEntry(t *testing.T) {
 	}
 	var got []string
 	for _, chat := range overview.Chats {
-		line := chat.Entry.Ref.String() + " " + chat.Entry.Subject + ":"
+		line := chat.Post.Ref.String() + " " + chat.Post.Subject + ":"
 		for _, message := range chat.Messages {
 			line += " " + message.Body
 		}
@@ -379,7 +379,7 @@ func TestOverwrittenTextLeavesNoCopyInTheDatabase(t *testing.T) {
 	subject := "short"
 	if _, err := store.Edit(ctx, everyAccess(store),
 		store.mustKey(entry.Ref),
-		api.EditEntryRequest{Subject: &subject, User: testUser}); err != nil {
+		api.EditPostRequest{Subject: &subject, User: testUser}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := store.EditMessage(ctx, store.mustKey(entry.Ref),

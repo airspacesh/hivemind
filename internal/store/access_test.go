@@ -19,21 +19,21 @@ type linkedWorkspaces struct {
 	store *Store
 	// openRoot has an open child, openChild. secretSee links to
 	// openRoot, and openSee links to secretSee.
-	openRoot  api.Entry
-	openChild api.Entry
-	secretSee api.Entry
-	openSee   api.Entry
+	openRoot  api.Post
+	openChild api.Post
+	secretSee api.Post
+	openSee   api.Post
 	// secretSuperseder supersedes openOld.
-	openOld          api.Entry
-	secretSuperseder api.Entry
+	openOld          api.Post
+	secretSuperseder api.Post
 }
 
 func newLinkedWorkspaces(t *testing.T) linkedWorkspaces {
 	t.Helper()
 	store := openTestStore(t)
-	secret := func(subject string, links ...api.Link) api.Entry {
+	secret := func(subject string, links ...api.Link) api.Post {
 		t.Helper()
-		entry := addTo(t, store, "personal", api.AddEntryRequest{
+		entry := addTo(t, store, "personal", api.AddPostRequest{
 			Subject: "SECRET " + subject,
 			Body:    "SECRET body",
 			Project: "SECRET-project",
@@ -43,9 +43,9 @@ func newLinkedWorkspaces(t *testing.T) linkedWorkspaces {
 		mustPost(t, store, entry.Ref, "SECRET message")
 		return entry
 	}
-	open := func(subject string, links ...api.Link) api.Entry {
+	open := func(subject string, links ...api.Link) api.Post {
 		t.Helper()
-		return addTo(t, store, "general", api.AddEntryRequest{
+		return addTo(t, store, "general", api.AddPostRequest{
 			Subject: subject, Links: links,
 		})
 	}
@@ -65,7 +65,7 @@ func (w linkedWorkspaces) openAccess(t *testing.T) Access {
 	return accessTo(t, w.store, "general")
 }
 
-func (w linkedWorkspaces) detail(t *testing.T, ref api.Ref) api.EntryDetail {
+func (w linkedWorkspaces) detail(t *testing.T, ref api.Ref) api.PostDetail {
 	t.Helper()
 	detail, err := w.store.Detail(context.Background(), w.openAccess(t),
 		w.store.mustKey(ref))
@@ -145,9 +145,9 @@ func TestProtectedEntriesStayOutOfListings(t *testing.T) {
 	}
 	assertNoSecret(t, "a listing", listing)
 	for _, match := range listing.Matches {
-		if match.Entry.Ref == w.openOld.Ref {
+		if match.Post.Ref == w.openOld.Ref {
 			t.Fatalf("search lists %s, which a protected entry "+
-				"supersedes", match.Entry.Ref)
+				"supersedes", match.Post.Ref)
 		}
 	}
 
@@ -163,7 +163,7 @@ func TestLinkingToAnUnreadableEntryIsRefusedAsMissing(t *testing.T) {
 	w := newLinkedWorkspaces(t)
 	add := func(target api.Ref) error {
 		_, err := w.store.Add(ctx, w.openAccess(t),
-			workspaceID(t, w.store, "general"), api.AddEntryRequest{
+			workspaceID(t, w.store, "general"), api.AddPostRequest{
 				Subject: "probe",
 				Links:   []api.Link{link("see", target)},
 			})
@@ -182,7 +182,7 @@ func TestLinkingToAnUnreadableEntryIsRefusedAsMissing(t *testing.T) {
 			"(%v)", unreadable, missing)
 	}
 	if _, err := w.store.Edit(ctx, w.openAccess(t),
-		w.store.mustKey(w.openRoot.Ref), api.EditEntryRequest{
+		w.store.mustKey(w.openRoot.Ref), api.EditPostRequest{
 			AddLinks: []api.Link{link("see", w.secretSee.Ref)},
 			User:     testUser,
 		}); !errors.Is(err, ErrLinkTarget) {
