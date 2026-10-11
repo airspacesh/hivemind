@@ -77,7 +77,7 @@ func (r *Ref) UnmarshalText(text []byte) error {
 func ParseMessageRef(text string) (MessageRef, error) {
 	match := messageRefPattern.FindStringSubmatch(text)
 	if match == nil {
-		return MessageRef{}, fmt.Errorf("invalid message id %q: want an "+
+		return MessageRef{}, fmt.Errorf("invalid message id %q: want a "+
 			"post id, -m, and a number, like e40-m3", text)
 	}
 	id, err := strconv.ParseInt(match[2], 10, 64)
