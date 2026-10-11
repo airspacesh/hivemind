@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/workstream/internal/store"
 )
 
 const (
@@ -38,16 +39,25 @@ func (h *handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, message)
 }
 
+// pathMessage finds the message the path's ref and number name, in an
+// entry the request must be able to read. The message may not exist.
+func (h *handler) pathMessage(
+	w http.ResponseWriter, r *http.Request,
+) (store.Key, int64, bool) {
+	number, err := strconv.ParseInt(r.PathValue("n"), 10, 64)
+	if err != nil || number <= 0 {
+		writeBadRequest(w, "the message number must be a positive integer")
+		return store.Key{}, 0, false
+	}
+	_, entry, ok := h.pathEntry(w, r)
+	return entry, number, ok
+}
+
 func (h *handler) editMessage(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return
 	}
-	number, err := strconv.ParseInt(r.PathValue("n"), 10, 64)
-	if err != nil || number <= 0 {
-		writeBadRequest(w, "the message number must be a positive integer")
-		return
-	}
-	_, entry, ok := h.pathEntry(w, r)
+	entry, number, ok := h.pathMessage(w, r)
 	if !ok {
 		return
 	}
@@ -61,6 +71,31 @@ func (h *handler) editMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	message, _, err := h.store.EditMessage(
 		r.Context(), entry, number, request)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, message)
+}
+
+func (h *handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
+	if !requireNoQuery(w, r) {
+		return
+	}
+	entry, number, ok := h.pathMessage(w, r)
+	if !ok {
+		return
+	}
+	var request api.DeleteRequest
+	if !decodeBody(w, r, &request) {
+		return
+	}
+	if err := request.Validate(); err != nil {
+		writeBadRequest(w, err.Error())
+		return
+	}
+	message, err := h.store.DeleteMessage(r.Context(), entry, number,
+		request)
 	if err != nil {
 		writeStoreError(w, err)
 		return

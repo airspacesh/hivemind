@@ -182,6 +182,10 @@ func (r EditMessageRequest) Validate() error {
 	return validateEditor(r.User)
 }
 
+func (r DeleteRequest) Validate() error {
+	return validateEditor(r.User)
+}
+
 func validateLink(link Link) error {
 	if err := validateSlug("link name", link.Name); err != nil {
 		return err

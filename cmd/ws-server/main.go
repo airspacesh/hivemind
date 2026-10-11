@@ -194,10 +194,12 @@ func (h *handler) routes() http.Handler {
 	route("GET /api/workspaces/{workspace}/changes", h.changes)
 	route("GET /api/entries/{ref}", h.getEntry)
 	route("PATCH /api/entries/{ref}", h.editEntry)
+	route("DELETE /api/entries/{ref}", h.deleteEntry)
 	route("GET /api/entries/{ref}/tree", h.tree)
 	route("POST /api/entries/{ref}/messages", h.postMessage)
 	route("GET /api/entries/{ref}/messages", h.listMessages)
 	route("PATCH /api/entries/{ref}/messages/{n}", h.editMessage)
+	route("DELETE /api/entries/{ref}/messages/{n}", h.deleteMessage)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, api.CodeRouteNotFound,
 			"route not found")
@@ -353,6 +355,30 @@ func (h *handler) editEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	entry, err := h.store.Edit(r.Context(), access, key, request)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, entry)
+}
+
+func (h *handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
+	if !requireNoQuery(w, r) {
+		return
+	}
+	access, key, ok := h.pathEntry(w, r)
+	if !ok {
+		return
+	}
+	var request api.DeleteRequest
+	if !decodeBody(w, r, &request) {
+		return
+	}
+	if err := request.Validate(); err != nil {
+		writeBadRequest(w, err.Error())
+		return
+	}
+	entry, err := h.store.Delete(r.Context(), access, key, request)
 	if err != nil {
 		writeStoreError(w, err)
 		return

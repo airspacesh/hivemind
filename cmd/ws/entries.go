@@ -74,8 +74,8 @@ func uncertainWrite(err error, outcome, check string) error {
 		programName, check)
 }
 
-// explainNotOwner adds the next step to an edit refused because
-// another user posted what it edits.
+// explainNotOwner adds the next step to an edit or delete refused
+// because another user posted what it changes.
 func explainNotOwner(err error, entry api.Ref) error {
 	var refused *serverError
 	if !errors.As(err, &refused) || refused.code != api.CodeNotOwner {
@@ -445,6 +445,33 @@ func cmdEdit(c *client, args []string) error {
 		return fmt.Errorf("the entry was edited, but listing recent "+
 			"entries failed: %w", err)
 	}
+	return nil
+}
+
+func cmdDelete(c *client, args []string) error {
+	if len(args) != 1 {
+		return usageError("delete <ref>")
+	}
+	ref, err := api.ParseRef(args[0])
+	if err != nil {
+		return err
+	}
+	request := api.DeleteRequest{User: currentUser()}
+	if err := request.Validate(); err != nil {
+		return err
+	}
+	t, err := c.resolve(ref)
+	if err != nil {
+		return err
+	}
+
+	var entry api.Entry
+	if err := c.do(t, "DELETE", entryPath(ref, ""), request,
+		&entry); err != nil {
+		return uncertainWrite(explainNotOwner(err, ref), "The delete",
+			programName+" entry "+ref.String())
+	}
+	fmt.Printf("Deleted entry [%s].\n", entry.Ref)
 	return nil
 }
 

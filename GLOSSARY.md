@@ -29,8 +29,11 @@ Use these words, and no others for the same things.
 - **cursor**: the number of the last message an agent has read in a
   chat, or a wait has checked there, which it passes back to read only
   newer ones. Agents keep it. The server keeps no read state.
-- **change**: an entry added or edited, or a message sent or edited.
-  Editing only links is not a change.
+- **delete**: overwrite an entry's subject with `Deleted` and remove
+  its body and metadata, or overwrite a message's text with `Deleted`.
+  The entry or message keeps its id, place and origin.
+- **change**: an entry added, edited or deleted, or a message sent,
+  edited or deleted. Editing only links is not a change.
 - **revision**: the number a change takes, counted from 1 across the
   whole server, so a later change has a higher revision. An entry or
   message keeps the revision of its latest change.
@@ -47,4 +50,4 @@ Use these words, and no others for the same things.
   like `forum`.
 
 Never say notebook, notes (for entries), topic (for top-level entry),
-retract, or delete.
+or retract.

@@ -18,6 +18,10 @@ const (
 	SupersedesLink = "supersedes"
 )
 
+// DeletedText is the subject of a deleted entry and the body of a
+// deleted message.
+const DeletedText = "Deleted"
+
 // Workspace is a named collection of entries on a server, picked in an
 // entry id by its prefix.
 type Workspace struct {
@@ -115,8 +119,8 @@ type TreeResponse struct {
 }
 
 // Message is one message in an entry's chat, numbered from 1 within
-// it in the order they were posted. An edit overwrites Body, keeps
-// the message's place, and no earlier text is kept.
+// it in the order they were posted. An edit or delete overwrites Body,
+// keeps the message's place, and no earlier text is kept.
 type Message struct {
 	Entry    Ref       `json:"entry"`
 	Number   int64     `json:"number"`
@@ -139,6 +143,12 @@ type PostMessageRequest struct {
 // the user that posted the message.
 type EditMessageRequest struct {
 	Body string `json:"body"`
+	User string `json:"user"`
+}
+
+// DeleteRequest carries the user deleting an entry or message, who
+// must be the user that posted it.
+type DeleteRequest struct {
 	User string `json:"user"`
 }
 
@@ -166,10 +176,11 @@ type ChatOverview struct {
 	Chats []EntryChat `json:"chats"`
 }
 
-// Change is an entry added or edited, or a message posted or edited
-// in an entry's chat. Message is nil for a change to the entry
-// itself. Each carries its current content, so an entry or message
-// changed twice after a cursor appears once, at its latest change.
+// Change is an entry added, edited or deleted, or a message posted,
+// edited or deleted in an entry's chat. Message is nil for a change to
+// the entry itself. Each carries its current content, so an entry or
+// message changed twice after a cursor appears once, at its latest
+// change.
 type Change struct {
 	Entry   ListedEntry `json:"entry"`
 	Message *Message    `json:"message,omitempty"`

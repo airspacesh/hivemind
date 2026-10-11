@@ -254,8 +254,9 @@ func (v view) editContent(
 	return nil
 }
 
-// NotOwnerError refuses an edit by anyone but the user who posted the
-// entry or message it edits. Nobody can edit one that records no user.
+// NotOwnerError refuses an edit or delete by anyone but the user who
+// posted the entry or message it changes. Nobody can change one that
+// records no user.
 type NotOwnerError struct {
 	posted string
 	owner  string
@@ -263,14 +264,15 @@ type NotOwnerError struct {
 
 func (e *NotOwnerError) Error() string {
 	if e.owner == "" {
-		return e.posted + " records no user, so nobody can edit it"
+		return e.posted + " records no user, so nobody can edit or " +
+			"delete it"
 	}
-	return fmt.Sprintf("%s was posted by %s, so only %s can edit it",
-		e.posted, e.owner, e.owner)
+	return fmt.Sprintf("%s was posted by %s, so only %s can edit or "+
+		"delete it", e.posted, e.owner, e.owner)
 }
 
-// checkEditor refuses an edit by editor of something owner posted,
-// unless they are the same user.
+// checkEditor refuses an edit or delete by editor of something owner
+// posted, unless they are the same user.
 func checkEditor(posted fmt.Stringer, owner, editor string) error {
 	if owner == "" || owner != editor {
 		return &NotOwnerError{posted: posted.String(), owner: owner}
@@ -342,6 +344,59 @@ func (s *Store) Edit(
 	}
 	if err := v.tx.Commit(); err != nil {
 		return api.Entry{}, fmt.Errorf("committing edited entry: %w", err)
+	}
+	return entry, nil
+}
+
+// Delete overwrites an entry's subject with api.DeletedText, clears its
+// body and removes its metadata, and no earlier text is kept. Its id,
+// project, origin, creation time, links and chat stay, so the entries
+// under it stay in place. Deleting a deleted entry changes nothing.
+// Only the user who posted the entry can delete it.
+func (s *Store) Delete(
+	ctx context.Context, access Access, key Key, req api.DeleteRequest,
+) (api.Entry, error) {
+	v, err := s.begin(ctx, access, false)
+	if err != nil {
+		return api.Entry{}, fmt.Errorf("deleting entry: %w", err)
+	}
+	defer v.tx.Rollback()
+
+	owner, err := v.entryOwner(ctx, key)
+	if err != nil {
+		return api.Entry{}, err
+	}
+	if err := checkEditor(v.store.mustRef(key), owner,
+		req.User); err != nil {
+		return api.Entry{}, err
+	}
+	entry, err := v.getEntry(ctx, key)
+	if err != nil {
+		return api.Entry{}, err
+	}
+	if entry.Subject == api.DeletedText && entry.Body == "" &&
+		len(entry.Metadata) == 0 {
+		return entry, nil
+	}
+
+	subject, body := api.DeletedText, ""
+	if err := v.editContent(ctx, key, api.EditEntryRequest{
+		Subject: &subject, Body: &body,
+	}); err != nil {
+		return api.Entry{}, err
+	}
+	if _, err := v.tx.ExecContext(ctx, `
+		DELETE FROM entry_metadata WHERE workspace_id = ? AND entry_id = ?`,
+		key.Workspace, key.ID,
+	); err != nil {
+		return api.Entry{}, fmt.Errorf("removing metadata: %w", err)
+	}
+	entry, err = v.getEntry(ctx, key)
+	if err != nil {
+		return api.Entry{}, fmt.Errorf("reading deleted entry: %w", err)
+	}
+	if err := v.tx.Commit(); err != nil {
+		return api.Entry{}, fmt.Errorf("committing deleted entry: %w", err)
 	}
 	return entry, nil
 }

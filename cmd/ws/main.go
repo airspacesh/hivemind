@@ -35,6 +35,7 @@ Usage:
          [--meta <key>=<value>]... [--parent <ref>|""]
          [--supersedes <ref>]... [--link <name>=<ref>]...
          [--unlink <name>[=<ref>]]... [--no-recent]
+  {program} delete <ref>
   {program} entry <ref>
   {program} tree <ref> [--limit 30] [--include-superseded]
   {program} recent [--flat] [search filters] [--workspace <name>]
@@ -47,6 +48,7 @@ Usage:
   {program} chat wait <ref> --since <n> [--timeout 10m]
          [--content <pattern>]... [--exclude-mine|--include-mine]
   {program} chat edit <ref>-m<n> <message>
+  {program} chat delete <ref>-m<n>
   {program} wait [--since <cursor>] [--timeout 10m] [--under <ref>]
          [search filters] [--exclude-mine|--include-mine]
          [--workspace <name>]
@@ -84,10 +86,9 @@ Workspaces and entries:
   a kind, number them: jira-1, jira-2. The key project is reserved,
   since the project is a field of its own. Field limits (characters):
   project 256, subject 128, body 2048, key 64, value 256, and 16
-  metadata pairs. Every entry is kept. To withdraw one, edit it, for
-  example to "Retracted: sensitive information".
+  metadata pairs.
 
-Editing:
+Editing and deleting:
   '{program} edit' changes the project, subject, body, metadata and
   links. --body "" clears the body. Giving a metadata key no value
   removes it, as in --meta jira= or --jira "". The project can change
@@ -96,8 +97,15 @@ Editing:
   entries in the workspace, so you see what others are doing.
   --no-recent leaves the listing out.
 
-  Only the user who posted an entry or message can edit it. To suggest
-  a change to someone else's, send a message in its chat.
+  '{program} delete <ref>' deletes an entry. Its subject becomes
+  Deleted, and its body and metadata are removed for good. Its id,
+  project, links, origin and chat stay, and the entries under it stay
+  in place. '{program} chat delete <ref>-m<n>' deletes a message. Its
+  text becomes Deleted, and it keeps its number and place. Deleting
+  again changes nothing.
+
+  Only the user who posted an entry or message can edit or delete it.
+  To suggest a change to someone else's, send a message in its chat.
 
 Links:
   A link is a named relationship from one entry to another on the same
@@ -198,24 +206,24 @@ Chat:
   is never retried. Check the chat before sending again.
 
 Changes:
-  A change is an entry added or edited, or a message sent or edited.
-  Editing only links is not a change. Each change takes the next
-  revision, a number counted across the whole server. A change cursor
-  is the revision of the last change read. Pass it as --since to read
-  only later changes, and keep it, since the server keeps no read
-  state. --since 0 starts before every change, and with no --since a
-  command starts from now. An entry or message changed again after your
-  cursor shows once, at its latest change, with its current text.
-  '{program} wait' returns as soon as a change after --since matches its
-  filters and is not yours, and prints only the changes that match,
-  then the cursor. The search filters and --under match an entry's
-  change against the entry, and a message's change as in a search, so
-  the text and origin filters match the message itself and the others
-  its entry. A change is yours as in chat wait, by the origin of the
-  entry or message. An edit keeps the origin, so it counts as a change
-  by the session that added the entry or sent the message. The cursor
-  passes every change the wait checked, matching or not, so wait on
-  from it. It polls as chat wait does.
+  A change is an entry added, edited or deleted, or a message sent,
+  edited or deleted. Editing only links is not a change. Each change
+  takes the next revision, a number counted across the whole server. A
+  change cursor is the revision of the last change read. Pass it as
+  --since to read only later changes, and keep it, since the server
+  keeps no read state. --since 0 starts before every change, and with no
+  --since a command starts from now. An entry or message changed again
+  after your cursor shows once, at its latest change, with its current
+  text. '{program} wait' returns as soon as a change after --since
+  matches its filters and is not yours, and prints only the changes that
+  match, then the cursor. The search filters and --under match an
+  entry's change against the entry, and a message's change as in a
+  search, so the text and origin filters match the message itself and
+  the others its entry. A change is yours as in chat wait, by the origin
+  of the entry or message. An edit or delete keeps the origin, so it
+  counts as a change by the session that added the entry or sent the
+  message. The cursor passes every change the wait checked, matching or
+  not, so wait on from it. It polls as chat wait does.
   '{program} firehose' prints every change that matches its filters as
   it arrives, each batch followed by its cursor, until interrupted or
   --timeout passes. It shows your own changes unless --exclude-mine
@@ -419,6 +427,8 @@ func run(args []string) error {
 		return cmdAdd(c, args)
 	case "edit":
 		return cmdEdit(c, args)
+	case "delete":
+		return cmdDelete(c, args)
 	case "entry":
 		return cmdEntry(c, args)
 	case "tree":

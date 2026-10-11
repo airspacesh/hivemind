@@ -195,6 +195,50 @@ func TestTextIndexForgetsOverwrittenText(t *testing.T) {
 	}
 }
 
+// A delete removes text for good, so neither a search nor the
+// index's blocks may find it after.
+func TestTextIndexForgetsDeletedText(t *testing.T) {
+	store := openTestStore(t)
+	const secret = "ǂǂǂ"
+	entry := mustAdd(t, store, "Heron "+secret, "Egret "+secret, nil)
+	message := mustPost(t, store, entry.Ref, "Swan "+secret)
+	addFiller(t, store)
+	for _, text := range []string{"heron", "egret", "swan", secret} {
+		result := runSearch(t, store, Filter{
+			Content: []FieldCond{{Value: text}},
+		})
+		if len(result.Entries) != 1 {
+			t.Fatalf("before the delete, a search for %q found %d entries",
+				text, len(result.Entries))
+		}
+	}
+
+	mustDelete(t, store, entry.Ref)
+	mustDeleteMessage(t, store, message.Ref())
+
+	for _, text := range []string{"heron", "egret", "swan", secret} {
+		result := runSearch(t, store, Filter{
+			Content: []FieldCond{{Value: text}},
+		})
+		if len(result.Entries) != 0 {
+			t.Errorf("a search for %q still finds the deleted text", text)
+		}
+	}
+	for _, index := range []string{"entry_text", "message_text"} {
+		var blocks int
+		if err := store.db.QueryRow(`
+			SELECT count(*) FROM `+index+`_data
+			WHERE instr(block, CAST(? AS BLOB)) > 0`, secret,
+		).Scan(&blocks); err != nil {
+			t.Fatal(err)
+		}
+		if blocks != 0 {
+			t.Errorf("%d blocks of %s still hold the deleted text",
+				blocks, index)
+		}
+	}
+}
+
 // The newest changes hold the first page here, and the text indexes
 // find the older matches the later pages need.
 func TestSearchPagesFromTheNewestChangesOnToTheIndex(t *testing.T) {

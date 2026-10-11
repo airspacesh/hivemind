@@ -215,6 +215,10 @@ func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 		{"PATCH", "/api/entries/e1/messages/3",
 			`{"body":"x","user":"duck"}`, 404,
 			api.CodeMessageNotFound},
+		{"DELETE", "/api/entries/e1/messages/3", `{"user":"duck"}`, 404,
+			api.CodeMessageNotFound},
+		{"DELETE", "/api/entries/e9", `{"user":"duck"}`, 404,
+			api.CodeEntryNotFound},
 		{"GET", "/api/workspaces/nowhere/entries", "", 404,
 			api.CodeUnknownWorkspace},
 		{"GET", "/api/workspaces/general/entries?under=x1", "", 404,
@@ -339,7 +343,7 @@ func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
 	}
 }
 
-func TestOnlyThePosterCanEditOverHTTP(t *testing.T) {
+func TestOnlyThePosterCanEditOrDeleteOverHTTP(t *testing.T) {
 	s := startServer(t, testConfig(t))
 	s.must(t, "POST", "/api/workspaces/general/entries", entryBody("mine"),
 		"", http.StatusCreated)
@@ -347,31 +351,116 @@ func TestOnlyThePosterCanEditOverHTTP(t *testing.T) {
 		`{"body":"hi","origin":{"user":"duck"}}`, "", http.StatusCreated)
 
 	for _, test := range []struct {
+		method string
 		path   string
 		body   string
 		status int
 		code   api.ErrorCode
 	}{
-		{"/api/entries/e1", `{"subject":"taken","user":"heron"}`, 403,
-			api.CodeNotOwner},
-		{"/api/entries/e1/messages/1", `{"body":"taken","user":"heron"}`,
+		{"PATCH", "/api/entries/e1", `{"subject":"taken","user":"heron"}`,
 			403, api.CodeNotOwner},
-		{"/api/entries/e1", `{"subject":"taken"}`, 400, api.CodeBadRequest},
-		{"/api/entries/e1/messages/1", `{"body":"taken"}`, 400,
+		{"PATCH", "/api/entries/e1/messages/1",
+			`{"body":"taken","user":"heron"}`, 403, api.CodeNotOwner},
+		{"DELETE", "/api/entries/e1", `{"user":"heron"}`, 403,
+			api.CodeNotOwner},
+		{"DELETE", "/api/entries/e1/messages/1", `{"user":"heron"}`, 403,
+			api.CodeNotOwner},
+		{"PATCH", "/api/entries/e1", `{"subject":"taken"}`, 400,
 			api.CodeBadRequest},
-		{"/api/entries/e1", `{"subject":"kept","user":"duck"}`, 200, ""},
-		{"/api/entries/e1/messages/1", `{"body":"kept","user":"duck"}`,
+		{"PATCH", "/api/entries/e1/messages/1", `{"body":"taken"}`, 400,
+			api.CodeBadRequest},
+		{"DELETE", "/api/entries/e1", `{}`, 400, api.CodeBadRequest},
+		{"DELETE", "/api/entries/e1/messages/1", `{}`, 400,
+			api.CodeBadRequest},
+		{"PATCH", "/api/entries/e1", `{"subject":"kept","user":"duck"}`,
 			200, ""},
+		{"PATCH", "/api/entries/e1/messages/1",
+			`{"body":"kept","user":"duck"}`, 200, ""},
+		{"DELETE", "/api/entries/e1", `{"user":"duck"}`, 200, ""},
+		{"DELETE", "/api/entries/e1/messages/1", `{"user":"duck"}`, 200,
+			""},
 	} {
-		status, text := s.do(t, "PATCH", test.path, test.body, "")
+		status, text := s.do(t, test.method, test.path, test.body, "")
 		if status != test.status {
-			t.Fatalf("PATCH %s %s: %d %s, want %d", test.path, test.body,
-				status, text, test.status)
+			t.Fatalf("%s %s %s: %d %s, want %d", test.method, test.path,
+				test.body, status, text, test.status)
 		}
 		if test.code != "" && errorCode(t, text) != test.code {
-			t.Fatalf("PATCH %s %s: %s, want code %s", test.path,
+			t.Fatalf("%s %s %s: %s, want code %s", test.method, test.path,
 				test.body, text, test.code)
 		}
+	}
+}
+
+// No request names an origin or creation time but the one that adds an
+// entry or posts a message, so they stay as that request recorded them.
+func TestNoRequestChangesAnOriginOverHTTP(t *testing.T) {
+	s := startServer(t, testConfig(t))
+	origin := `{"user":"duck","host":"nest","dir":"/pond",` +
+		`"claude_session":"s1"}`
+	var entry api.Entry
+	if err := json.Unmarshal([]byte(s.must(t, "POST",
+		"/api/workspaces/general/entries",
+		`{"subject":"mine","project":"p","origin":`+origin+`}`, "",
+		http.StatusCreated)), &entry); err != nil {
+		t.Fatal(err)
+	}
+	var message api.Message
+	if err := json.Unmarshal([]byte(s.must(t, "POST",
+		"/api/entries/e1/messages", `{"body":"hi","origin":`+origin+`}`, "",
+		http.StatusCreated)), &message); err != nil {
+		t.Fatal(err)
+	}
+
+	claims := []string{
+		`"origin":{"user":"heron"}`, `"origin_user":"heron"`,
+		`"origin_host":"heron"`, `"created":"2000-01-01T00:00:00Z"`,
+	}
+	for _, claim := range claims {
+		for _, test := range []struct {
+			method string
+			path   string
+			body   string
+		}{
+			{"PATCH", "/api/entries/e1", `"subject":"x","user":"duck"`},
+			{"PATCH", "/api/entries/e1/messages/1", `"body":"x","user":"duck"`},
+			{"DELETE", "/api/entries/e1", `"user":"duck"`},
+			{"DELETE", "/api/entries/e1/messages/1", `"user":"duck"`},
+		} {
+			body := "{" + test.body + "," + claim + "}"
+			status, text := s.do(t, test.method, test.path, body, "")
+			if status != http.StatusBadRequest {
+				t.Fatalf("%s %s %s: %d %s, want 400", test.method,
+					test.path, body, status, text)
+			}
+		}
+	}
+	s.must(t, "PATCH", "/api/entries/e1", `{"subject":"x","user":"duck"}`,
+		"", http.StatusOK)
+	s.must(t, "DELETE", "/api/entries/e1", `{"user":"duck"}`, "",
+		http.StatusOK)
+	s.must(t, "DELETE", "/api/entries/e1/messages/1", `{"user":"duck"}`, "",
+		http.StatusOK)
+
+	var detail api.EntryDetail
+	if err := json.Unmarshal([]byte(s.must(t, "GET", "/api/entries/e1", "",
+		"", http.StatusOK)), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.Origin != entry.Origin || !detail.Created.Equal(entry.Created) {
+		t.Fatalf("entry origin %+v created %v, want %+v created %v",
+			detail.Origin, detail.Created, entry.Origin, entry.Created)
+	}
+	var page api.ChatPage
+	if err := json.Unmarshal([]byte(s.must(t, "GET",
+		"/api/entries/e1/messages", "", "", http.StatusOK)),
+		&page); err != nil {
+		t.Fatal(err)
+	}
+	if got := page.Messages[0]; got.Origin != message.Origin ||
+		!got.Created.Equal(message.Created) {
+		t.Fatalf("message origin %+v created %v, want %+v created %v",
+			got.Origin, got.Created, message.Origin, message.Created)
 	}
 }
 

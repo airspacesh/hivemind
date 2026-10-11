@@ -34,18 +34,19 @@ func assertNotOwner(t *testing.T, err error, want string) {
 	t.Helper()
 	var notOwner *NotOwnerError
 	if !errors.As(err, &notOwner) || err.Error() != want {
-		t.Fatalf("edit = %v, want a refusal saying %q", err, want)
+		t.Fatalf("change = %v, want a refusal saying %q", err, want)
 	}
 }
 
-func TestOnlyThePosterCanEditAnEntry(t *testing.T) {
+func TestOnlyThePosterCanEditOrDeleteAnEntry(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	topic := addAs(t, store, "alice", "topic")
 	other := addAs(t, store, "alice", "other")
 	key := store.mustKey(topic.Ref)
 	subject := "taken over"
-	refusal := "e1 was posted by alice, so only alice can edit it"
+	refusal := "e1 was posted by alice, so only alice can edit or " +
+		"delete it"
 
 	for _, req := range []api.EditEntryRequest{
 		{Subject: &subject, User: "bob"},
@@ -57,10 +58,13 @@ func TestOnlyThePosterCanEditAnEntry(t *testing.T) {
 		_, err := store.Edit(ctx, everyAccess(store), key, req)
 		assertNotOwner(t, err, refusal)
 	}
+	_, err := store.Delete(ctx, everyAccess(store), key,
+		api.DeleteRequest{User: "bob"})
+	assertNotOwner(t, err, refusal)
 	if got := mustGet(t, store, topic.Ref); got.Subject != "topic" ||
 		len(got.Metadata) != 0 || len(got.Links) != 0 ||
 		!got.Modified.Equal(topic.Modified) {
-		t.Fatalf("a refused edit changed the entry: %+v", got)
+		t.Fatalf("a refused change changed the entry: %+v", got)
 	}
 
 	edited, err := store.Edit(ctx, everyAccess(store), key,
@@ -88,13 +92,14 @@ func TestOthersCanStillAddUnderAnEntryAndChatOnIt(t *testing.T) {
 	}
 }
 
-func TestOnlyThePosterCanEditAMessage(t *testing.T) {
+func TestOnlyThePosterCanEditOrDeleteAMessage(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	topic := addAs(t, store, "bob", "topic")
 	message := postAs(t, store, "alice", topic.Ref, "the answer")
 	key := store.mustKey(topic.Ref)
-	refusal := "e1-m1 was posted by alice, so only alice can edit it"
+	refusal := "e1-m1 was posted by alice, so only alice can edit or " +
+		"delete it"
 
 	// The entry's own poster cannot edit its chat either, even with
 	// text that would change nothing.
@@ -103,9 +108,13 @@ func TestOnlyThePosterCanEditAMessage(t *testing.T) {
 			api.EditMessageRequest{Body: body, User: "bob"})
 		assertNotOwner(t, err, refusal)
 	}
+	_, err := store.DeleteMessage(ctx, key, message.Number,
+		api.DeleteRequest{User: "bob"})
+	assertNotOwner(t, err, refusal)
 	if got := readChat(t, store, topic.Ref, 0, 20); got.Messages[0].Body !=
 		"the answer" {
-		t.Fatalf("a refused edit changed the message: %+v", got.Messages)
+		t.Fatalf("a refused change changed the message: %+v",
+			got.Messages)
 	}
 
 	edited, changed, err := store.EditMessage(ctx, key, message.Number,
@@ -116,7 +125,7 @@ func TestOnlyThePosterCanEditAMessage(t *testing.T) {
 	}
 }
 
-func TestNobodyCanEditWhatRecordsNoUser(t *testing.T) {
+func TestNobodyCanEditOrDeleteWhatRecordsNoUser(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	entry, err := store.Add(ctx, everyAccess(store),
@@ -129,13 +138,21 @@ func TestNobodyCanEditWhatRecordsNoUser(t *testing.T) {
 	key := store.mustKey(entry.Ref)
 
 	subject := "claimed"
+	entryRefusal := "e1 records no user, so nobody can edit or delete it"
+	messageRefusal := "e1-m1 records no user, so nobody can edit or " +
+		"delete it"
 	for _, user := range []string{"duck", ""} {
 		_, err := store.Edit(ctx, everyAccess(store), key,
 			api.EditEntryRequest{Subject: &subject, User: user})
-		assertNotOwner(t, err, "e1 records no user, so nobody can edit it")
+		assertNotOwner(t, err, entryRefusal)
+		_, err = store.Delete(ctx, everyAccess(store), key,
+			api.DeleteRequest{User: user})
+		assertNotOwner(t, err, entryRefusal)
 		_, _, err = store.EditMessage(ctx, key, message.Number,
 			api.EditMessageRequest{Body: "claimed", User: user})
-		assertNotOwner(t, err,
-			"e1-m1 records no user, so nobody can edit it")
+		assertNotOwner(t, err, messageRefusal)
+		_, err = store.DeleteMessage(ctx, key, message.Number,
+			api.DeleteRequest{User: user})
+		assertNotOwner(t, err, messageRefusal)
 	}
 }

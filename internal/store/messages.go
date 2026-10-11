@@ -180,6 +180,17 @@ func (s *Store) EditMessage(
 	return message, true, nil
 }
 
+// DeleteMessage overwrites a message's text with api.DeletedText, as
+// an edit would. Deleting a deleted message changes nothing. Only the
+// user who posted the message can delete it.
+func (s *Store) DeleteMessage(
+	ctx context.Context, entry Key, number int64, req api.DeleteRequest,
+) (api.Message, error) {
+	message, _, err := s.EditMessage(ctx, entry, number,
+		api.EditMessageRequest{Body: api.DeletedText, User: req.User})
+	return message, err
+}
+
 // readChatPage reads the messages a query selects into a page, oldest
 // first. The query reads at most limit messages after since, so a full
 // page ends at its last message, and a page short of it has checked

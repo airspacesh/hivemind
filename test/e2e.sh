@@ -145,6 +145,7 @@ check_status() {
 }
 
 added() { sed -n 's/^Added entry \[\([a-z]*[0-9]*\)\]\.$/\1/p'; }
+cursor_of() { sed -n 's/^Cursor: \([0-9]*\) .*/\1/p'; }
 
 # Each build reads only its own config, and without one it explains
 # how to write one and does nothing else.
@@ -420,9 +421,9 @@ check "recent shows a tree's newest messages, not its edited ones" \
 check "search shows the matching messages" "  [$chat-m4]" \
     "$(ws search Woken)"
 
-# Only the user who posted an entry or message can edit it, and anyone
-# can add under it and chat on it. The client always sends its own
-# user, so the other user's posts go in by curl.
+# Only the user who posted an entry or message can edit or delete it,
+# and anyone can add under it and chat on it. The client always sends
+# its own user, so the other user's posts go in by curl.
 post_as_heron() {
     curl -fsS -X POST -H "Workstream-API-Version: $api_version" \
         --data "$2" "$main_url/api/$1" >/dev/null
@@ -431,9 +432,9 @@ post_as_heron workspaces/general/entries \
     '{"subject":"Heron topic","project":"owners","origin":{"user":"heron"}}'
 heron="$(ws search 'Heron topic' --id-only)"
 check "an edit of another user's entry names its owner and the next step" \
-    "$heron was posted by heron, so only heron can edit it. To suggest a change, send a message in its chat with 'ws chat send $heron \"<message>\"'" \
+    "$heron was posted by heron, so only heron can edit or delete it. To suggest a change, send a message in its chat with 'ws chat send $heron \"<message>\"'" \
     "$(ws edit "$heron" --subject "Taken" 2>&1 || true)"
-check "a link alone is refused too" "only heron can edit it" \
+check "a link alone is refused too" "only heron can edit or delete it" \
     "$(ws edit "$heron" --link "see=$chat" 2>&1 || true)"
 reply="$(ws add "Reply under heron" --project owners --parent "$heron" \
     --no-recent | added)"
@@ -468,12 +469,52 @@ check_equal "recent leaves out trees with no change in the span" \
 check "a time flag names the forms it takes" "like 2d, 6h or 90m" \
     "$(ws search --after yesterday 2>&1 || true)"
 check "an edit of another user's message is refused" \
-    "$heron-m2 was posted by heron, so only heron can edit it" \
+    "$heron-m2 was posted by heron, so only heron can edit or delete it" \
     "$(ws chat edit "$heron-m2" "Taken" 2>&1 || true)"
-check_equal "your own message can still be withdrawn" \
-    "Edited [$heron-m1]." "$(ws chat edit "$heron-m1" "Retracted")"
-check_equal "your own entry can still be withdrawn" "Edited entry [$reply]." \
-    "$(ws edit "$reply" --subject "Retracted" --no-recent)"
+check "a delete of another user's entry is refused" \
+    "only heron can edit or delete it" "$(ws delete "$heron" 2>&1 || true)"
+check "a delete of another user's message is refused" \
+    "only heron can edit or delete it" \
+    "$(ws chat delete "$heron-m2" 2>&1 || true)"
+
+# A delete removes an entry's text and metadata, or a message's text,
+# and keeps its place.
+gadwall="$(ws add "Gadwall nest" --project owners --body "Code 4417" \
+    --jira QUACK-9 --parent "$reply" --no-recent | added)"
+egg="$(ws add "Eggs counted" --project owners --parent "$gadwall" \
+    --no-recent | added)"
+ws chat send "$gadwall" "Before" >/dev/null
+ws chat send "$gadwall" "The code is 4417" >/dev/null
+ws chat send "$gadwall" "After" >/dev/null
+before_delete="$(ws wait --since 0 --include-mine --timeout 1s | cursor_of)"
+check_equal "you can delete your own entry" "Deleted entry [$gadwall]." \
+    "$(ws delete "$gadwall")"
+check_equal "you can delete your own message" "Deleted [$gadwall-m2]." \
+    "$(ws chat delete "$gadwall-m2")"
+gadwall_entry="$(ws entry "$gadwall")"
+check "a deleted entry's subject is Deleted" "[$gadwall] Deleted" \
+    "$gadwall_entry"
+check_equal "a deleted entry keeps no body or metadata" "" \
+    "$(echo "$gadwall_entry" | grep -E '4417|QUACK|Metadata' || true)"
+check "a deleted entry keeps its origin" "From: $(id -un)@" "$gadwall_entry"
+untimed() { sed -E 's/\] ([0-9/]+ )?[0-9]{2}:[0-9]{2}:? /] /'; }
+check "a deleted entry keeps its place in the tree" \
+    "  [$gadwall] Deleted
+    [$egg] Eggs counted" "$(ws tree "$reply" | untimed)"
+check "a deleted message keeps its place" \
+    "[$gadwall-m1] $(id -un): Before
+[$gadwall-m2] $(id -un) (edited): Deleted
+[$gadwall-m3] $(id -un): After" "$(ws chat recent "$gadwall" | untimed)"
+check_equal "search no longer finds deleted text" "No matching entries." \
+    "$(ws search 4417)"
+deletes="$(ws wait --since "$before_delete" --include-mine --timeout 1s)"
+check "a wait sees a deleted entry" "[$gadwall]" "$deletes"
+check "a wait sees a deleted message" "[$gadwall-m2]" "$deletes"
+after_delete="$(echo "$deletes" | cursor_of)"
+ws delete "$gadwall" >/dev/null
+ws chat delete "$gadwall-m2" >/dev/null
+check "deleting again changes nothing" "No matching changes" \
+    "$(ws wait --since "$after_delete" --include-mine --timeout 1s)"
 
 # Changes.
 private_changes="$(ws wait --since 0 --workspace personal --include-mine \
@@ -516,7 +557,6 @@ check "a firehose prints entries as they arrive" "Hosed entry" \
 
 # A wait leaves out the changes of its own session, and wakes for
 # another session of the same user. Its cursor passes what it left out.
-cursor_of() { sed -n 's/^Cursor: \([0-9]*\) .*/\1/p'; }
 start="$(lead wait --timeout 1ms | cursor_of)"
 own="$(lead add "Own changes" --project own --no-recent | added)"
 lead chat send "$own" "Lead message" >/dev/null
