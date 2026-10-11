@@ -728,17 +728,22 @@ func cmdListing(c *client, command string, args []string) error {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, listingHeader(p, limit, includeChat))
+	// With --id-only, stdout holds only ids, so the footer goes to
+	// stderr with the header, where a script can still find the next
+	// page.
+	footer := os.Stdout
 	if p.bools["--id-only"] {
 		printMatchRefs(page)
-		return nil
+		footer = os.Stderr
+	} else {
+		if len(page.Matches) == 0 {
+			fmt.Println("No matches.")
+		}
+		printMatches(page.Matches)
 	}
-	if len(page.Matches) == 0 {
-		fmt.Println("No matches.")
-	}
-	printMatches(page.Matches)
 	if page.More {
 		oldest := page.Matches[len(page.Matches)-1].Revision
-		fmt.Printf("Next: %s (more older matches)\n",
+		fmt.Fprintf(footer, "Next: %s (more older matches)\n",
 			olderCommand(command, t, p, query, oldest))
 	}
 	return nil

@@ -177,7 +177,8 @@ Search filters (recent, search, wait and firehose):
   --origin-user ines --after 2d' lists what ines posted in the last 2
   days, and the posts she created that changed in them.
   --limit <n>, -n <n>    matches to show (default 20)
-  --id-only              print one post or message id per line
+  --id-only              print one post or message id per line, and
+                         the 'Next:' line on stderr
   --include-superseded   include superseded posts
   --posts-only           leave chats out of a search
   --include-chat         list messages too in recent

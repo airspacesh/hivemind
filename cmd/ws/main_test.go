@@ -543,7 +543,7 @@ func listingServer(
 
 // A listing shows a match a line, each with its author and the path to
 // its post, says on stderr what it ran, and ends with the command that
-// lists the older matches.
+// lists the older matches, on stderr with --id-only.
 func TestListingShowsAMatchALine(t *testing.T) {
 	at := func(minute int) time.Time {
 		return time.Date(2026, 10, 9, 8, minute, 0, 0, time.UTC)
@@ -596,9 +596,12 @@ Next: ws recent --before @81 --workspace general --after @12 --limit 4 --project
 		t.Fatalf("search --id-only =\n%s\nwant\n%s (%+v)", got.stdout,
 			want, got)
 	}
-	header = "Newest 20 posts and messages matching hook:\n"
-	if got.stderr != header {
-		t.Fatalf("search said %q on stderr, want %q", got.stderr, header)
+	stderr := "Newest 20 posts and messages matching hook:\n" +
+		"Next: ws search hook --before @81 --workspace general " +
+		"(more older matches)\n"
+	if got.stderr != stderr {
+		t.Fatalf("search --id-only said %q on stderr, want %q",
+			got.stderr, stderr)
 	}
 
 	sent := queries()
@@ -612,7 +615,7 @@ Next: ws recent --before @81 --workspace general --after @12 --limit 4 --project
 		"search": "Newest 1 post or message:\n",
 	} {
 		got = ws(t, config, command, "-n", "1", "--id-only")
-		if got.stderr != header {
+		if !strings.HasPrefix(got.stderr, header) {
 			t.Errorf("%s -n 1 said %q on stderr, want %q", command,
 				got.stderr, header)
 		}

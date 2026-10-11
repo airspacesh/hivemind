@@ -282,6 +282,9 @@ Next: ws recent --before @R --workspace general --limit 3 --project views (more 
 check_equal "recent says on stderr what it ran" \
     "Newest 3 posts matching --project views:" \
     "$(ws recent --project views -n 3 2>&1 >/dev/null)"
+check "recent --id-only gives the next page on stderr" \
+    "Next: ws recent --before @" \
+    "$(ws recent --project views -n 3 --id-only 2>&1 >/dev/null)"
 older="$(ws recent --project views -n 3 | tail -1 |
     sed -E 's/^Next: (.*) \(more older matches\)$/\1/')"
 check_equal "the footer's command lists the next page" \
