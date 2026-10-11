@@ -19,7 +19,7 @@ type Workspace struct {
 	Prefix string
 }
 
-// Key names an entry inside the database by its workspace id and its
+// Key names a post inside the database by its workspace id and its
 // number within that workspace.
 type Key struct {
 	Workspace int64
@@ -27,7 +27,7 @@ type Key struct {
 }
 
 // Access is the set of workspaces a request can read, and so write.
-// Every entry outside it is unreadable. It shows as its bare ref in a
+// Every post outside it is unreadable. It shows as its bare ref in a
 // link or an ancestor path, and nowhere else.
 type Access struct {
 	workspaces []int64
@@ -109,12 +109,12 @@ func (s *Store) Workspaces() []Workspace {
 }
 
 // Unconfigured names the workspaces the database holds that the config
-// does not. Their entries are unreachable.
+// does not. Their posts are unreachable.
 func (s *Store) Unconfigured() []string {
 	return slices.Clone(s.unconfigured)
 }
 
-// Resolve finds the entry key a ref names, without checking the entry
+// Resolve finds the post key a ref names, without checking the post
 // exists.
 func (s *Store) Resolve(ref api.Ref) (Key, error) {
 	for _, workspace := range s.workspaces {
@@ -125,8 +125,8 @@ func (s *Store) Resolve(ref api.Ref) (Key, error) {
 	return Key{}, fmt.Errorf("%w %s", ErrUnknownPrefix, ref.Prefix)
 }
 
-// ref names an entry by its prefixed id. An entry in a workspace the
-// config does not name has none.
+// ref names a post by its prefixed id. A post in a workspace the config
+// does not name has none.
 func (s *Store) ref(key Key) (api.Ref, bool) {
 	for _, workspace := range s.workspaces {
 		if workspace.ID == key.Workspace {
@@ -136,17 +136,17 @@ func (s *Store) ref(key Key) (api.Ref, bool) {
 	return api.Ref{}, false
 }
 
-// mustRef names an entry in a configured workspace, which every entry
-// a request reaches directly is.
+// mustRef names a post in a configured workspace, which every post a
+// request reaches directly is.
 func (s *Store) mustRef(key Key) api.Ref {
 	ref, ok := s.ref(key)
 	if !ok {
-		panic(fmt.Sprintf("entry %+v is in an unconfigured workspace", key))
+		panic(fmt.Sprintf("post %+v is in an unconfigured workspace", key))
 	}
 	return ref
 }
 
-// mustKey finds the key of an entry the store named itself.
+// mustKey finds the key of a post the store named itself.
 func (s *Store) mustKey(ref api.Ref) Key {
 	key, err := s.Resolve(ref)
 	if err != nil {

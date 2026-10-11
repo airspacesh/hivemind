@@ -32,7 +32,7 @@ func (s *Store) begin(
 	return view{store: s, tx: tx, access: access}, nil
 }
 
-const entryColumns = `e.workspace_id, e.id, e.created_utc,
+const postColumns = `e.workspace_id, e.id, e.created_utc,
 	e.modified_utc, e.project, e.subject, e.body, e.deleted,
 	e.origin_user, e.origin_host, e.origin_dir, e.origin_claude_session`
 
@@ -40,41 +40,41 @@ type rowScanner interface {
 	Scan(...any) error
 }
 
-// scanEntry reads the entryColumns, and any extra columns into extra.
-func (v view) scanEntry(row rowScanner, extra ...any) (api.Post, error) {
-	var entry api.Post
+// scanPost reads the postColumns, and any extra columns into extra.
+func (v view) scanPost(row rowScanner, extra ...any) (api.Post, error) {
+	var post api.Post
 	var key Key
 	var created, modified string
 	err := row.Scan(append([]any{
 		&key.Workspace, &key.ID, &created, &modified,
-		&entry.Project, &entry.Subject, &entry.Body, &entry.Deleted,
-		&entry.Origin.User, &entry.Origin.Host,
-		&entry.Origin.Dir, &entry.Origin.ClaudeSession,
+		&post.Project, &post.Subject, &post.Body, &post.Deleted,
+		&post.Origin.User, &post.Origin.Host,
+		&post.Origin.Dir, &post.Origin.ClaudeSession,
 	}, extra...)...)
 	if err != nil {
 		return api.Post{}, err
 	}
-	entry.Ref = v.store.mustRef(key)
-	if entry.Created, err = parseTime(created); err != nil {
+	post.Ref = v.store.mustRef(key)
+	if post.Created, err = parseTime(created); err != nil {
 		return api.Post{}, err
 	}
-	if entry.Modified, err = parseTime(modified); err != nil {
+	if post.Modified, err = parseTime(modified); err != nil {
 		return api.Post{}, err
 	}
-	return entry, nil
+	return post, nil
 }
 
-func (v view) checkEntryExists(ctx context.Context, key Key) error {
+func (v view) checkPostExists(ctx context.Context, key Key) error {
 	var exists bool
 	if err := v.tx.QueryRowContext(ctx, `
 		SELECT EXISTS (
-			SELECT 1 FROM entries WHERE workspace_id = ? AND id = ?
+			SELECT 1 FROM posts WHERE workspace_id = ? AND id = ?
 		)`, key.Workspace, key.ID,
 	).Scan(&exists); err != nil {
-		return fmt.Errorf("checking entry: %w", err)
+		return fmt.Errorf("checking post: %w", err)
 	}
 	if !exists {
-		return fmt.Errorf("%w: %s", ErrEntryNotFound, v.store.mustRef(key))
+		return fmt.Errorf("%w: %s", ErrPostNotFound, v.store.mustRef(key))
 	}
 	return nil
 }
@@ -83,8 +83,8 @@ func (v view) metadataFor(
 	ctx context.Context, key Key,
 ) (map[string]string, error) {
 	rows, err := v.tx.QueryContext(ctx, `
-		SELECT key, value FROM entry_metadata
-		WHERE workspace_id = ? AND entry_id = ? ORDER BY key`,
+		SELECT key, value FROM post_metadata
+		WHERE workspace_id = ? AND post_id = ? ORDER BY key`,
 		key.Workspace, key.ID,
 	)
 	if err != nil {
@@ -102,27 +102,27 @@ func (v view) metadataFor(
 	return metadata, rows.Err()
 }
 
-func (v view) getEntry(ctx context.Context, key Key) (api.Post, error) {
+func (v view) getPost(ctx context.Context, key Key) (api.Post, error) {
 	row := v.tx.QueryRowContext(ctx, `
-		SELECT `+entryColumns+` FROM entries AS e
+		SELECT `+postColumns+` FROM posts AS e
 		WHERE e.workspace_id = ? AND e.id = ?`, key.Workspace, key.ID,
 	)
-	entry, err := v.scanEntry(row)
+	post, err := v.scanPost(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return api.Post{}, fmt.Errorf("%w: %s", ErrEntryNotFound,
+		return api.Post{}, fmt.Errorf("%w: %s", ErrPostNotFound,
 			v.store.mustRef(key))
 	}
 	if err != nil {
 		return api.Post{}, err
 	}
-	if entry.Metadata, err = v.metadataFor(ctx, key); err != nil {
+	if post.Metadata, err = v.metadataFor(ctx, key); err != nil {
 		return api.Post{}, err
 	}
-	entries := []api.Post{entry}
-	if err := v.attachLinks(ctx, entries); err != nil {
+	posts := []api.Post{post}
+	if err := v.attachLinks(ctx, posts); err != nil {
 		return api.Post{}, err
 	}
-	return entries[0], nil
+	return posts[0], nil
 }
 
 func (v view) writeMetadata(
@@ -131,8 +131,8 @@ func (v view) writeMetadata(
 	for name, value := range metadata {
 		if value == "" {
 			if _, err := v.tx.ExecContext(ctx, `
-				DELETE FROM entry_metadata
-				WHERE workspace_id = ? AND entry_id = ? AND key = ?`,
+				DELETE FROM post_metadata
+				WHERE workspace_id = ? AND post_id = ? AND key = ?`,
 				key.Workspace, key.ID, name,
 			); err != nil {
 				return fmt.Errorf("removing metadata: %w", err)
@@ -141,9 +141,9 @@ func (v view) writeMetadata(
 		}
 
 		if _, err := v.tx.ExecContext(ctx, `
-			INSERT INTO entry_metadata (workspace_id, entry_id, key, value)
+			INSERT INTO post_metadata (workspace_id, post_id, key, value)
 			VALUES (?, ?, ?, ?)
-			ON CONFLICT (workspace_id, entry_id, key)
+			ON CONFLICT (workspace_id, post_id, key)
 			DO UPDATE SET value = excluded.value`,
 			key.Workspace, key.ID, name, value,
 		); err != nil {
@@ -153,8 +153,8 @@ func (v view) writeMetadata(
 
 	var count int
 	if err := v.tx.QueryRowContext(ctx, `
-		SELECT count(*) FROM entry_metadata
-		WHERE workspace_id = ? AND entry_id = ?`, key.Workspace, key.ID,
+		SELECT count(*) FROM post_metadata
+		WHERE workspace_id = ? AND post_id = ?`, key.Workspace, key.ID,
 	).Scan(&count); err != nil {
 		return fmt.Errorf("checking metadata: %w", err)
 	}
@@ -164,8 +164,8 @@ func (v view) writeMetadata(
 	return nil
 }
 
-// Add adds an entry to a workspace, numbered one past the workspace's
-// highest entry. Writes are serialised through the store's one
+// Add adds a post to a workspace, numbered one past the workspace's
+// highest post. Writes are serialised through the store's one
 // connection, so no other write can take the same number.
 func (s *Store) Add(
 	ctx context.Context,
@@ -175,16 +175,16 @@ func (s *Store) Add(
 ) (api.Post, error) {
 	v, err := s.begin(ctx, access, false)
 	if err != nil {
-		return api.Post{}, fmt.Errorf("adding entry: %w", err)
+		return api.Post{}, fmt.Errorf("adding post: %w", err)
 	}
 	defer v.tx.Rollback()
 
 	key := Key{Workspace: workspace}
 	if err := v.tx.QueryRowContext(ctx, `
-		SELECT coalesce(max(id), 0) + 1 FROM entries
+		SELECT coalesce(max(id), 0) + 1 FROM posts
 		WHERE workspace_id = ?`, workspace,
 	).Scan(&key.ID); err != nil {
-		return api.Post{}, fmt.Errorf("numbering entry: %w", err)
+		return api.Post{}, fmt.Errorf("numbering post: %w", err)
 	}
 	revision, err := nextRevision(ctx, v.tx)
 	if err != nil {
@@ -192,7 +192,7 @@ func (s *Store) Add(
 	}
 	now := nowUTC()
 	if _, err := v.tx.ExecContext(ctx, `
-		INSERT INTO entries (
+		INSERT INTO posts (
 			workspace_id, id, created_utc, modified_utc, activity_utc,
 			revision, activity_revision, project, subject, body,
 			origin_user, origin_host, origin_dir, origin_claude_session
@@ -201,7 +201,7 @@ func (s *Store) Add(
 		req.Subject, req.Body, req.Origin.User, req.Origin.Host,
 		req.Origin.Dir, req.Origin.ClaudeSession,
 	); err != nil {
-		return api.Post{}, fmt.Errorf("adding entry: %w", err)
+		return api.Post{}, fmt.Errorf("adding post: %w", err)
 	}
 	if err := v.writeMetadata(ctx, key, req.Metadata); err != nil {
 		return api.Post{}, err
@@ -209,20 +209,20 @@ func (s *Store) Add(
 	if err := v.writeLinks(ctx, key, nil, nil, req.Links); err != nil {
 		return api.Post{}, err
 	}
-	entry, err := v.getEntry(ctx, key)
+	post, err := v.getPost(ctx, key)
 	if err != nil {
-		return api.Post{}, fmt.Errorf("reading new entry: %w", err)
+		return api.Post{}, fmt.Errorf("reading new post: %w", err)
 	}
 	if err := v.tx.Commit(); err != nil {
-		return api.Post{}, fmt.Errorf("committing new entry: %w", err)
+		return api.Post{}, fmt.Errorf("committing new post: %w", err)
 	}
-	return entry, nil
+	return post, nil
 }
 
-// editContent updates an entry's own fields, its modified and activity
+// editContent updates a post's own fields, its modified and activity
 // times, and its revisions. A change to links alone leaves them all as
-// they are, so organising old entries does not reorder listings or
-// show in the changes feed.
+// they are, so organising old posts does not reorder listings or show
+// in the changes feed.
 func (v view) editContent(
 	ctx context.Context, key Key, req api.EditPostRequest,
 ) error {
@@ -231,7 +231,7 @@ func (v view) editContent(
 		return err
 	}
 	now := nowUTC()
-	query := `UPDATE entries SET modified_utc = ?, activity_utc = ?,
+	query := `UPDATE posts SET modified_utc = ?, activity_utc = ?,
 		revision = ?, activity_revision = ?`
 	args := []any{now, now, revision, revision}
 	if req.Project != nil {
@@ -249,13 +249,13 @@ func (v view) editContent(
 	query += ` WHERE workspace_id = ? AND id = ?`
 	args = append(args, key.Workspace, key.ID)
 	if _, err := v.tx.ExecContext(ctx, query, args...); err != nil {
-		return fmt.Errorf("editing entry: %w", err)
+		return fmt.Errorf("editing post: %w", err)
 	}
 	return nil
 }
 
 // NotOwnerError refuses an edit or delete by anyone but the user who
-// posted the entry or message it changes. Nobody can change one that
+// wrote the post or message it changes. Nobody can change one that
 // records no user.
 type NotOwnerError struct {
 	posted string
@@ -280,7 +280,7 @@ func checkEditor(posted fmt.Stringer, owner, editor string) error {
 	return nil
 }
 
-// DeletedError refuses an edit of a deleted entry or message, which
+// DeletedError refuses an edit of a deleted post or message, which
 // would bring back what the delete removed.
 type DeletedError struct {
 	deleted string
@@ -290,28 +290,28 @@ func (e *DeletedError) Error() string {
 	return e.deleted + " was deleted, so it cannot be edited"
 }
 
-// editState reads what decides whether an entry can be changed: the
-// user who posted it, and whether it is deleted.
+// editState reads what decides whether a post can be changed: the user
+// who posted it, and whether it is deleted.
 func (v view) editState(
 	ctx context.Context, key Key,
 ) (owner string, deleted bool, err error) {
 	err = v.tx.QueryRowContext(ctx, `
-		SELECT origin_user, deleted FROM entries
+		SELECT origin_user, deleted FROM posts
 		WHERE workspace_id = ? AND id = ?`, key.Workspace, key.ID,
 	).Scan(&owner, &deleted)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, fmt.Errorf("%w: %s", ErrEntryNotFound,
+		return "", false, fmt.Errorf("%w: %s", ErrPostNotFound,
 			v.store.mustRef(key))
 	}
 	if err != nil {
-		return "", false, fmt.Errorf("reading entry state: %w", err)
+		return "", false, fmt.Errorf("reading post state: %w", err)
 	}
 	return owner, deleted, nil
 }
 
-// Edit overwrites an entry's fields and changes its metadata and
-// links. No earlier text is kept. Only the user who posted the entry
-// can edit it, and nobody can edit a deleted entry.
+// Edit overwrites a post's fields and changes its metadata and links.
+// No earlier text is kept. Only the user who wrote the post can edit
+// it, and nobody can edit a deleted post.
 func (s *Store) Edit(
 	ctx context.Context,
 	access Access,
@@ -324,7 +324,7 @@ func (s *Store) Edit(
 	}
 	v, err := s.begin(ctx, access, false)
 	if err != nil {
-		return api.Post{}, fmt.Errorf("editing entry: %w", err)
+		return api.Post{}, fmt.Errorf("editing post: %w", err)
 	}
 	defer v.tx.Rollback()
 
@@ -354,27 +354,27 @@ func (s *Store) Edit(
 		return api.Post{}, err
 	}
 
-	entry, err := v.getEntry(ctx, key)
+	post, err := v.getPost(ctx, key)
 	if err != nil {
-		return api.Post{}, fmt.Errorf("reading edited entry: %w", err)
+		return api.Post{}, fmt.Errorf("reading edited post: %w", err)
 	}
 	if err := v.tx.Commit(); err != nil {
-		return api.Post{}, fmt.Errorf("committing edited entry: %w", err)
+		return api.Post{}, fmt.Errorf("committing edited post: %w", err)
 	}
-	return entry, nil
+	return post, nil
 }
 
-// Delete clears an entry's subject and body, removes its metadata, and
+// Delete clears a post's subject and body, removes its metadata, and
 // marks it deleted, and no earlier text is kept. Its id, project,
-// origin, creation time, links and chat stay, so the entries under it
-// stay in place. Deleting a deleted entry changes nothing. Only the
-// user who posted the entry can delete it.
+// origin, creation time, links and chat stay, so the posts under it
+// stay in place. Deleting a deleted post changes nothing. Only the user
+// who wrote the post can delete it.
 func (s *Store) Delete(
 	ctx context.Context, access Access, key Key, req api.DeleteRequest,
 ) (api.Post, error) {
 	v, err := s.begin(ctx, access, false)
 	if err != nil {
-		return api.Post{}, fmt.Errorf("deleting entry: %w", err)
+		return api.Post{}, fmt.Errorf("deleting post: %w", err)
 	}
 	defer v.tx.Rollback()
 
@@ -387,7 +387,7 @@ func (s *Store) Delete(
 		return api.Post{}, err
 	}
 	if deleted {
-		return v.getEntry(ctx, key)
+		return v.getPost(ctx, key)
 	}
 
 	empty := ""
@@ -397,23 +397,23 @@ func (s *Store) Delete(
 		return api.Post{}, err
 	}
 	if _, err := v.tx.ExecContext(ctx, `
-		UPDATE entries SET deleted = 1 WHERE workspace_id = ? AND id = ?`,
+		UPDATE posts SET deleted = 1 WHERE workspace_id = ? AND id = ?`,
 		key.Workspace, key.ID,
 	); err != nil {
-		return api.Post{}, fmt.Errorf("marking entry deleted: %w", err)
+		return api.Post{}, fmt.Errorf("marking post deleted: %w", err)
 	}
 	if _, err := v.tx.ExecContext(ctx, `
-		DELETE FROM entry_metadata WHERE workspace_id = ? AND entry_id = ?`,
+		DELETE FROM post_metadata WHERE workspace_id = ? AND post_id = ?`,
 		key.Workspace, key.ID,
 	); err != nil {
 		return api.Post{}, fmt.Errorf("removing metadata: %w", err)
 	}
-	entry, err := v.getEntry(ctx, key)
+	post, err := v.getPost(ctx, key)
 	if err != nil {
-		return api.Post{}, fmt.Errorf("reading deleted entry: %w", err)
+		return api.Post{}, fmt.Errorf("reading deleted post: %w", err)
 	}
 	if err := v.tx.Commit(); err != nil {
-		return api.Post{}, fmt.Errorf("committing deleted entry: %w", err)
+		return api.Post{}, fmt.Errorf("committing deleted post: %w", err)
 	}
-	return entry, nil
+	return post, nil
 }

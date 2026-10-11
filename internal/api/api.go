@@ -225,7 +225,7 @@ type EditPostRequest struct {
 	RemoveLinks     []Link   `json:"remove_links,omitempty"`
 	RemoveLinkNames []string `json:"remove_link_names,omitempty"`
 	// User is the user making the edit, who must be the user that
-	// added the post.
+	// wrote the post.
 	User string `json:"user"`
 }
 

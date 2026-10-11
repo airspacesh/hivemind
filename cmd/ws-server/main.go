@@ -128,7 +128,7 @@ func startupWarnings(
 	for _, name := range unconfigured {
 		warnings = append(warnings, fmt.Sprintf("the database holds "+
 			"workspace %s, which the config does not name, so its "+
-			"entries are unreachable", name))
+			"posts are unreachable", name))
 	}
 	return warnings
 }
@@ -188,13 +188,13 @@ func (h *handler) routes() http.Handler {
 	route("GET /api/status", h.status)
 	route("GET /api/workspaces", h.listWorkspaces)
 	route("GET /api/workspaces/{workspace}/posts", h.search)
-	route("POST /api/workspaces/{workspace}/posts", h.addEntry)
+	route("POST /api/workspaces/{workspace}/posts", h.addPost)
 	route("GET /api/workspaces/{workspace}/projects", h.projects)
 	route("GET /api/workspaces/{workspace}/messages", h.overview)
 	route("GET /api/workspaces/{workspace}/changes", h.changes)
-	route("GET /api/posts/{ref}", h.getEntry)
-	route("PATCH /api/posts/{ref}", h.editEntry)
-	route("DELETE /api/posts/{ref}", h.deleteEntry)
+	route("GET /api/posts/{ref}", h.getPost)
+	route("PATCH /api/posts/{ref}", h.editPost)
+	route("DELETE /api/posts/{ref}", h.deletePost)
 	route("GET /api/posts/{ref}/tree", h.tree)
 	route("POST /api/posts/{ref}/messages", h.postMessage)
 	route("GET /api/posts/{ref}/messages", h.listMessages)
@@ -280,7 +280,7 @@ func (h *handler) projects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, projects)
 }
 
-func (h *handler) addEntry(w http.ResponseWriter, r *http.Request) {
+func (h *handler) addPost(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return
 	}
@@ -300,33 +300,33 @@ func (h *handler) addEntry(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	entry, err := h.store.Add(r.Context(), access, workspace.ID, request)
+	post, err := h.store.Add(r.Context(), access, workspace.ID, request)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	log.Printf("issued %s", entry.Ref)
-	writeJSON(w, http.StatusCreated, entry)
+	log.Printf("issued %s", post.Ref)
+	writeJSON(w, http.StatusCreated, post)
 }
 
-// pathEntry finds the entry the path's ref names, which the request
-// must be able to read.
-func (h *handler) pathEntry(
+// pathPost finds the post the path's ref names, which the request must
+// be able to read.
+func (h *handler) pathPost(
 	w http.ResponseWriter, r *http.Request,
 ) (store.Access, store.Key, bool) {
 	access, ok := h.access(w, r)
 	if !ok {
 		return store.Access{}, store.Key{}, false
 	}
-	key, ok := h.entryKey(w, access, r.PathValue("ref"))
+	key, ok := h.postKey(w, access, r.PathValue("ref"))
 	return access, key, ok
 }
 
-func (h *handler) getEntry(w http.ResponseWriter, r *http.Request) {
+func (h *handler) getPost(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return
 	}
-	access, key, ok := h.pathEntry(w, r)
+	access, key, ok := h.pathPost(w, r)
 	if !ok {
 		return
 	}
@@ -338,11 +338,11 @@ func (h *handler) getEntry(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, detail)
 }
 
-func (h *handler) editEntry(w http.ResponseWriter, r *http.Request) {
+func (h *handler) editPost(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return
 	}
-	access, key, ok := h.pathEntry(w, r)
+	access, key, ok := h.pathPost(w, r)
 	if !ok {
 		return
 	}
@@ -354,19 +354,19 @@ func (h *handler) editEntry(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	entry, err := h.store.Edit(r.Context(), access, key, request)
+	post, err := h.store.Edit(r.Context(), access, key, request)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, entry)
+	writeJSON(w, http.StatusOK, post)
 }
 
-func (h *handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
+func (h *handler) deletePost(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return
 	}
-	access, key, ok := h.pathEntry(w, r)
+	access, key, ok := h.pathPost(w, r)
 	if !ok {
 		return
 	}
@@ -378,12 +378,12 @@ func (h *handler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	entry, err := h.store.Delete(r.Context(), access, key, request)
+	post, err := h.store.Delete(r.Context(), access, key, request)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, entry)
+	writeJSON(w, http.StatusOK, post)
 }
 
 const defaultTreeLimit = 30
@@ -404,7 +404,7 @@ func (h *handler) tree(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	access, key, ok := h.pathEntry(w, r)
+	access, key, ok := h.pathPost(w, r)
 	if !ok {
 		return
 	}

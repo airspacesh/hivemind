@@ -15,20 +15,21 @@ import (
 	"github.com/airspacesh/workstream/internal/api"
 )
 
-// activityExpr is when entry e last changed by definition: an edit to
-// it, or a post or edit in its chat. activity_utc must always equal it.
+// activityExpr is when post e last changed by definition: an edit to
+// it, or a message posted or edited in its chat. activity_utc must
+// always equal it.
 const activityExpr = `max(e.modified_utc, coalesce((
-	SELECT max(m.modified_utc) FROM entry_messages AS m
-	WHERE m.workspace_id = e.workspace_id AND m.entry_id = e.id), ''))`
+	SELECT max(m.modified_utc) FROM post_messages AS m
+	WHERE m.workspace_id = e.workspace_id AND m.post_id = e.id), ''))`
 
-// forestWriter makes random writes to two workspaces: entries with
-// random parents in the same workspace, supersessions across them,
-// origins, metadata, messages, and edits and deletes of both.
+// forestWriter makes random writes to two workspaces: posts with random
+// parents in the same workspace, supersessions across them, origins,
+// metadata, messages, and edits and deletes of both.
 type forestWriter struct {
 	t           *testing.T
 	store       *Store
 	random      *rand.Rand
-	entries     []api.Post
+	posts       []api.Post
 	messages    []api.Message
 	inWorkspace map[string][]api.Ref
 	deleted     map[string]bool
@@ -42,7 +43,7 @@ func newForestWriter(
 		inWorkspace: map[string][]api.Ref{}, deleted: map[string]bool{}}
 }
 
-// add adds an entry, in a random place.
+// add adds a post, in a random place.
 func (w *forestWriter) add() {
 	workspace := "general"
 	if w.random.Intn(3) == 0 {
@@ -54,17 +55,18 @@ func (w *forestWriter) add() {
 		links = append(links, link(api.ParentLink,
 			parents[w.random.Intn(len(parents))]))
 	}
-	if len(w.entries) > 0 && w.random.Intn(7) == 0 {
+	if len(w.posts) > 0 && w.random.Intn(7) == 0 {
 		links = append(links, link(api.SupersedesLink,
-			w.entries[w.random.Intn(len(w.entries))].Ref))
+			w.posts[w.random.Intn(len(w.posts))].Ref))
 	}
-	// Project c is rare, so a listing of it reads its entries by key.
+	// Project c is rare, so a listing of it reads its posts by key.
 	project := []string{"a", "b"}[w.random.Intn(2)]
 	if w.writes%13 == 0 {
 		project = "c"
 	}
-	// Some entries hold jira, and a few jira-2 as well. The values are
-	// upper case, so the metadata filters match them regardless of case.
+	// Some posts hold jira, and a few jira-2 as well. The values are
+	// upper case, so the metadata filters match them regardless of
+	// case.
 	metadata := map[string]string{}
 	if w.writes%3 == 0 {
 		metadata["jira"] = fmt.Sprintf("PROJ-%d", w.writes%4)
@@ -72,15 +74,15 @@ func (w *forestWriter) add() {
 	if w.writes%9 == 0 {
 		metadata["jira-2"] = "PROJ-9"
 	}
-	entry := addTo(w.t, w.store, workspace, api.AddPostRequest{
+	post := addTo(w.t, w.store, workspace, api.AddPostRequest{
 		Project:  project,
-		Subject:  fmt.Sprintf("entry %d %s", w.writes, w.word()),
+		Subject:  fmt.Sprintf("post %d %s", w.writes, w.word()),
 		Metadata: metadata,
 		Links:    links,
 		Origin:   api.Origin{User: []string{"ines", "omar"}[w.random.Intn(2)]},
 	})
-	w.entries = append(w.entries, entry)
-	w.inWorkspace[workspace] = append(w.inWorkspace[workspace], entry.Ref)
+	w.posts = append(w.posts, post)
+	w.inWorkspace[workspace] = append(w.inWorkspace[workspace], post.Ref)
 }
 
 func (w *forestWriter) word() string {
@@ -92,17 +94,17 @@ func (w *forestWriter) write() {
 	w.t.Helper()
 	ctx := context.Background()
 	w.writes++
-	if len(w.entries) < 20 || w.random.Intn(3) == 0 {
+	if len(w.posts) < 20 || w.random.Intn(3) == 0 {
 		w.add()
 		return
 	}
-	entry := w.entries[w.random.Intn(len(w.entries))]
-	key := w.store.mustKey(entry.Ref)
+	post := w.posts[w.random.Intn(len(w.posts))]
+	key := w.store.mustKey(post.Ref)
 	switch choice := w.random.Intn(16); {
-	case choice < 3 && !w.deleted[entry.Ref.String()]:
+	case choice < 3 && !w.deleted[post.Ref.String()]:
 		subject := fmt.Sprintf("edited %d %s", w.writes, w.word())
 		edit := api.EditPostRequest{Subject: &subject,
-			User: entry.Origin.User}
+			User: post.Origin.User}
 		switch choice {
 		case 0:
 			edit.Metadata = map[string]string{"jira": ""}
@@ -115,10 +117,10 @@ func (w *forestWriter) write() {
 		}
 	case choice < 4:
 		if _, err := w.store.Delete(ctx, everyAccess(w.store), key,
-			api.DeleteRequest{User: entry.Origin.User}); err != nil {
+			api.DeleteRequest{User: post.Origin.User}); err != nil {
 			w.t.Fatal(err)
 		}
-		w.deleted[entry.Ref.String()] = true
+		w.deleted[post.Ref.String()] = true
 	case choice < 8 && len(w.messages) > 0:
 		message := w.messages[w.random.Intn(len(w.messages))]
 		messageKey := w.store.mustKey(message.Post)
@@ -142,7 +144,7 @@ func (w *forestWriter) write() {
 			w.t.Fatal(err)
 		}
 	default:
-		message, err := w.store.Post(ctx, key, api.PostMessageRequest{
+		message, err := w.store.PostMessage(ctx, key, api.PostMessageRequest{
 			Body:   w.word(),
 			Origin: api.Origin{User: []string{"ines", "omar"}[w.random.Intn(2)]},
 		})
@@ -153,10 +155,10 @@ func (w *forestWriter) write() {
 	}
 }
 
-// scrambleTimes spreads the times of every entry and message over a
-// year at random, and sets each entry's activity time to match, so
-// times no longer follow revisions. When onDays is set, every time
-// falls on midnight, so many share it.
+// scrambleTimes spreads the times of every post and message over a year
+// at random, and sets each post's activity time to match, so times no
+// longer follow revisions. When onDays is set, every time falls on
+// midnight, so many share it.
 func scrambleTimes(
 	t *testing.T, store *Store, random *rand.Rand, onDays bool,
 ) {
@@ -186,31 +188,31 @@ func scrambleTimes(
 		}
 		return keys
 	}
-	for _, key := range readKeys(`SELECT workspace_id, id FROM entries`) {
+	for _, key := range readKeys(`SELECT workspace_id, id FROM posts`) {
 		if _, err := store.db.Exec(`
-			UPDATE entries SET created_utc = ?, modified_utc = ?
+			UPDATE posts SET created_utc = ?, modified_utc = ?
 			WHERE workspace_id = ? AND id = ?`,
 			at(), at(), key[0], key[1]); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for _, key := range readKeys(
-		`SELECT post_order, 0 FROM entry_messages`) {
+		`SELECT post_order, 0 FROM post_messages`) {
 		if _, err := store.db.Exec(`
-			UPDATE entry_messages SET created_utc = ?, modified_utc = ?
+			UPDATE post_messages SET created_utc = ?, modified_utc = ?
 			WHERE post_order = ?`, at(), at(), key[0]); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if _, err := store.db.Exec(`
-		UPDATE entries AS e SET activity_utc = ` + activityExpr); err != nil {
+		UPDATE posts AS e SET activity_utc = ` + activityExpr); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// forestEntry and forestMessage hold what the reference reads of the
-// entries and messages of a workspace.
-type forestEntry struct {
+// forestPost and forestMessage hold what the reference reads of the
+// posts and messages of a workspace.
+type forestPost struct {
 	id                  int64
 	revision            int64
 	activityRevision    int64
@@ -218,54 +220,54 @@ type forestEntry struct {
 	project, text, user string
 	superseded          bool
 	parent              int64
-	// metadata holds the entry's values lowered, by key.
+	// metadata holds the post's values lowered, by key.
 	metadata map[string]string
 }
 
 type forestMessage struct {
-	postOrder, entry, number, revision int64
-	created, text, user                string
+	postOrder, post, number, revision int64
+	created, text, user               string
 }
 
 // referenceMatch is a match as the reference ranks it.
 type referenceMatch struct {
 	revision  int64
-	entry     int64
+	post      int64
 	postOrder int64
 }
 
-// readForest reads every entry and message of a workspace.
+// readForest reads every post and message of a workspace.
 func readForest(
 	t *testing.T, store *Store, workspace int64,
-) (map[int64]forestEntry, []forestMessage) {
+) (map[int64]forestPost, []forestMessage) {
 	t.Helper()
 	rows, err := store.db.Query(`
 		SELECT e.id, e.revision, e.activity_revision, e.modified_utc,
 			e.activity_utc, e.project_lower,
 			e.subject_lower || ' ' || e.body_lower, e.origin_user_lower,
 			`+supersededClause+`, coalesce((
-				SELECT target_id FROM entry_links
+				SELECT target_id FROM post_links
 				WHERE source_workspace_id = e.workspace_id
 					AND source_id = e.id AND name = 'parent'), 0)
-		FROM entries AS e WHERE e.workspace_id = ?`, workspace)
+		FROM posts AS e WHERE e.workspace_id = ?`, workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
-	entries := map[int64]forestEntry{}
+	posts := map[int64]forestPost{}
 	for rows.Next() {
-		var e forestEntry
+		var e forestPost
 		if err := rows.Scan(&e.id, &e.revision, &e.activityRevision,
 			&e.modified, &e.activity, &e.project, &e.text, &e.user,
 			&e.superseded, &e.parent); err != nil {
 			t.Fatal(err)
 		}
 		e.metadata = map[string]string{}
-		entries[e.id] = e
+		posts[e.id] = e
 	}
 	rows.Close()
 
 	rows, err = store.db.Query(`
-		SELECT entry_id, key, value_lower FROM entry_metadata
+		SELECT post_id, key, value_lower FROM post_metadata
 		WHERE workspace_id = ?`, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -276,14 +278,14 @@ func readForest(
 		if err := rows.Scan(&id, &key, &value); err != nil {
 			t.Fatal(err)
 		}
-		entries[id].metadata[key] = value
+		posts[id].metadata[key] = value
 	}
 	rows.Close()
 
 	rows, err = store.db.Query(`
-		SELECT post_order, entry_id, id, posted_revision, created_utc,
+		SELECT post_order, post_id, id, posted_revision, created_utc,
 			lower(body), lower(origin_user)
-		FROM entry_messages WHERE workspace_id = ?`, workspace)
+		FROM post_messages WHERE workspace_id = ?`, workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,13 +293,13 @@ func readForest(
 	var messages []forestMessage
 	for rows.Next() {
 		var m forestMessage
-		if err := rows.Scan(&m.postOrder, &m.entry, &m.number, &m.revision,
+		if err := rows.Scan(&m.postOrder, &m.post, &m.number, &m.revision,
 			&m.created, &m.text, &m.user); err != nil {
 			t.Fatal(err)
 		}
 		messages = append(messages, m)
 	}
-	return entries, messages
+	return posts, messages
 }
 
 // listingCase is a listing the reference knows how to filter:
@@ -344,11 +346,11 @@ func (c listingCase) filter(workspace int64) Filter {
 	return filter
 }
 
-// referenceListing is the listing worked out from every entry and
+// referenceListing is the listing worked out from every post and
 // message: those that match, by the revision each ranks by, newest
 // first.
 func referenceListing(
-	entries map[int64]forestEntry, messages []forestMessage, c listingCase,
+	posts map[int64]forestPost, messages []forestMessage, c listingCase,
 ) []referenceMatch {
 	inSpans := func(revision int64, at string) bool {
 		return (c.revisions.After == 0 || revision > c.revisions.After) &&
@@ -357,14 +359,14 @@ func referenceListing(
 			(c.span.Before.IsZero() || at < formatTime(c.span.Before))
 	}
 	under := func(id int64) bool {
-		for ; c.under != 0 && id != 0; id = entries[id].parent {
+		for ; c.under != 0 && id != 0; id = posts[id].parent {
 			if id == c.under {
 				return true
 			}
 		}
 		return c.under == 0
 	}
-	holds := func(e forestEntry, keyPattern, valuePattern string) bool {
+	holds := func(e forestPost, keyPattern, valuePattern string) bool {
 		for key, value := range e.metadata {
 			keyMatched, _ := path.Match(keyPattern, key)
 			valueMatched, _ := path.Match(valuePattern, value)
@@ -374,7 +376,7 @@ func referenceListing(
 		}
 		return false
 	}
-	listed := func(e forestEntry) bool {
+	listed := func(e forestPost) bool {
 		return (c.project == "" || e.project == c.project) &&
 			(c.key == "" || holds(e, c.key, "*")) &&
 			(c.noKey == "" || !holds(e, c.noKey, "*")) &&
@@ -387,7 +389,7 @@ func referenceListing(
 	}
 
 	var matches []referenceMatch
-	for _, e := range entries {
+	for _, e := range posts {
 		revision, at := e.activityRevision, e.activity
 		if c.includeChat {
 			revision, at = e.revision, e.modified
@@ -397,10 +399,10 @@ func referenceListing(
 		}
 	}
 	for _, m := range messages {
-		if c.includeChat && listed(entries[m.entry]) &&
+		if c.includeChat && listed(posts[m.post]) &&
 			matched(m.text, m.user) && inSpans(m.revision, m.created) {
 			matches = append(matches,
-				referenceMatch{m.revision, m.entry, m.postOrder})
+				referenceMatch{m.revision, m.post, m.postOrder})
 		}
 	}
 	slices.SortFunc(matches, func(a, b referenceMatch) int {
@@ -409,7 +411,7 @@ func referenceListing(
 	return matches
 }
 
-// referenceNewMessages counts, for each entry a page without chat
+// referenceNewMessages counts, for each post a page without chat
 // matched, the messages in its chat posted since the page's oldest
 // match.
 func referenceNewMessages(
@@ -421,11 +423,11 @@ func referenceNewMessages(
 	}
 	onPage := map[int64]bool{}
 	for _, m := range page {
-		onPage[m.entry] = true
+		onPage[m.post] = true
 	}
 	for _, m := range messages {
-		if onPage[m.entry] && m.revision >= page[len(page)-1].revision {
-			counts[m.entry]++
+		if onPage[m.post] && m.revision >= page[len(page)-1].revision {
+			counts[m.post]++
 		}
 	}
 	return counts
@@ -439,7 +441,7 @@ func checkListingPage(
 	t *testing.T,
 	store *Store,
 	workspace int64,
-	entries map[int64]forestEntry,
+	posts map[int64]forestPost,
 	messages []forestMessage,
 	c listingCase,
 	limit int,
@@ -452,7 +454,7 @@ func checkListingPage(
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := referenceListing(entries, messages, c)
+	want := referenceListing(posts, messages, c)
 	wantPage := want[:min(limit, len(want))]
 	label := fmt.Sprintf("%+v, limit %d", c, limit)
 
@@ -463,7 +465,7 @@ func checkListingPage(
 		match := referenceMatch{m.Revision, key.ID, 0}
 		if m.Message != nil {
 			for _, message := range messages {
-				if message.entry == key.ID &&
+				if message.post == key.ID &&
 					message.number == m.Message.Number {
 					match.postOrder = message.postOrder
 				}
@@ -475,7 +477,7 @@ func checkListingPage(
 		}
 
 		var path []int64
-		for id := entries[key.ID].parent; id != 0; id = entries[id].parent {
+		for id := posts[key.ID].parent; id != 0; id = posts[id].parent {
 			path = append([]int64{id}, path...)
 		}
 		var gotPath []int64
@@ -507,16 +509,16 @@ func checkPagesBack(
 	t *testing.T,
 	store *Store,
 	workspace int64,
-	entries map[int64]forestEntry,
+	posts map[int64]forestPost,
 	messages []forestMessage,
 	c listingCase,
 	limit int,
 ) {
 	t.Helper()
-	want := referenceListing(entries, messages, c)
+	want := referenceListing(posts, messages, c)
 	listed := 0
 	for {
-		page, more := checkListingPage(t, store, workspace, entries,
+		page, more := checkListingPage(t, store, workspace, posts,
 			messages, c, limit)
 		listed += len(page)
 		if !more {
@@ -549,9 +551,9 @@ func TestListingMatchesTheReference(t *testing.T) {
 		}
 		scrambleTimes(t, store, random, seed%2 == 0)
 		workspace := workspaceID(t, store, "general")
-		entries, messages := readForest(t, store, workspace)
+		posts, messages := readForest(t, store, workspace)
 		var unders []int64
-		for id, e := range entries {
+		for id, e := range posts {
 			if e.parent == 0 && len(unders) < 2 {
 				unders = append(unders, id)
 			}
@@ -575,14 +577,14 @@ func TestListingMatchesTheReference(t *testing.T) {
 						c.under, c.span = under, span
 						c.includeSuperseded = flags&1 != 0
 						c.includeChat = flags&2 != 0
-						checkListingPage(t, store, workspace, entries,
+						checkListingPage(t, store, workspace, posts,
 							messages, c, 500)
-						checkListingPage(t, store, workspace, entries,
+						checkListingPage(t, store, workspace, posts,
 							messages, c, 1)
-						checkPagesBack(t, store, workspace, entries,
+						checkPagesBack(t, store, workspace, posts,
 							messages, c, 3)
 						c.revisions = middle
-						checkListingPage(t, store, workspace, entries,
+						checkListingPage(t, store, workspace, posts,
 							messages, c, 500)
 					}
 				}
@@ -616,18 +618,18 @@ func TestPagingBackListsEachMatchOnceWhileWritesLand(t *testing.T) {
 				first.project = "a"
 			}
 
-			entries, messages := readForest(t, store, workspace)
-			atStart := referenceListing(entries, messages, first)
+			posts, messages := readForest(t, store, workspace)
+			atStart := referenceListing(posts, messages, first)
 			listed := map[referenceMatch]bool{}
 			c := first
 			for {
 				page, more := checkListingPage(t, store, workspace,
-					entries, messages, c, 3)
+					posts, messages, c, 3)
 				for _, m := range page {
 					m.revision = 0
 					if listed[m] {
 						t.Fatalf("%+v: e%d message %d listed twice", c,
-							m.entry, m.postOrder)
+							m.post, m.postOrder)
 					}
 					listed[m] = true
 				}
@@ -639,26 +641,26 @@ func TestPagingBackListsEachMatchOnceWhileWritesLand(t *testing.T) {
 				for range 3 {
 					writer.write()
 				}
-				entries, messages = readForest(t, store, workspace)
+				posts, messages = readForest(t, store, workspace)
 			}
 
-			atEnd := referenceListing(entries, messages, first)
+			atEnd := referenceListing(posts, messages, first)
 			for _, m := range atStart {
 				kept := slices.Contains(atEnd, m)
 				m.revision = 0
 				if kept && !listed[m] {
 					t.Fatalf("seed %d, chat %v: e%d message %d was skipped",
-						seed, includeChat, m.entry, m.postOrder)
+						seed, includeChat, m.post, m.postOrder)
 				}
 			}
 		}
 	}
 }
 
-// Without chat, an entry ranks by the latest change to it or its chat
-// alone, so a post deep in a tree lifts only the entry it is in, and a
-// filter finds an entry at any level.
-func TestListingRanksEachEntryByItsOwnActivity(t *testing.T) {
+// Without chat, a post ranks by the latest change to it or its chat
+// alone, so a message deep in a tree lifts only the post it is in, and
+// a filter finds a post at any level.
+func TestListingRanksEachPostByItsOwnActivity(t *testing.T) {
 	store := openTestStore(t)
 	root := addTo(t, store, "general", api.AddPostRequest{
 		Subject: "root", Origin: api.Origin{User: "omar"}})
@@ -669,10 +671,10 @@ func TestListingRanksEachEntryByItsOwnActivity(t *testing.T) {
 		Subject: "grandchild", Origin: api.Origin{User: "omar"},
 		Links: []api.Link{link(api.ParentLink, child.Ref)}})
 	other := mustAdd(t, store, "other", "", nil)
-	mustPost(t, store, grandchild.Ref, "quack")
+	mustPostMessage(t, store, grandchild.Ref, "quack")
 
 	page := runSearch(t, store, Filter{Limit: 2})
-	assertEntryRefs(t, page, grandchild.Ref, other.Ref)
+	assertPostRefs(t, page, grandchild.Ref, other.Ref)
 	if got := page.Matches[0].NewMessages; got != 1 {
 		t.Fatalf("new messages = %d, want 1", got)
 	}
@@ -681,18 +683,18 @@ func TestListingRanksEachEntryByItsOwnActivity(t *testing.T) {
 			page.Matches[0].Ancestors)
 	}
 
-	// With chat, the post is a match of its own, and the entry ranks by
-	// its own change.
+	// With chat, the message is a match of its own, and the post ranks
+	// by its own change.
 	withChat := runSearch(t, store, Filter{Limit: 2, IncludeChat: true})
 	assertMatches(t, withChat, messageRef(grandchild.Ref, 1),
 		other.Ref.String())
 
 	byInes := runSearch(t, store, Filter{
 		OriginUser: []FieldCond{{Value: "ines"}}, IncludeChat: true})
-	assertEntryRefs(t, byInes, child.Ref)
+	assertPostRefs(t, byInes, child.Ref)
 }
 
-func TestListingLeavesOutSupersededEntries(t *testing.T) {
+func TestListingLeavesOutSupersededPosts(t *testing.T) {
 	store := openTestStore(t)
 	old := mustAdd(t, store, "old", "", nil)
 	child := addChild(t, store, "child", old.Ref)
@@ -703,7 +705,7 @@ func TestListingLeavesOutSupersededEntries(t *testing.T) {
 	}
 
 	page := runSearch(t, store, Filter{})
-	assertEntryRefs(t, page, successor.Ref, child.Ref)
+	assertPostRefs(t, page, successor.Ref, child.Ref)
 	if path := page.Matches[1].Ancestors; len(path) != 1 ||
 		!reflect.DeepEqual(path[0].SupersededBy, []api.Ref{successor.Ref}) {
 		t.Fatalf("the child's path = %+v, want its superseded parent", path)

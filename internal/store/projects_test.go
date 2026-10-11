@@ -10,8 +10,8 @@ import (
 	"github.com/airspacesh/workstream/internal/api"
 )
 
-// describeProjects lists each project as its name and recent entries,
-// and its count of every entry when the response gives it.
+// describeProjects lists each project as its name and recent posts, and
+// its count of every post when the response gives it.
 func describeProjects(response api.ProjectsResponse) string {
 	var listed []string
 	for _, project := range response.Projects {
@@ -83,9 +83,9 @@ func TestProjectsCountOneWorkspace(t *testing.T) {
 		t.Fatalf("projects named lake = %q", got)
 	}
 
-	// Chat counts as activity, so a message to an old entry brings its
+	// Chat counts as activity, so a message to an old post brings its
 	// project to the top.
-	mustPost(t, store, first.Ref, "still here")
+	mustPostMessage(t, store, first.Ref, "still here")
 	got = describeProjects(listProjects(t, store, "general", 30, now))
 	if got != "pond 2, nest 1, Pond 1" {
 		t.Fatalf("projects after a message = %q", got)
@@ -94,22 +94,22 @@ func TestProjectsCountOneWorkspace(t *testing.T) {
 	addToProject(t, store, "general", "nest")
 	got = describeProjects(listProjects(t, store, "general", 30, now))
 	if got != "nest 2, pond 2, Pond 1" {
-		t.Fatalf("projects after another entry = %q", got)
+		t.Fatalf("projects after another post = %q", got)
 	}
 }
 
-func setCreated(t *testing.T, store *Store, entry api.Ref, at time.Time) {
+func setCreated(t *testing.T, store *Store, post api.Ref, at time.Time) {
 	t.Helper()
-	key := store.mustKey(entry)
+	key := store.mustKey(post)
 	if _, err := store.db.Exec(`
-		UPDATE entries SET created_utc = ?
+		UPDATE posts SET created_utc = ?
 		WHERE workspace_id = ? AND id = ?`,
 		formatTime(at), key.Workspace, key.ID); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestProjectsCountEntriesCreatedInTheWindow(t *testing.T) {
+func TestProjectsCountPostsCreatedInTheWindow(t *testing.T) {
 	store := openTestStore(t)
 	now := time.Now()
 	since := now.Add(-recentWindow)
@@ -127,14 +127,14 @@ func TestProjectsCountEntriesCreatedInTheWindow(t *testing.T) {
 	}
 	if !all.RecentSince.Equal(since) || all.RecentPosts != 2 ||
 		all.Count != 2 {
-		t.Fatalf("since %v with %d entries in %d projects, want since %v "+
+		t.Fatalf("since %v with %d posts in %d projects, want since %v "+
 			"with 2 in 2", all.RecentSince, all.RecentPosts, all.Count,
 			since)
 	}
 	pond := readProject(t, store, "pond", now)
 	if got := describeProjects(pond); got != "pond 2/3" ||
 		pond.RecentPosts != 2 {
-		t.Fatalf("project pond = %q of %d recent entries", got,
+		t.Fatalf("project pond = %q of %d recent posts", got,
 			pond.RecentPosts)
 	}
 	if got := describeProjects(readProject(t, store, "lake", now)); got !=
@@ -145,7 +145,7 @@ func TestProjectsCountEntriesCreatedInTheWindow(t *testing.T) {
 	limited := listProjects(t, store, "general", 1, now)
 	if got := describeProjects(limited); got != "lake 0" ||
 		limited.Count != 2 || limited.RecentPosts != 2 {
-		t.Fatalf("one project = %q of %d with %d recent entries", got,
+		t.Fatalf("one project = %q of %d with %d recent posts", got,
 			limited.Count, limited.RecentPosts)
 	}
 }

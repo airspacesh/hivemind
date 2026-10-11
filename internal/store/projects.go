@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	// recentWindow is how far back a project's recent entries reach.
+	// recentWindow is how far back a project's recent posts reach.
 	recentWindow    = 90 * 24 * time.Hour
 	MaxProjectLimit = 500
 )
@@ -19,18 +19,18 @@ const (
 var ErrInvalidProjectLimit = errors.New("invalid project limit")
 
 // projectNames names a workspace's projects in a CTE, seeking each name
-// in an index rather than reading every entry.
+// in an index rather than reading every post.
 const projectNames = `
 	WITH RECURSIVE names(project) AS (
-		SELECT min(project) FROM entries WHERE workspace_id = ?1
+		SELECT min(project) FROM posts WHERE workspace_id = ?1
 		UNION ALL
-		SELECT (SELECT min(project) FROM entries
+		SELECT (SELECT min(project) FROM posts
 			WHERE workspace_id = ?1 AND project > names.project)
 		FROM names WHERE names.project IS NOT NULL
 	)`
 
 // Projects lists a workspace's most recently active projects, at most
-// limit of them, with their entries created in the recentWindow before
+// limit of them, with their posts created in the recentWindow before
 // now.
 func (s *Store) Projects(
 	ctx context.Context, workspace int64, limit int, now time.Time,
@@ -43,10 +43,10 @@ func (s *Store) Projects(
 	since := now.Add(-recentWindow)
 	rows, err := s.reads.QueryContext(ctx, projectNames+`
 		SELECT project, (
-			SELECT max(activity_utc) FROM entries
+			SELECT max(activity_utc) FROM posts
 			WHERE workspace_id = ?1 AND project = names.project
 		) AS latest, (
-			SELECT count(*) FROM entries
+			SELECT count(*) FROM posts
 			WHERE workspace_id = ?1 AND project = names.project
 				AND created_utc >= ?2
 		)
@@ -86,22 +86,22 @@ func (s *Store) Projects(
 }
 
 // Project reads one project of a workspace as Projects lists it, adding
-// its count of every entry. It reads only that project's entries.
+// its count of every post. It reads only that project's posts.
 func (s *Store) Project(
 	ctx context.Context, workspace int64, name string, now time.Time,
 ) (api.ProjectsResponse, error) {
 	since := now.Add(-recentWindow)
 	var latest sql.NullString
-	var entries, recent int
+	var posts, recent int
 	if err := s.reads.QueryRowContext(ctx, `
 		SELECT max(activity_utc), count(*), (
-			SELECT count(*) FROM entries
+			SELECT count(*) FROM posts
 			WHERE workspace_id = ?1 AND project = ?2
 				AND created_utc >= ?3
 		)
-		FROM entries WHERE workspace_id = ?1 AND project = ?2`,
+		FROM posts WHERE workspace_id = ?1 AND project = ?2`,
 		workspace, name, formatTime(since),
-	).Scan(&latest, &entries, &recent); err != nil {
+	).Scan(&latest, &posts, &recent); err != nil {
 		return api.ProjectsResponse{}, fmt.Errorf(
 			"reading project %q: %w", name, err)
 	}
@@ -113,7 +113,7 @@ func (s *Store) Project(
 		return response, nil
 	}
 	project := api.Project{
-		Name: name, RecentPosts: recent, Posts: &entries,
+		Name: name, RecentPosts: recent, Posts: &posts,
 	}
 	var err error
 	if project.Latest, err = parseTime(latest.String); err != nil {

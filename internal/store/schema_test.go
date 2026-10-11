@@ -151,7 +151,7 @@ func TestOpenRejectsUnrecognizedDatabases(t *testing.T) {
 			"database from before workspaces",
 			func(t *testing.T, path string) {
 				rawExec(t, path, fmt.Sprintf(`
-					CREATE TABLE entries(id INTEGER PRIMARY KEY);
+					CREATE TABLE posts(id INTEGER PRIMARY KEY);
 					PRAGMA application_id = %d;
 					PRAGMA user_version = 3`, legacyApplicationID))
 			},
@@ -180,7 +180,7 @@ func TestOpenRejectsUnrecognizedDatabases(t *testing.T) {
 			"changed schema",
 			func(t *testing.T, path string) {
 				createValidDatabase(t, path)
-				rawExec(t, path, `DROP INDEX entries_subject_search`)
+				rawExec(t, path, `DROP INDEX posts_subject_search`)
 			},
 			"schema does not match",
 		},
@@ -245,7 +245,7 @@ func TestOpenSyncsWorkspacesWithTheConfig(t *testing.T) {
 	}
 	got := mustGet(t, swapped, api.Ref{Prefix: "p", ID: work.Ref.ID})
 	if got.Subject != "work" {
-		t.Fatalf("after swapping prefixes, p1 = %q, want the work entry",
+		t.Fatalf("after swapping prefixes, p1 = %q, want the work post",
 			got.Subject)
 	}
 	swapped.Close()
@@ -258,8 +258,8 @@ func TestOpenSyncsWorkspacesWithTheConfig(t *testing.T) {
 	}
 	if _, err := renamed.Detail(ctx, everyAccess(renamed), Key{
 		Workspace: workspaceID(t, renamed, "private"), ID: private.Ref.ID,
-	}); !errors.Is(err, ErrEntryNotFound) {
-		t.Fatalf("a new workspace reached another's entry: %v", err)
+	}); !errors.Is(err, ErrPostNotFound) {
+		t.Fatalf("a new workspace reached another's post: %v", err)
 	}
 	renamed.Close()
 
@@ -272,7 +272,7 @@ func TestOpenSyncsWorkspacesWithTheConfig(t *testing.T) {
 	}
 	if got := mustGet(t, restored, api.Ref{Prefix: "q",
 		ID: private.Ref.ID}); got.Subject != "private" {
-		t.Fatalf("q1 = %q, want the restored private entry", got.Subject)
+		t.Fatalf("q1 = %q, want the restored private post", got.Subject)
 	}
 }
 

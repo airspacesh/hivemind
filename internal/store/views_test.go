@@ -34,23 +34,23 @@ func readTree(
 	return tree
 }
 
-// treeText shows a tree's entries in order by subject, with its cuts.
+// treeText shows a tree's posts in order by subject, with its cuts.
 func treeText(tree api.TreeResponse) string {
 	var lines []string
-	for _, entry := range tree.Posts {
-		line := entry.Subject
-		if entry.MoreBelow > 0 {
-			line += fmt.Sprintf(" (%d more below)", entry.MoreBelow)
+	for _, post := range tree.Posts {
+		line := post.Subject
+		if post.MoreBelow > 0 {
+			line += fmt.Sprintf(" (%d more below)", post.MoreBelow)
 		}
-		if entry.MoreUnder > 0 {
-			line += fmt.Sprintf(" (%d more under)", entry.MoreUnder)
+		if post.MoreUnder > 0 {
+			line += fmt.Sprintf(" (%d more under)", post.MoreUnder)
 		}
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, ", ")
 }
 
-func TestEntriesShowThePathAndTheSubtreeFacts(t *testing.T) {
+func TestPostsShowThePathAndTheSubtreeFacts(t *testing.T) {
 	store := openTestStore(t)
 	older := mustAdd(t, store, "older topic", "", nil)
 	newer := mustAdd(t, store, "newer topic", "", nil)
@@ -168,13 +168,13 @@ func TestSearchUnderASubtree(t *testing.T) {
 	missing := Key{Workspace: under.Workspace, ID: 99}
 	_, err := store.Search(ctx, everyAccess(store), under.Workspace,
 		Filter{Limit: 20, Under: &missing})
-	if !errors.Is(err, ErrEntryNotFound) {
-		t.Fatalf("search under a missing entry = %v", err)
+	if !errors.Is(err, ErrPostNotFound) {
+		t.Fatalf("search under a missing post = %v", err)
 	}
 }
 
-// Counts leave out superseded entries, as listings and trees do.
-func TestCountsLeaveOutSupersededEntries(t *testing.T) {
+// Counts leave out superseded posts, as listings and trees do.
+func TestCountsLeaveOutSupersededPosts(t *testing.T) {
 	store := openTestStore(t)
 	question := mustAdd(t, store, "Why?", "", nil)
 	old := addChild(t, store, "old answer", question.Ref)

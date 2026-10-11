@@ -336,7 +336,7 @@ check "a link cannot join servers" "cannot join entries on different servers" \
 check "an unknown prefix names the servers asked" \
     "no configured server has a workspace with prefix x" \
     "$(ws entry x1 2>&1 || true)"
-check "a missing entry is reported as missing" "entry not found: e999" \
+check "a missing post is reported as missing" "post not found: e999" \
     "$(ws entry e999 2>&1 || true)"
 
 # An open workspace linked to a protected one shows the protected entry

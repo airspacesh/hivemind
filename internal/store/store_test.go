@@ -87,11 +87,11 @@ func everyAccess(store *Store) Access {
 	return NewAccess(ids...)
 }
 
-// testUser posts the entries and messages of tests that name no other
+// testUser posts the posts and messages of tests that name no other
 // user, and makes their edits.
 const testUser = "duck"
 
-// addTo adds an entry, posted by testUser unless req names a user.
+// addTo adds a post, posted by testUser unless req names a user.
 func addTo(
 	t *testing.T, store *Store, workspace string, req api.AddPostRequest,
 ) api.Post {
@@ -99,15 +99,15 @@ func addTo(
 	if req.Origin.User == "" {
 		req.Origin.User = testUser
 	}
-	entry, err := store.Add(context.Background(), everyAccess(store),
+	post, err := store.Add(context.Background(), everyAccess(store),
 		workspaceID(t, store, workspace), req)
 	if err != nil {
-		t.Fatalf("adding entry: %v", err)
+		t.Fatalf("adding post: %v", err)
 	}
-	return entry
+	return post
 }
 
-// mustAdd adds an entry to the general workspace.
+// mustAdd adds a post to the general workspace.
 func mustAdd(
 	t *testing.T,
 	store *Store,
@@ -145,8 +145,8 @@ func mustGet(t *testing.T, store *Store, ref api.Ref) api.PostDetail {
 	return detail
 }
 
-// matchRefs names a page's matches, an entry by its ref and a message
-// by its own.
+// matchRefs names a page's matches, a post by its ref and a message by
+// its own.
 func matchRefs(page api.MatchPage) []string {
 	refs := []string{}
 	for _, m := range page.Matches {
@@ -167,14 +167,14 @@ func refStrings(refs ...api.Ref) []string {
 	return texts
 }
 
-func TestEntryIDsCountFromOnePerWorkspace(t *testing.T) {
+func TestPostIDsCountFromOnePerWorkspace(t *testing.T) {
 	store := openTestStore(t)
 	var got []string
 	for _, workspace := range []string{"general", "personal", "general",
 		"general", "personal"} {
-		entry := addTo(t, store, workspace,
+		post := addTo(t, store, workspace,
 			api.AddPostRequest{Subject: "s"})
-		got = append(got, entry.Ref.String())
+		got = append(got, post.Ref.String())
 	}
 	want := fmt.Sprint([]string{"e1", "p1", "e2", "e3", "p2"})
 	if fmt.Sprint(got) != want {
@@ -192,14 +192,14 @@ func TestConcurrentAddsGetUniqueIDsCountingFromOne(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			workspace := []string{"general", "personal"}[i%2]
-			entry, err := store.Add(context.Background(),
+			post, err := store.Add(context.Background(),
 				everyAccess(store), workspaceID(t, store, workspace),
 				api.AddPostRequest{Subject: "s"})
 			if err != nil {
-				t.Errorf("adding entry: %v", err)
+				t.Errorf("adding post: %v", err)
 				return
 			}
-			refs <- entry.Ref
+			refs <- post.Ref
 		}()
 	}
 	wg.Wait()
@@ -224,7 +224,7 @@ func TestConcurrentAddsGetUniqueIDsCountingFromOne(t *testing.T) {
 func TestGeneratedColumnsFollowWrites(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	entry := mustAdd(
+	post := mustAdd(
 		t, store, "COUNT Æ", "BODY Σ",
 		map[string]string{"jira": "QUACK Æ"},
 	)
@@ -237,11 +237,11 @@ func TestGeneratedColumnsFollowWrites(t *testing.T) {
 		var subject, body, value string
 		err := store.db.QueryRowContext(ctx, `
 			SELECT e.subject_lower, e.body_lower, metadata.value_lower
-			FROM entries AS e
-			JOIN entry_metadata AS metadata
+			FROM posts AS e
+			JOIN post_metadata AS metadata
 				ON metadata.workspace_id = e.workspace_id
-				AND metadata.entry_id = e.id
-			WHERE e.id = ?`, entry.Ref.ID,
+				AND metadata.post_id = e.id
+			WHERE e.id = ?`, post.Ref.ID,
 		).Scan(&subject, &body, &value)
 		if err != nil {
 			t.Fatalf("reading folded values: %v", err)
@@ -259,12 +259,12 @@ func TestGeneratedColumnsFollowWrites(t *testing.T) {
 	subject := "CHANGED Æ"
 	body := "CHANGED Σ"
 	if _, err := store.Edit(ctx, everyAccess(store),
-		store.mustKey(entry.Ref), api.EditPostRequest{
+		store.mustKey(post.Ref), api.EditPostRequest{
 			Subject: &subject, Body: &body,
 			Metadata: map[string]string{"jira": "CHANGED Æ"},
 			User:     testUser,
 		}); err != nil {
-		t.Fatalf("editing entry: %v", err)
+		t.Fatalf("editing post: %v", err)
 	}
 	assertFolded("changed Æ", "changed Σ", "changed Æ")
 }
@@ -273,9 +273,9 @@ func TestMutationRollsBackWhenResultCannotBeRead(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	_, err := store.db.ExecContext(ctx, `
-		CREATE TRIGGER corrupt_new_entry AFTER INSERT ON entries
+		CREATE TRIGGER corrupt_new_post AFTER INSERT ON posts
 		BEGIN
-			UPDATE entries SET created_utc = 'bad'
+			UPDATE posts SET created_utc = 'bad'
 			WHERE workspace_id = NEW.workspace_id AND id = NEW.id;
 		END`)
 	if err != nil {
@@ -289,12 +289,12 @@ func TestMutationRollsBackWhenResultCannotBeRead(t *testing.T) {
 	}
 	var count int
 	if err := store.db.QueryRowContext(
-		ctx, `SELECT count(*) FROM entries`,
+		ctx, `SELECT count(*) FROM posts`,
 	).Scan(&count); err != nil {
-		t.Fatalf("counting entries: %v", err)
+		t.Fatalf("counting posts: %v", err)
 	}
 	if count != 0 {
-		t.Fatalf("failed add committed %d entries", count)
+		t.Fatalf("failed add committed %d posts", count)
 	}
 }
 
@@ -329,16 +329,16 @@ func TestMetadataEditsRefreshModifiedAndApply(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			store := openTestStore(t)
-			entry := mustAdd(t, store, "entry", "",
+			post := mustAdd(t, store, "post", "",
 				map[string]string{"jira": "QUACK-1"})
 			oldTime := "2000-01-01T00:00:00.000000000Z"
 			if _, err := store.db.ExecContext(ctx, `
-				UPDATE entries SET modified_utc = ?`, oldTime,
+				UPDATE posts SET modified_utc = ?`, oldTime,
 			); err != nil {
 				t.Fatalf("setting old modification time: %v", err)
 			}
 			got, err := store.Edit(ctx, everyAccess(store),
-				store.mustKey(entry.Ref),
+				store.mustKey(post.Ref),
 				api.EditPostRequest{Metadata: test.set, User: testUser})
 			if err != nil {
 				t.Fatalf("changing metadata: %v", err)
@@ -364,13 +364,13 @@ func TestCanceledMutationDoesNotWrite(t *testing.T) {
 		t.Fatalf("add error = %v, want context.Canceled", err)
 	}
 	var count int
-	if err := store.db.QueryRow(`SELECT count(*) FROM entries`).Scan(
+	if err := store.db.QueryRow(`SELECT count(*) FROM posts`).Scan(
 		&count,
 	); err != nil {
-		t.Fatalf("counting entries: %v", err)
+		t.Fatalf("counting posts: %v", err)
 	}
 	if count != 0 {
-		t.Fatalf("canceled add wrote %d entries", count)
+		t.Fatalf("canceled add wrote %d posts", count)
 	}
 }
 
@@ -387,7 +387,7 @@ func TestBusyDatabaseIsRecognized(t *testing.T) {
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE entries SET subject = subject`); err != nil {
+		`UPDATE posts SET subject = subject`); err != nil {
 		t.Fatalf("locking database: %v", err)
 	}
 	_, err = second.Add(ctx, everyAccess(second),
@@ -401,15 +401,15 @@ func TestBusyDatabaseIsRecognized(t *testing.T) {
 	}
 }
 
-func TestMetadataLimitStopsEntryGrowth(t *testing.T) {
+func TestMetadataLimitStopsPostGrowth(t *testing.T) {
 	store := openTestStore(t)
 	metadata := make(map[string]string, api.MaxMetadata)
 	for index := range api.MaxMetadata {
 		metadata[fmt.Sprintf("key-%d", index)] = "value"
 	}
-	entry := mustAdd(t, store, "bounded", "", metadata)
+	post := mustAdd(t, store, "bounded", "", metadata)
 	ctx := context.Background()
-	key := store.mustKey(entry.Ref)
+	key := store.mustKey(post.Ref)
 	_, err := store.Edit(ctx, everyAccess(store), key, api.EditPostRequest{
 		Metadata: map[string]string{"overflow": "value"},
 		User:     testUser,
@@ -444,7 +444,7 @@ func TestWritesProceedWhileAReadIsOpen(t *testing.T) {
 	defer read.tx.Rollback()
 	var count int
 	if err := read.tx.QueryRowContext(
-		ctx, `SELECT count(*) FROM entries`,
+		ctx, `SELECT count(*) FROM posts`,
 	).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +458,7 @@ func TestWritesProceedWhileAReadIsOpen(t *testing.T) {
 		t.Fatalf("adding while a read is open: %v", err)
 	}
 	if _, err := store.reads.ExecContext(
-		ctx, `DELETE FROM entry_metadata`,
+		ctx, `DELETE FROM post_metadata`,
 	); err == nil {
 		t.Fatal("a read connection accepted a write")
 	}

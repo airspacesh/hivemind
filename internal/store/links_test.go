@@ -32,11 +32,11 @@ func TestOneNameLinksSeveralTargetsButOneParent(t *testing.T) {
 	if got := mustGet(t, store, a.Ref).Links; !reflect.DeepEqual(got, want) {
 		t.Fatalf("links = %v, want %v", got, want)
 	}
-	if _, err := store.db.Exec(`INSERT INTO entry_links
+	if _, err := store.db.Exec(`INSERT INTO post_links
 		(source_workspace_id, source_id, name, target_workspace_id,
 			target_id)
 		SELECT workspace_id, ?, 'parent', workspace_id, ?
-		FROM entries LIMIT 1`, a.Ref.ID, b.Ref.ID); err == nil {
+		FROM posts LIMIT 1`, a.Ref.ID, b.Ref.ID); err == nil {
 		t.Fatal("the database accepted a second parent")
 	}
 	if got := mustGet(t, store, b.Ref).Backlinks; !reflect.DeepEqual(
@@ -67,7 +67,7 @@ func TestLinksJoinWorkspacesOnOneServer(t *testing.T) {
 }
 
 // A parent stays in its child's workspace, so a tree never leaves it.
-// The refusal is the same whether the other entry exists or not.
+// The refusal is the same whether the other post exists or not.
 func TestParentsStayInTheirWorkspace(t *testing.T) {
 	store := openTestStore(t)
 	work := mustAdd(t, store, "work", "", nil)
@@ -159,7 +159,7 @@ func TestConcurrentOppositeParentsLeaveNoLoop(t *testing.T) {
 
 		var count int
 		if err := first.db.QueryRow(
-			`SELECT count(*) FROM entry_links WHERE name = 'parent'`,
+			`SELECT count(*) FROM post_links WHERE name = 'parent'`,
 		).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
@@ -167,7 +167,7 @@ func TestConcurrentOppositeParentsLeaveNoLoop(t *testing.T) {
 			t.Fatalf("parent links = %d, errors = %v; want one of each",
 				count, errs)
 		}
-		if _, err := first.db.Exec(`DELETE FROM entry_links`); err != nil {
+		if _, err := first.db.Exec(`DELETE FROM post_links`); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -202,7 +202,7 @@ func TestIndependentSuccessorsAreAllShown(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(result.Matches) != 3 || result.More {
-		t.Fatalf("listing with superseded holds %d entries and more %v, "+
+		t.Fatalf("listing with superseded holds %d posts and more %v, "+
 			"want 3 and no more", len(result.Matches), result.More)
 	}
 }
@@ -248,7 +248,7 @@ func TestLinkEditsAndTheirFailures(t *testing.T) {
 
 	if err := addLinks(t, store, a.Ref, link("see",
 		api.Ref{Prefix: "e", ID: 99})); !errors.Is(err, ErrLinkTarget) {
-		t.Fatalf("link to a missing entry = %v", err)
+		t.Fatalf("link to a missing post = %v", err)
 	}
 	if err := addLinks(t, store, a.Ref, link("see",
 		api.Ref{Prefix: "x", ID: 1})); !errors.Is(err, ErrUnknownPrefix) {
@@ -262,7 +262,7 @@ func TestLinkEditsAndTheirFailures(t *testing.T) {
 	if err := edit(api.EditPostRequest{
 		RemoveLinkNames: []string{"parent"},
 	}); err != nil {
-		t.Fatalf("removing every parent of an unparented entry: %v", err)
+		t.Fatalf("removing every parent of an unparented post: %v", err)
 	}
 
 	for range 2 {

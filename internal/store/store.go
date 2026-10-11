@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	ErrEntryNotFound   = errors.New("entry not found")
+	ErrPostNotFound    = errors.New("post not found")
 	ErrMetadataLimit   = errors.New("metadata pair limit reached")
 	ErrInvalidDatabase = errors.New("invalid workstream database")
 )
@@ -55,19 +55,18 @@ CREATE TABLE revision_counter (
 const startRevisionCounter = `
 INSERT INTO revision_counter (only_row, revision) VALUES (1, 0)`
 
-// createEntries defines the entries table. An entry's id counts from 1
-// within its workspace. Each entry records its origin: the OS user,
-// host, working directory, and Claude Code session that created it.
-// Every searchable text field has a lowered twin so GLOB can match
-// without regard to ASCII case. activity_utc is the latest change to
-// the entry or its chat. Every write to either sets it, so listings
-// read it rather than the chat. revision is the revision of the
-// entry's own latest change, which also set modified_utc, and
-// activity_revision the revision of the change that set activity_utc.
-// deleted is 1 once a delete has cleared the subject and body, and 0
-// before.
-const createEntries = `
-CREATE TABLE entries (
+// createPosts defines the posts table. A post's id counts from 1 within
+// its workspace. Each post records its origin: the OS user, host,
+// working directory, and Claude Code session that created it. Every
+// searchable text field has a lowered twin so GLOB can match without
+// regard to ASCII case. activity_utc is the latest change to the post
+// or its chat. Every write to either sets it, so listings read it
+// rather than the chat. revision is the revision of the post's own
+// latest change, which also set modified_utc, and activity_revision the
+// revision of the change that set activity_utc. deleted is 1 once a
+// delete has cleared the subject and body, and 0 before.
+const createPosts = `
+CREATE TABLE posts (
 	workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
 	id INTEGER NOT NULL,
 	created_utc TEXT NOT NULL,
@@ -101,73 +100,72 @@ CREATE TABLE entries (
 )`
 
 const createMetadata = `
-CREATE TABLE entry_metadata (
+CREATE TABLE post_metadata (
 	workspace_id INTEGER NOT NULL,
-	entry_id INTEGER NOT NULL,
+	post_id INTEGER NOT NULL,
 	key TEXT NOT NULL,
 	value TEXT NOT NULL,
 	value_lower TEXT COLLATE BINARY
 		GENERATED ALWAYS AS (lower(value)) STORED,
-	PRIMARY KEY (workspace_id, entry_id, key),
-	FOREIGN KEY (workspace_id, entry_id) REFERENCES entries(workspace_id, id)
+	PRIMARY KEY (workspace_id, post_id, key),
+	FOREIGN KEY (workspace_id, post_id) REFERENCES posts(workspace_id, id)
 ) WITHOUT ROWID`
 
-// createMetadataKeyIndex finds the entries that hold a metadata key, or
-// a key with a value, so a search by metadata need not read them all.
+// createMetadataKeyIndex finds the posts that hold a metadata key, or a
+// key with a value, so a search by metadata need not read them all.
 // Only the search's lookup of candidates reads it. The listings'
-// metadata filters check each entry's own pairs, which SQLite reads
+// metadata filters check each post's own pairs, which SQLite reads
 // through the primary key instead.
 const createMetadataKeyIndex = `
-CREATE INDEX entry_metadata_key
-ON entry_metadata(workspace_id, key, value_lower)`
+CREATE INDEX post_metadata_key
+ON post_metadata(workspace_id, key, value_lower)`
 
-// createActivityIndex reads a workspace's entries newest first by the
+// createActivityIndex reads a workspace's posts newest first by the
 // latest change to them or their chats, as a listing without chat ranks
 // them, with the time a span keeps to at hand.
 const createActivityIndex = `
-CREATE INDEX entries_activity_order
-ON entries(workspace_id, activity_revision, activity_utc)`
+CREATE INDEX posts_activity_order
+ON posts(workspace_id, activity_revision, activity_utc)`
 
-// createRevisionIndex reads a workspace's entries changed after a
+// createRevisionIndex reads a workspace's posts changed after a
 // revision, in revision order.
 const createRevisionIndex = `
-CREATE INDEX entries_revision ON entries(workspace_id, revision)`
+CREATE INDEX posts_revision ON posts(workspace_id, revision)`
 
 const createSubjectIndex = `
-CREATE INDEX entries_subject_search ON entries(subject_lower)`
+CREATE INDEX posts_subject_search ON posts(subject_lower)`
 
 // createProjectIndex finds a workspace's projects, and each one's
-// latest activity, by seeking rather than reading the entries. The
+// latest activity, by seeking rather than reading the posts. The
 // project filters reach the project indexes only through the search's
-// lookup of candidates. A listing reads entries newest first and stops
-// at a full page, which an index on project_lower would turn into
-// reading and sorting every entry of the project.
+// lookup of candidates. A listing reads posts newest first and stops at
+// a full page, which an index on project_lower would turn into reading
+// and sorting every post of the project.
 const createProjectIndex = `
-CREATE INDEX entries_project_activity
-ON entries(workspace_id, project, activity_utc)`
+CREATE INDEX posts_project_activity
+ON posts(workspace_id, project, activity_utc)`
 
-// createOriginUserIndex finds the entries a user created, so a search
-// by user need not read them all. Only the search's lookup of
-// candidates reads it. A listing that reads entries newest first and
-// stops at a full page would read and sort every entry of the user
-// through it instead, so the listings' origin filters keep SQLite off
-// it with unary +.
+// createOriginUserIndex finds the posts a user created, so a search by
+// user need not read them all. Only the search's lookup of candidates
+// reads it. A listing that reads posts newest first and stops at a full
+// page would read and sort every post of the user through it instead,
+// so the listings' origin filters keep SQLite off it with unary +.
 const createOriginUserIndex = `
-CREATE INDEX entries_origin_user
-ON entries(workspace_id, origin_user_lower, id)`
+CREATE INDEX posts_origin_user
+ON posts(workspace_id, origin_user_lower, id)`
 
-// createProjectCreatedIndex counts a project's entries created since a
-// time by reading only those entries' part of the index.
+// createProjectCreatedIndex counts a project's posts created since a
+// time by reading only those posts' part of the index.
 const createProjectCreatedIndex = `
-CREATE INDEX entries_project_created
-ON entries(workspace_id, project, created_utc)`
+CREATE INDEX posts_project_created
+ON posts(workspace_id, project, created_utc)`
 
-// createLinks defines named links between entries, which may join
+// createLinks defines named links between posts, which may join
 // workspaces. Each link is stored once, on its source, and
-// entry_links_target derives the reverse direction. A source has at
-// most one parent.
+// post_links_target derives the reverse direction. A source has at most
+// one parent.
 const createLinks = `
-CREATE TABLE entry_links (
+CREATE TABLE post_links (
 	source_workspace_id INTEGER NOT NULL,
 	source_id INTEGER NOT NULL,
 	name TEXT NOT NULL,
@@ -176,33 +174,33 @@ CREATE TABLE entry_links (
 	PRIMARY KEY (source_workspace_id, source_id, name,
 		target_workspace_id, target_id),
 	FOREIGN KEY (source_workspace_id, source_id)
-		REFERENCES entries(workspace_id, id),
+		REFERENCES posts(workspace_id, id),
 	FOREIGN KEY (target_workspace_id, target_id)
-		REFERENCES entries(workspace_id, id)
+		REFERENCES posts(workspace_id, id)
 ) WITHOUT ROWID`
 
 const createLinkTargetIndex = `
-CREATE INDEX entry_links_target
-ON entry_links(target_workspace_id, target_id, name)`
+CREATE INDEX post_links_target
+ON post_links(target_workspace_id, target_id, name)`
 
 const createOneParentIndex = `
-CREATE UNIQUE INDEX entry_links_one_parent
-ON entry_links(source_workspace_id, source_id) WHERE name = 'parent'`
+CREATE UNIQUE INDEX post_links_one_parent
+ON post_links(source_workspace_id, source_id) WHERE name = 'parent'`
 
-// createMessages defines the chat attached to entries. A message's id
-// counts from 1 within its entry. post_order numbers every message on
-// the server in the order it was posted, so the chat overview orders
-// by it rather than by a clock. An edit overwrites the body, so no
-// earlier text is kept. revision is the revision of the post or of the
-// latest edit, and posted_revision the revision of the post, which
+// createMessages defines the chat attached to posts. A message's id
+// counts from 1 within its post. post_order numbers every message on
+// the server in the order it was posted, so the chat overview orders by
+// it rather than by a clock. An edit overwrites the body, so no earlier
+// text is kept. revision is the revision of the posting or of the
+// latest edit, and posted_revision the revision of the posting, which
 // edits leave alone. deleted is 1 once a delete has cleared the body,
 // and 0 before. origin_user has a lowered twin for
 // createMessageOriginUserIndex to hold.
 const createMessages = `
-CREATE TABLE entry_messages (
+CREATE TABLE post_messages (
 	post_order INTEGER PRIMARY KEY,
 	workspace_id INTEGER NOT NULL,
-	entry_id INTEGER NOT NULL,
+	post_id INTEGER NOT NULL,
 	id INTEGER NOT NULL,
 	created_utc TEXT NOT NULL,
 	modified_utc TEXT NOT NULL,
@@ -216,45 +214,44 @@ CREATE TABLE entry_messages (
 	origin_host TEXT NOT NULL DEFAULT '',
 	origin_dir TEXT NOT NULL DEFAULT '',
 	origin_claude_session TEXT NOT NULL DEFAULT '',
-	UNIQUE (workspace_id, entry_id, id),
-	FOREIGN KEY (workspace_id, entry_id) REFERENCES entries(workspace_id, id)
+	UNIQUE (workspace_id, post_id, id),
+	FOREIGN KEY (workspace_id, post_id) REFERENCES posts(workspace_id, id)
 )`
 
 const createMessageOrderIndex = `
-CREATE INDEX entry_messages_workspace_order
-ON entry_messages(workspace_id, post_order)`
+CREATE INDEX post_messages_workspace_order
+ON post_messages(workspace_id, post_order)`
 
 // createMessagePostedIndex reads a workspace's messages newest first
 // by when they were posted, as a listing with chat ranks them, with the
 // time a span keeps to at hand.
 const createMessagePostedIndex = `
-CREATE INDEX entry_messages_posted
-ON entry_messages(workspace_id, posted_revision, created_utc)`
+CREATE INDEX post_messages_posted
+ON post_messages(workspace_id, posted_revision, created_utc)`
 
 const createMessageRevisionIndex = `
-CREATE INDEX entry_messages_revision
-ON entry_messages(workspace_id, revision)`
+CREATE INDEX post_messages_revision
+ON post_messages(workspace_id, revision)`
 
 // createMessageOriginUserIndex finds the messages a user posted, as
-// createOriginUserIndex finds the entries they created. The listings
+// createOriginUserIndex finds the posts they created. The listings
 // match messages on lower(origin_user), which SQLite does not read
 // through it.
 const createMessageOriginUserIndex = `
-CREATE INDEX entry_messages_origin_user
-ON entry_messages(workspace_id, origin_user_lower)`
+CREATE INDEX post_messages_origin_user
+ON post_messages(workspace_id, origin_user_lower)`
 
 // The text indexes hold the trigrams of the lowered text a search
-// matches, so a search finds the entries and messages that hold a
+// matches, so a search finds the posts and messages that hold a
 // pattern's literal text without reading them all. They are
-// contentless, so they hold no copy of the text, and keep no
-// positions, so they cannot tell where in a row its trigrams are. Each
-// row is keyed by its workspace id in the high 32 bits and its entry
-// id or message post_order in the low 32. secure-delete makes FTS5
-// remove the trigrams of overwritten text at once rather than at a
-// later merge, as the secure_delete pragma zeroes overwritten text in
-// the tables.
-const createEntryText = `
-CREATE VIRTUAL TABLE entry_text USING fts5(
+// contentless, so they hold no copy of the text, and keep no positions,
+// so they cannot tell where in a row its trigrams are. Each row is
+// keyed by its workspace id in the high 32 bits and its post id or
+// message post_order in the low 32. secure-delete makes FTS5 remove the
+// trigrams of overwritten text at once rather than at a later merge, as
+// the secure_delete pragma zeroes overwritten text in the tables.
+const createPostText = `
+CREATE VIRTUAL TABLE post_text USING fts5(
 	subject_lower, body_lower,
 	content='', columnsize=0, detail=none,
 	tokenize='trigram case_sensitive 1'
@@ -267,40 +264,40 @@ CREATE VIRTUAL TABLE message_text USING fts5(
 	tokenize='trigram case_sensitive 1'
 )`
 
-const secureEntryText = `
-INSERT INTO entry_text (entry_text, rank) VALUES ('secure-delete', 1)`
+const securePostText = `
+INSERT INTO post_text (post_text, rank) VALUES ('secure-delete', 1)`
 
 const secureMessageText = `
 INSERT INTO message_text (message_text, rank) VALUES ('secure-delete', 1)`
 
 // A contentless index forgets a row through the FTS5 'delete' command,
 // given the text it indexed.
-const createEntryTextInsert = `
-CREATE TRIGGER entry_text_insert AFTER INSERT ON entries BEGIN
-	INSERT INTO entry_text (rowid, subject_lower, body_lower)
+const createPostTextInsert = `
+CREATE TRIGGER post_text_insert AFTER INSERT ON posts BEGIN
+	INSERT INTO post_text (rowid, subject_lower, body_lower)
 	VALUES ((new.workspace_id << 32) | new.id, new.subject_lower,
 		new.body_lower);
 END`
 
-const createEntryTextUpdate = `
-CREATE TRIGGER entry_text_update AFTER UPDATE OF subject, body ON entries
+const createPostTextUpdate = `
+CREATE TRIGGER post_text_update AFTER UPDATE OF subject, body ON posts
 BEGIN
-	INSERT INTO entry_text (entry_text, rowid, subject_lower, body_lower)
+	INSERT INTO post_text (post_text, rowid, subject_lower, body_lower)
 	VALUES ('delete', (old.workspace_id << 32) | old.id, old.subject_lower,
 		old.body_lower);
-	INSERT INTO entry_text (rowid, subject_lower, body_lower)
+	INSERT INTO post_text (rowid, subject_lower, body_lower)
 	VALUES ((new.workspace_id << 32) | new.id, new.subject_lower,
 		new.body_lower);
 END`
 
 const createMessageTextInsert = `
-CREATE TRIGGER message_text_insert AFTER INSERT ON entry_messages BEGIN
+CREATE TRIGGER message_text_insert AFTER INSERT ON post_messages BEGIN
 	INSERT INTO message_text (rowid, body_lower)
 	VALUES ((new.workspace_id << 32) | new.post_order, lower(new.body));
 END`
 
 const createMessageTextUpdate = `
-CREATE TRIGGER message_text_update AFTER UPDATE OF body ON entry_messages
+CREATE TRIGGER message_text_update AFTER UPDATE OF body ON post_messages
 BEGIN
 	INSERT INTO message_text (message_text, rowid, body_lower)
 	VALUES ('delete', (old.workspace_id << 32) | old.post_order,
@@ -345,65 +342,65 @@ var schemaSteps = []schemaStep{
 	{
 		statements: []string{
 			createWorkspaces, createRevisionCounter,
-			startRevisionCounter, createEntries, createMetadata,
+			startRevisionCounter, createPosts, createMetadata,
 			createMetadataKeyIndex, createActivityIndex,
 			createRevisionIndex, createSubjectIndex, createProjectIndex,
 			createProjectCreatedIndex, createOriginUserIndex, createLinks,
 			createLinkTargetIndex, createOneParentIndex, createMessages,
 			createMessageOrderIndex, createMessagePostedIndex,
 			createMessageRevisionIndex, createMessageOriginUserIndex,
-			createEntryText, secureEntryText, createEntryTextInsert,
-			createEntryTextUpdate, createMessageText, secureMessageText,
+			createPostText, securePostText, createPostTextInsert,
+			createPostTextUpdate, createMessageText, secureMessageText,
 			createMessageTextInsert, createMessageTextUpdate,
 		},
 		objects: slices.Concat([]schemaObject{
-			{"index", "entries_activity_order", "entries",
+			{"index", "posts_activity_order", "posts",
 				normalizeSchemaSQL(createActivityIndex)},
-			{"index", "entries_origin_user", "entries",
+			{"index", "posts_origin_user", "posts",
 				normalizeSchemaSQL(createOriginUserIndex)},
-			{"index", "entries_revision", "entries",
+			{"index", "posts_revision", "posts",
 				normalizeSchemaSQL(createRevisionIndex)},
-			{"index", "entries_project_activity", "entries",
+			{"index", "posts_project_activity", "posts",
 				normalizeSchemaSQL(createProjectIndex)},
-			{"index", "entries_project_created", "entries",
+			{"index", "posts_project_created", "posts",
 				normalizeSchemaSQL(createProjectCreatedIndex)},
-			{"index", "entries_subject_search", "entries",
+			{"index", "posts_subject_search", "posts",
 				normalizeSchemaSQL(createSubjectIndex)},
-			{"index", "entry_links_one_parent", "entry_links",
+			{"index", "post_links_one_parent", "post_links",
 				normalizeSchemaSQL(createOneParentIndex)},
-			{"index", "entry_links_target", "entry_links",
+			{"index", "post_links_target", "post_links",
 				normalizeSchemaSQL(createLinkTargetIndex)},
-			{"index", "entry_messages_posted", "entry_messages",
+			{"index", "post_messages_posted", "post_messages",
 				normalizeSchemaSQL(createMessagePostedIndex)},
-			{"index", "entry_messages_origin_user", "entry_messages",
+			{"index", "post_messages_origin_user", "post_messages",
 				normalizeSchemaSQL(createMessageOriginUserIndex)},
-			{"index", "entry_messages_revision", "entry_messages",
+			{"index", "post_messages_revision", "post_messages",
 				normalizeSchemaSQL(createMessageRevisionIndex)},
-			{"index", "entry_messages_workspace_order", "entry_messages",
+			{"index", "post_messages_workspace_order", "post_messages",
 				normalizeSchemaSQL(createMessageOrderIndex)},
-			{"index", "entry_metadata_key", "entry_metadata",
+			{"index", "post_metadata_key", "post_metadata",
 				normalizeSchemaSQL(createMetadataKeyIndex)},
-			{"table", "entries", "entries",
-				normalizeSchemaSQL(createEntries)},
-			{"table", "entry_links", "entry_links",
+			{"table", "posts", "posts",
+				normalizeSchemaSQL(createPosts)},
+			{"table", "post_links", "post_links",
 				normalizeSchemaSQL(createLinks)},
-			{"table", "entry_messages", "entry_messages",
+			{"table", "post_messages", "post_messages",
 				normalizeSchemaSQL(createMessages)},
-			{"table", "entry_metadata", "entry_metadata",
+			{"table", "post_metadata", "post_metadata",
 				normalizeSchemaSQL(createMetadata)},
 			{"table", "revision_counter", "revision_counter",
 				normalizeSchemaSQL(createRevisionCounter)},
 			{"table", "workspaces", "workspaces",
 				normalizeSchemaSQL(createWorkspaces)},
-			{"trigger", "entry_text_insert", "entries",
-				normalizeSchemaSQL(createEntryTextInsert)},
-			{"trigger", "entry_text_update", "entries",
-				normalizeSchemaSQL(createEntryTextUpdate)},
-			{"trigger", "message_text_insert", "entry_messages",
+			{"trigger", "post_text_insert", "posts",
+				normalizeSchemaSQL(createPostTextInsert)},
+			{"trigger", "post_text_update", "posts",
+				normalizeSchemaSQL(createPostTextUpdate)},
+			{"trigger", "message_text_insert", "post_messages",
 				normalizeSchemaSQL(createMessageTextInsert)},
-			{"trigger", "message_text_update", "entry_messages",
+			{"trigger", "message_text_update", "post_messages",
 				normalizeSchemaSQL(createMessageTextUpdate)},
-		}, textIndexObjects("entry_text", createEntryText),
+		}, textIndexObjects("post_text", createPostText),
 			textIndexObjects("message_text", createMessageText)),
 	},
 }
@@ -428,7 +425,7 @@ func expectedSchema(version int) []schemaObject {
 
 type Store struct {
 	// db holds the one connection every write goes through, so writes
-	// take turns and no two take the same entry or message number.
+	// take turns and no two take the same post or message number.
 	db *sql.DB
 	// reads holds the connections reads go through. In WAL mode they
 	// read beside the writer, so a slow listing holds up no write.
@@ -436,7 +433,7 @@ type Store struct {
 	// workspaces are the configured workspaces, in config order.
 	workspaces []Workspace
 	// unconfigured names the workspaces the database holds but the
-	// config does not, whose entries are unreachable.
+	// config does not, whose posts are unreachable.
 	unconfigured []string
 }
 

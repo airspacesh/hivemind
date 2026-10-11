@@ -11,7 +11,7 @@ import (
 	"github.com/airspacesh/workstream/internal/api"
 )
 
-type searchEntries struct {
+type searchPosts struct {
 	store  *Store
 	first  api.Post
 	second api.Post
@@ -20,7 +20,7 @@ type searchEntries struct {
 	fifth  api.Post
 }
 
-func newSearchEntries(t *testing.T) searchEntries {
+func newSearchPosts(t *testing.T) searchPosts {
 	t.Helper()
 	store := openTestStore(t)
 	add := func(
@@ -32,7 +32,7 @@ func newSearchEntries(t *testing.T) searchEntries {
 			Metadata: metadata,
 		})
 	}
-	return searchEntries{
+	return searchPosts{
 		store: store,
 		first: add("duck-pond", "Count the Ducklings", "",
 			map[string]string{"jira": "QUACK-1"}),
@@ -59,13 +59,13 @@ func runSearch(t *testing.T, store *Store, filter Filter) api.MatchPage {
 	return result
 }
 
-func assertEntryRefs(t *testing.T, page api.MatchPage, want ...api.Ref) {
+func assertPostRefs(t *testing.T, page api.MatchPage, want ...api.Ref) {
 	t.Helper()
 	assertMatches(t, page, refStrings(want...)...)
 }
 
-// assertMatches checks a page's matches by their refs, an entry's like
-// e1 and a message's like e1-m2.
+// assertMatches checks a page's matches by their refs, a post's like e1
+// and a message's like e1-m2.
 func assertMatches(t *testing.T, page api.MatchPage, want ...string) {
 	t.Helper()
 	if got := matchRefs(page); !slices.Equal(got, want) &&
@@ -74,128 +74,128 @@ func assertMatches(t *testing.T, page api.MatchPage, want ...string) {
 	}
 }
 
-// messageRef names a message of an entry, like e1-m2.
-func messageRef(entry api.Ref, number int64) string {
-	return api.MessageRef{Post: entry, Number: number}.String()
+// messageRef names a message of a post, like e1-m2.
+func messageRef(post api.Ref, number int64) string {
+	return api.MessageRef{Post: post, Number: number}.String()
 }
 
 func TestSearchUsesRawCaseFoldedGlobPatterns(t *testing.T) {
-	entries := newSearchEntries(t)
+	posts := newSearchPosts(t)
 	tests := []struct {
 		name    string
 		pattern string
 		want    []api.Ref
 	}{
-		{"whole string", "COUNT THE DUCKLINGS", []api.Ref{entries.first.Ref}},
+		{"whole string", "COUNT THE DUCKLINGS", []api.Ref{posts.first.Ref}},
 		{"bare text matches anywhere", "DUCKLINGS", []api.Ref{
-			entries.third.Ref, entries.first.Ref,
+			posts.third.Ref, posts.first.Ref,
 		}},
 		{"empty matches only an empty value", "", nil},
 		{"wildcard", "*DUCKLINGS*", []api.Ref{
-			entries.third.Ref, entries.first.Ref,
+			posts.third.Ref, posts.first.Ref,
 		}},
-		{"single character", "fix nes?", []api.Ref{entries.second.Ref}},
-		{"character class", "fi[xz] nest", []api.Ref{entries.second.Ref}},
+		{"single character", "fix nes?", []api.Ref{posts.second.Ref}},
+		{"character class", "fi[xz] nest", []api.Ref{posts.second.Ref}},
 		{"non-ASCII is unchanged", "æther", nil},
-		{"matching non-ASCII", "ÆTHER", []api.Ref{entries.fifth.Ref}},
+		{"matching non-ASCII", "ÆTHER", []api.Ref{posts.fifth.Ref}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result := runSearch(t, entries.store, Filter{
+			result := runSearch(t, posts.store, Filter{
 				Subject: []FieldCond{{Value: test.pattern}},
 			})
-			assertEntryRefs(t, result, test.want...)
+			assertPostRefs(t, result, test.want...)
 		})
 	}
 }
 
 func TestSearchSetAndPairNegationUsesNotExists(t *testing.T) {
-	entries := newSearchEntries(t)
-	result := runSearch(t, entries.store, Filter{
+	posts := newSearchPosts(t)
+	result := runSearch(t, posts.store, Filter{
 		Key: []FieldCond{{Value: "JIRA"}},
 	})
-	assertEntryRefs(t, result, entries.third.Ref, entries.first.Ref)
+	assertPostRefs(t, result, posts.third.Ref, posts.first.Ref)
 
-	result = runSearch(t, entries.store, Filter{
+	result = runSearch(t, posts.store, Filter{
 		Key: []FieldCond{{Negate: true, Value: "JIRA"}},
 	})
-	assertEntryRefs(t, result,
-		entries.fifth.Ref, entries.fourth.Ref, entries.second.Ref)
+	assertPostRefs(t, result,
+		posts.fifth.Ref, posts.fourth.Ref, posts.second.Ref)
 
-	result = runSearch(t, entries.store, Filter{
+	result = runSearch(t, posts.store, Filter{
 		Meta: []MetaCond{{Key: "jira", Value: "QUACK-*"}},
 	})
-	assertEntryRefs(t, result, entries.third.Ref, entries.first.Ref)
+	assertPostRefs(t, result, posts.third.Ref, posts.first.Ref)
 
-	result = runSearch(t, entries.store, Filter{
+	result = runSearch(t, posts.store, Filter{
 		Meta: []MetaCond{{Key: "jira", Value: "QUACK"}},
 	})
-	assertEntryRefs(t, result)
+	assertPostRefs(t, result)
 
-	result = runSearch(t, entries.store, Filter{
+	result = runSearch(t, posts.store, Filter{
 		Meta: []MetaCond{{Negate: true, Key: "jira", Value: "QUACK-1"}},
 	})
-	assertEntryRefs(t, result, entries.fifth.Ref,
-		entries.fourth.Ref, entries.third.Ref, entries.second.Ref)
+	assertPostRefs(t, result, posts.fifth.Ref,
+		posts.fourth.Ref, posts.third.Ref, posts.second.Ref)
 }
 
 func TestSearchMatchesProjectWholeValue(t *testing.T) {
-	entries := newSearchEntries(t)
-	result := runSearch(t, entries.store, Filter{
+	posts := newSearchPosts(t)
+	result := runSearch(t, posts.store, Filter{
 		Project: []FieldCond{{Value: "DUCK-*"}},
 	})
-	assertEntryRefs(t, result,
-		entries.third.Ref, entries.second.Ref, entries.first.Ref)
+	assertPostRefs(t, result,
+		posts.third.Ref, posts.second.Ref, posts.first.Ref)
 
-	result = runSearch(t, entries.store, Filter{
+	result = runSearch(t, posts.store, Filter{
 		Project: []FieldCond{{Value: "duck"}},
 	})
-	assertEntryRefs(t, result)
+	assertPostRefs(t, result)
 
-	result = runSearch(t, entries.store, Filter{
+	result = runSearch(t, posts.store, Filter{
 		Project: []FieldCond{{Negate: true, Value: "DUCK-POND"}},
 	})
-	assertEntryRefs(t, result,
-		entries.fifth.Ref, entries.fourth.Ref, entries.second.Ref)
+	assertPostRefs(t, result,
+		posts.fifth.Ref, posts.fourth.Ref, posts.second.Ref)
 
-	result = runSearch(t, entries.store, Filter{
+	result = runSearch(t, posts.store, Filter{
 		Project: []FieldCond{{Value: "ÆTHER"}},
 	})
-	assertEntryRefs(t, result)
+	assertPostRefs(t, result)
 }
 
 // A page ends at the oldest match it shows, and the next page lists
 // the matches before it.
 func TestSearchContentPagingAndMetadata(t *testing.T) {
-	entries := newSearchEntries(t)
+	posts := newSearchPosts(t)
 	ducklings := []FieldCond{{Value: "*DUCKLINGS*"}}
-	first := runSearch(t, entries.store, Filter{Content: ducklings, Limit: 2})
-	assertEntryRefs(t, first, entries.third.Ref, entries.second.Ref)
+	first := runSearch(t, posts.store, Filter{Content: ducklings, Limit: 2})
+	assertPostRefs(t, first, posts.third.Ref, posts.second.Ref)
 	if !first.More {
 		t.Fatal("no more after the first 2 of 3 matches")
 	}
-	result := runSearch(t, entries.store, Filter{Content: ducklings,
+	result := runSearch(t, posts.store, Filter{Content: ducklings,
 		Limit: 2, Changed: Span{Before: first.Matches[1].At}})
 	if result.More {
 		t.Fatal("more after the last of 3 matches")
 	}
-	assertEntryRefs(t, result, entries.first.Ref)
+	assertPostRefs(t, result, posts.first.Ref)
 	if got := result.Matches[0].Post.Metadata["jira"]; got != "QUACK-1" {
 		t.Fatalf("paged metadata jira = %q, want QUACK-1", got)
 	}
 }
 
-func TestSearchRanksAnEditedEntryFirst(t *testing.T) {
-	entries := newSearchEntries(t)
+func TestSearchRanksAnEditedPostFirst(t *testing.T) {
+	posts := newSearchPosts(t)
 	oldTime := "2000-01-01T00:00:00.000000000Z"
-	if _, err := entries.store.db.Exec(
-		`UPDATE entries SET modified_utc = ?1, activity_utc = ?1`, oldTime,
+	if _, err := posts.store.db.Exec(
+		`UPDATE posts SET modified_utc = ?1, activity_utc = ?1`, oldTime,
 	); err != nil {
 		t.Fatalf("setting modification times: %v", err)
 	}
-	if _, err := entries.store.Edit(
-		context.Background(), everyAccess(entries.store),
-		entries.store.mustKey(entries.first.Ref), api.EditPostRequest{
+	if _, err := posts.store.Edit(
+		context.Background(), everyAccess(posts.store),
+		posts.store.mustKey(posts.first.Ref), api.EditPostRequest{
 			Metadata: map[string]string{"jira": "QUACK-9"},
 			User:     testUser,
 		},
@@ -203,10 +203,10 @@ func TestSearchRanksAnEditedEntryFirst(t *testing.T) {
 		t.Fatalf("editing metadata: %v", err)
 	}
 
-	result := runSearch(t, entries.store, Filter{})
-	if got := result.Matches[0].Post.Ref; got != entries.first.Ref {
-		t.Fatalf("first entry = %s, want the edited %s", got,
-			entries.first.Ref)
+	result := runSearch(t, posts.store, Filter{})
+	if got := result.Matches[0].Post.Ref; got != posts.first.Ref {
+		t.Fatalf("first post = %s, want the edited %s", got,
+			posts.first.Ref)
 	}
 }
 
@@ -278,27 +278,27 @@ func TestSearchByOrigin(t *testing.T) {
 	got := runSearch(t, store, Filter{
 		Limit: 50, OriginHost: []FieldCond{{Value: "pond-a"}},
 	})
-	assertEntryRefs(t, got, first.Ref)
+	assertPostRefs(t, got, first.Ref)
 
-	// Directory glob and session match reach only their entry.
+	// Directory glob and session match reach only their post.
 	got = runSearch(t, store, Filter{
 		Limit: 50, OriginDir: []FieldCond{{Value: "*/envs"}},
 	})
-	assertEntryRefs(t, got, second.Ref)
+	assertPostRefs(t, got, second.Ref)
 	got = runSearch(t, store, Filter{
 		Limit: 50, OriginClaudeSession: []FieldCond{{Value: "abc-*"}},
 	})
-	assertEntryRefs(t, got, first.Ref)
+	assertPostRefs(t, got, first.Ref)
 
 	// Negation excludes the matching origin.
 	got = runSearch(t, store, Filter{
 		Limit: 50, OriginHost: []FieldCond{{Negate: true, Value: "pond-a"}},
 	})
-	assertEntryRefs(t, got, second.Ref)
+	assertPostRefs(t, got, second.Ref)
 }
 
-// Entries share numbers across workspaces, so metadata filters must
-// match only the metadata of the entry in the searched workspace.
+// Posts share numbers across workspaces, so metadata filters must match
+// only the metadata of the post in the searched workspace.
 func TestSearchMetadataStaysInItsWorkspace(t *testing.T) {
 	store := openTestStore(t)
 	inGeneral := mustAdd(t, store, "in general", "", nil)
@@ -313,12 +313,12 @@ func TestSearchMetadataStaysInItsWorkspace(t *testing.T) {
 		{Key: []FieldCond{{Value: "jira"}}},
 	} {
 		result := runSearch(t, store, filter)
-		assertEntryRefs(t, result)
+		assertPostRefs(t, result)
 	}
 	result := runSearch(t, store, Filter{
 		Meta: []MetaCond{{Negate: true, Key: "jira", Value: "*"}},
 	})
-	assertEntryRefs(t, result, inGeneral.Ref)
+	assertPostRefs(t, result, inGeneral.Ref)
 }
 
 func messageBodies(messages []api.Message) []string {
@@ -330,7 +330,7 @@ func messageBodies(messages []api.Message) []string {
 }
 
 // Each matching message is a match of its own, ranked by when it was
-// posted, beside the matching entries.
+// posted, beside the matching posts.
 func TestSearchMatchesChatMessages(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
@@ -339,9 +339,9 @@ func TestSearchMatchesChatMessages(t *testing.T) {
 	quiet := mustAdd(t, store, "Count ducks", "", nil)
 	for _, body := range []string{"a heron landed", "nothing here",
 		"HERON again", "heron thrice", "heron four"} {
-		mustPost(t, store, pond.Ref, body)
+		mustPostMessage(t, store, pond.Ref, body)
 	}
-	mustPost(t, store, quiet.Ref, "no birds")
+	mustPostMessage(t, store, quiet.Ref, "no birds")
 	heron := []FieldCond{{Value: "heron"}}
 	chatMatches := []string{messageRef(pond.Ref, 5), messageRef(pond.Ref, 4),
 		messageRef(pond.Ref, 3), messageRef(pond.Ref, 1),
@@ -360,16 +360,16 @@ func TestSearchMatchesChatMessages(t *testing.T) {
 		before.Before = page.Matches[0].At
 	}
 
-	entriesOnly := runSearch(t, store, Filter{Content: heron})
-	assertEntryRefs(t, entriesOnly, sighting.Ref)
+	postsOnly := runSearch(t, store, Filter{Content: heron})
+	assertPostRefs(t, postsOnly, sighting.Ref)
 
-	// The other filters apply to the entry a message is in.
+	// The other filters apply to the post a message is in.
 	sightings := runSearch(t, store, Filter{Content: heron,
 		Subject: []FieldCond{{Value: "sighting"}}, IncludeChat: true})
-	assertEntryRefs(t, sightings, sighting.Ref)
+	assertPostRefs(t, sightings, sighting.Ref)
 
-	// Excluding text matches every message and entry without it. With
-	// chat, an entry ranks by its own change, not by its chat.
+	// Excluding text matches every message and post without it. With
+	// chat, a post ranks by its own change, not by its chat.
 	without := runSearch(t, store, Filter{
 		Content:     []FieldCond{{Negate: true, Value: "heron"}},
 		IncludeChat: true,
@@ -377,7 +377,7 @@ func TestSearchMatchesChatMessages(t *testing.T) {
 	assertMatches(t, without, messageRef(quiet.Ref, 1),
 		messageRef(pond.Ref, 2), quiet.Ref.String(), pond.Ref.String())
 
-	// An edit lifts the entry, but the message keeps its place as the
+	// An edit lifts the post, but the message keeps its place as the
 	// first posted.
 	if _, _, err := store.EditMessage(ctx, store.mustKey(pond.Ref), 1,
 		ownEdit("heron at dawn")); err != nil {
@@ -392,11 +392,11 @@ func TestSearchMatchesChatMessages(t *testing.T) {
 func TestSearchMatchesEachMessageOnItsOwn(t *testing.T) {
 	store := openTestStore(t)
 	split := mustAdd(t, store, "Split", "", nil)
-	mustPost(t, store, split.Ref, "heron")
-	mustPost(t, store, split.Ref, "egret")
+	mustPostMessage(t, store, split.Ref, "heron")
+	mustPostMessage(t, store, split.Ref, "egret")
 	both := mustAdd(t, store, "Both", "", nil)
-	mustPost(t, store, both.Ref, "heron and egret")
-	mustPost(t, store, both.Ref, "heron alone")
+	mustPostMessage(t, store, both.Ref, "heron and egret")
+	mustPostMessage(t, store, both.Ref, "heron alone")
 
 	result := runSearch(t, store, Filter{Content: []FieldCond{
 		{Value: "heron"}, {Value: "egret"},
@@ -411,7 +411,7 @@ func TestSearchMatchesEachMessageOnItsOwn(t *testing.T) {
 }
 
 // A message matches the text and origin filters on its own, and the
-// other filters through its entry.
+// other filters through its post.
 func TestSearchMatchesMessagesByOrigin(t *testing.T) {
 	store := openTestStore(t)
 	add := func(user, project, subject string) api.Post {
@@ -448,7 +448,7 @@ func TestSearchMatchesMessagesByOrigin(t *testing.T) {
 			[]string{messageRef(garden.Ref, 1), messageRef(release.Ref, 3),
 				messageRef(release.Ref, 2), cats.Ref.String(),
 				design.Ref.String()}},
-		{"the other filters apply to a message's entry",
+		{"the other filters apply to a message's post",
 			Filter{OriginUser: ines, Project: []FieldCond{{Value: "build"}},
 				IncludeChat: true},
 			[]string{messageRef(release.Ref, 3), messageRef(release.Ref, 2),
@@ -460,7 +460,7 @@ func TestSearchMatchesMessagesByOrigin(t *testing.T) {
 			Filter{OriginUser: notInes, IncludeChat: true},
 			[]string{messageRef(cats.Ref, 1), messageRef(release.Ref, 1),
 				garden.Ref.String(), release.Ref.String()}},
-		{"entries only",
+		{"posts only",
 			Filter{OriginUser: ines},
 			[]string{cats.Ref.String(), design.Ref.String()}},
 	}
@@ -471,9 +471,9 @@ func TestSearchMatchesMessagesByOrigin(t *testing.T) {
 	}
 }
 
-// The text indexes find an old entry by its own text, and its messages
+// The text indexes find an old post by its own text, and its messages
 // then match by origin.
-func TestSearchMatchesMessagesByOriginInEntriesTheIndexFinds(t *testing.T) {
+func TestSearchMatchesMessagesByOriginInPostsTheIndexFinds(t *testing.T) {
 	store := openTestStore(t)
 	heron := mustAdd(t, store, "Heron at dawn", "", nil)
 	postAs(t, store, "ines", heron.Ref, "seen twice")
@@ -488,7 +488,7 @@ func TestSearchMatchesMessagesByOriginInEntriesTheIndexFinds(t *testing.T) {
 	assertMatches(t, result, messageRef(heron.Ref, 1))
 }
 
-// The origin user indexes find old entries, by their own origin or a
+// The origin user indexes find old posts, by their own origin or a
 // message's, and keep the GLOB semantics of the walk.
 func TestOriginUserIndexKeepsGlobSemantics(t *testing.T) {
 	store := openTestStore(t)
@@ -507,8 +507,8 @@ func TestOriginUserIndexKeepsGlobSemantics(t *testing.T) {
 	addFiller(t, store)
 
 	matches := `e.origin_user_lower GLOB ?2 OR EXISTS (
-		SELECT 1 FROM entry_messages AS m
-		WHERE m.workspace_id = e.workspace_id AND m.entry_id = e.id
+		SELECT 1 FROM post_messages AS m
+		WHERE m.workspace_id = e.workspace_id AND m.post_id = e.id
 			AND lower(m.origin_user) GLOB ?2
 	)`
 	for _, pattern := range []string{
@@ -527,7 +527,7 @@ func TestOriginUserIndexKeepsGlobSemantics(t *testing.T) {
 			slices.Sort(got)
 			got = slices.Compact(got)
 			if !slices.Equal(got, want) {
-				t.Fatalf("matched entries %v, want %v", got, want)
+				t.Fatalf("matched posts %v, want %v", got, want)
 			}
 		})
 	}
@@ -558,8 +558,8 @@ func messageRefs(messages []api.Message) []string {
 
 // A time filter keeps to the matches whose change they rank by falls
 // within a span, from its start up to but not including its end. That
-// is an entry's latest change to it or its chat without chat, or to it
-// alone with chat, and a message's post.
+// is a post's latest change to it or its chat without chat, or to it
+// alone with chat, and a message's posting.
 func TestSearchKeepsToASpan(t *testing.T) {
 	store := openTestStore(t)
 	day := func(month time.Month, day int) time.Time {
@@ -568,11 +568,11 @@ func TestSearchKeepsToASpan(t *testing.T) {
 	setChanged := func(ref api.Ref, message int64, at time.Time) {
 		t.Helper()
 		key := store.mustKey(ref)
-		query := `UPDATE entries SET created_utc = ?1, modified_utc = ?1
+		query := `UPDATE posts SET created_utc = ?1, modified_utc = ?1
 			WHERE workspace_id = ?2 AND id = ?3`
 		if message != 0 {
-			query = `UPDATE entry_messages SET created_utc = ?1,
-				modified_utc = ?1 WHERE workspace_id = ?2 AND entry_id = ?3
+			query = `UPDATE post_messages SET created_utc = ?1,
+				modified_utc = ?1 WHERE workspace_id = ?2 AND post_id = ?3
 				AND id = ?4`
 		}
 		if _, err := store.db.Exec(query, formatTime(at), key.Workspace,
@@ -591,7 +591,7 @@ func TestSearchKeepsToASpan(t *testing.T) {
 	recent := mustAdd(t, store, "Recent", "", nil)
 	setChanged(recent.Ref, 0, day(4, 1))
 	if _, err := store.db.Exec(`
-		UPDATE entries AS e SET activity_utc = ` + activityExpr); err != nil {
+		UPDATE posts AS e SET activity_utc = ` + activityExpr); err != nil {
 		t.Fatal(err)
 	}
 	late, early := messageRef(mid.Ref, 1), messageRef(mid.Ref, 2)
@@ -615,7 +615,7 @@ func TestSearchKeepsToASpan(t *testing.T) {
 			Filter{Changed: Span{After: day(1, 10)},
 				OriginUser: []FieldCond{{Value: "ken"}}, IncludeChat: true},
 			[]string{early}},
-		{"entries only",
+		{"posts only",
 			Filter{Changed: Span{After: day(2, 15)}},
 			[]string{recent.Ref.String(), mid.Ref.String()}},
 	}
@@ -626,7 +626,7 @@ func TestSearchKeepsToASpan(t *testing.T) {
 	}
 }
 
-// A search under an entry keeps to its subtree in a big workspace,
+// A search under a post keeps to its subtree in a big workspace,
 // whether the indexes find its matches or it reads the subtree newest
 // first.
 func TestSearchUnderASubtreeInABigWorkspace(t *testing.T) {
@@ -655,7 +655,7 @@ func TestSearchUnderASubtreeInABigWorkspace(t *testing.T) {
 			Filter{Under: &under, Content: heron, IncludeChat: true},
 			[]string{messageRef(child.Ref, 1), grandchild.Ref.String(),
 				root.Ref.String()}},
-		{"entries only",
+		{"posts only",
 			Filter{Under: &under, Content: heron},
 			[]string{root.Ref.String(), grandchild.Ref.String()}},
 		{"origin",
@@ -678,9 +678,9 @@ func TestSearchUnderASubtreeInABigWorkspace(t *testing.T) {
 	t.Run("small subtree", run)
 
 	if _, err := store.db.Exec(`
-		INSERT INTO entry_links (source_workspace_id, source_id, name,
+		INSERT INTO post_links (source_workspace_id, source_id, name,
 			target_workspace_id, target_id)
-		SELECT workspace_id, id, 'parent', workspace_id, ?1 FROM entries
+		SELECT workspace_id, id, 'parent', workspace_id, ?1 FROM posts
 		WHERE workspace_id = ?2 AND subject = '0'`,
 		under.ID, under.Workspace); err != nil {
 		t.Fatalf("moving the filler under the root: %v", err)

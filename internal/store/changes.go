@@ -52,9 +52,9 @@ func (builder *whereBuilder) excludeOrigin(alias string, key *OriginKey) {
 	builder.args = append(builder.args, key.User, key.ClaudeSession)
 }
 
-// addUnder keeps to entries e that are the entry under or lie beneath
-// it, when there is one. It walks up from each entry rather than down
-// from under, so its cost follows the changes read, not the subtree.
+// addUnder keeps to posts e that are the post under or lie beneath it,
+// when there is one. It walks up from each post rather than down from
+// under, so its cost follows the changes read, not the subtree.
 func (builder *whereBuilder) addUnder(under *Key) {
 	if under == nil {
 		return
@@ -64,7 +64,7 @@ func (builder *whereBuilder) addUnder(under *Key) {
 			SELECT e.workspace_id, e.id
 			UNION ALL
 			SELECT l.target_workspace_id, l.target_id
-			FROM above JOIN entry_links AS l
+			FROM above JOIN post_links AS l
 				ON l.source_workspace_id = above.workspace_id
 				AND l.source_id = above.id AND l.name = 'parent'
 		)
@@ -73,18 +73,18 @@ func (builder *whereBuilder) addUnder(under *Key) {
 	builder.args = append(builder.args, under.Workspace, under.ID)
 }
 
-// changeKey names a change by its revision and the entry or message
-// that changed, where message 0 stands for the entry itself.
+// changeKey names a change by its revision and the post or message that
+// changed, where message 0 stands for the post itself.
 type changeKey struct {
 	revision int64
-	entry    int64
+	post     int64
 	message  int64
 }
 
 // readChangeKeys reads the changes of a workspace after the revision
 // since and up to through that match a filter, leaving out those whose
-// origin has the key exclude, at most limit of them, oldest first. An
-// entry's change matches as the entry, and a message's as a message in
+// origin has the key exclude, at most limit of them, oldest first. A
+// post's change matches as the post, and a message's as a message in
 // its chat.
 func (v view) readChangeKeys(
 	ctx context.Context,
@@ -94,15 +94,15 @@ func (v view) readChangeKeys(
 	exclude *OriginKey,
 	limit int,
 ) ([]changeKey, error) {
-	entryWhere, err := buildWhere(filter)
+	postWhere, err := buildWhere(filter)
 	if err != nil {
 		return nil, err
 	}
-	entryWhere.addUnder(filter.Under)
-	entryWhere.excludeOrigin("e", exclude)
-	entryWhere.clauses = append(entryWhere.clauses, `e.workspace_id = ?`,
+	postWhere.addUnder(filter.Under)
+	postWhere.excludeOrigin("e", exclude)
+	postWhere.clauses = append(postWhere.clauses, `e.workspace_id = ?`,
 		`e.revision > ?`, `e.revision <= ?`)
-	entryWhere.args = append(entryWhere.args, workspace, since, through)
+	postWhere.args = append(postWhere.args, workspace, since, through)
 
 	messageWhere, err := buildMessageWhere(filter)
 	if err != nil {
@@ -115,23 +115,23 @@ func (v view) readChangeKeys(
 	messageWhere.args = append(messageWhere.args, workspace, since, through)
 
 	// CROSS JOIN keeps SQLite reading the messages in revision order,
-	// rather than reading entries first for a filter on them.
+	// rather than reading posts first for a filter on them.
 	query := `
-		SELECT revision, entry_id, number FROM (
-			SELECT e.revision, e.id AS entry_id, 0 AS number
-			FROM entries AS e` + entryWhere.sql() + `
+		SELECT revision, post_id, number FROM (
+			SELECT e.revision, e.id AS post_id, 0 AS number
+			FROM posts AS e` + postWhere.sql() + `
 			ORDER BY e.revision LIMIT ?
 		)
 		UNION ALL
-		SELECT revision, entry_id, number FROM (
-			SELECT m.revision, m.entry_id, m.id AS number
-			FROM entry_messages AS m CROSS JOIN entries AS e
-				ON e.workspace_id = m.workspace_id AND e.id = m.entry_id` +
+		SELECT revision, post_id, number FROM (
+			SELECT m.revision, m.post_id, m.id AS number
+			FROM post_messages AS m CROSS JOIN posts AS e
+				ON e.workspace_id = m.workspace_id AND e.id = m.post_id` +
 		messageWhere.sql() + `
 			ORDER BY m.revision LIMIT ?
 		)
 		ORDER BY revision LIMIT ?`
-	args := append(append(append(entryWhere.args, limit),
+	args := append(append(append(postWhere.args, limit),
 		messageWhere.args...), limit, limit)
 	rows, err := v.tx.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -142,7 +142,7 @@ func (v view) readChangeKeys(
 	for rows.Next() {
 		var key changeKey
 		if err := rows.Scan(
-			&key.revision, &key.entry, &key.message,
+			&key.revision, &key.post, &key.message,
 		); err != nil {
 			return nil, fmt.Errorf("reading changes: %w", err)
 		}
@@ -189,7 +189,7 @@ func (s *Store) changes(
 	}
 	defer v.tx.Rollback()
 	if filter.Under != nil {
-		if err := v.checkEntryExists(ctx, *filter.Under); err != nil {
+		if err := v.checkPostExists(ctx, *filter.Under); err != nil {
 			return api.ChangesPage{}, err
 		}
 	}
@@ -223,23 +223,23 @@ func (s *Store) changes(
 	}
 	listed := map[Key]api.ListedPost{}
 	for _, key := range keys {
-		entryKey := Key{Workspace: workspace, ID: key.entry}
-		entry, ok := listed[entryKey]
+		postKey := Key{Workspace: workspace, ID: key.post}
+		post, ok := listed[postKey]
 		if !ok {
-			found, err := v.getEntry(ctx, entryKey)
+			found, err := v.getPost(ctx, postKey)
 			if err != nil {
 				return api.ChangesPage{}, err
 			}
-			entries, err := v.listEntries(ctx, []api.Post{found})
+			posts, err := v.listPosts(ctx, []api.Post{found})
 			if err != nil {
 				return api.ChangesPage{}, err
 			}
-			entry = entries[0]
-			listed[entryKey] = entry
+			post = posts[0]
+			listed[postKey] = post
 		}
-		change := api.Change{Post: entry}
+		change := api.Change{Post: post}
 		if key.message != 0 {
-			message, err := s.getMessage(ctx, v.tx, entryKey, key.message)
+			message, err := s.getMessage(ctx, v.tx, postKey, key.message)
 			if err != nil {
 				return api.ChangesPage{}, err
 			}

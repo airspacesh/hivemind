@@ -18,7 +18,7 @@ func (h *handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return
 	}
-	_, entry, ok := h.pathEntry(w, r)
+	_, post, ok := h.pathPost(w, r)
 	if !ok {
 		return
 	}
@@ -30,7 +30,7 @@ func (h *handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	message, err := h.store.Post(r.Context(), entry, request)
+	message, err := h.store.PostMessage(r.Context(), post, request)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -39,8 +39,8 @@ func (h *handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, message)
 }
 
-// pathMessage finds the message the path's ref and number name, in an
-// entry the request must be able to read. The message may not exist.
+// pathMessage finds the message the path's ref and number name, in a
+// post the request must be able to read. The message may not exist.
 func (h *handler) pathMessage(
 	w http.ResponseWriter, r *http.Request,
 ) (store.Key, int64, bool) {
@@ -49,15 +49,15 @@ func (h *handler) pathMessage(
 		writeBadRequest(w, "the message number must be a positive integer")
 		return store.Key{}, 0, false
 	}
-	_, entry, ok := h.pathEntry(w, r)
-	return entry, number, ok
+	_, post, ok := h.pathPost(w, r)
+	return post, number, ok
 }
 
 func (h *handler) editMessage(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return
 	}
-	entry, number, ok := h.pathMessage(w, r)
+	post, number, ok := h.pathMessage(w, r)
 	if !ok {
 		return
 	}
@@ -70,7 +70,7 @@ func (h *handler) editMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	message, _, err := h.store.EditMessage(
-		r.Context(), entry, number, request)
+		r.Context(), post, number, request)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -82,7 +82,7 @@ func (h *handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return
 	}
-	entry, number, ok := h.pathMessage(w, r)
+	post, number, ok := h.pathMessage(w, r)
 	if !ok {
 		return
 	}
@@ -94,7 +94,7 @@ func (h *handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	message, err := h.store.DeleteMessage(r.Context(), entry, number,
+	message, err := h.store.DeleteMessage(r.Context(), post, number,
 		request)
 	if err != nil {
 		writeStoreError(w, err)
@@ -145,16 +145,16 @@ func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	_, entry, ok := h.pathEntry(w, r)
+	_, post, ok := h.pathPost(w, r)
 	if !ok {
 		return
 	}
 
 	var page api.ChatPage
 	if hasLatest {
-		page, err = h.store.LatestMessages(r.Context(), entry, int(latest))
+		page, err = h.store.LatestMessages(r.Context(), post, int(latest))
 	} else {
-		page, err = h.store.Messages(r.Context(), entry, after, filter,
+		page, err = h.store.Messages(r.Context(), post, after, filter,
 			exclude, int(limit))
 	}
 	if err != nil {
@@ -165,7 +165,7 @@ func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 // overview returns the newest messages across a workspace, grouped by
-// entry.
+// post.
 func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 	query, ok := parseQueryOf(w, r, "limit")
 	if !ok {

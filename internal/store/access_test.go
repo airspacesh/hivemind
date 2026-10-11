@@ -11,10 +11,10 @@ import (
 	"github.com/airspacesh/workstream/internal/api"
 )
 
-// linkedWorkspaces holds open entries in general linked every way a
-// link may cross workspaces to protected entries in personal, whose
-// text all holds SECRET. A parent never crosses workspaces, so trees
-// stay in one.
+// linkedWorkspaces holds open posts in general linked every way a link
+// may cross workspaces to protected posts in personal, whose text all
+// holds SECRET. A parent never crosses workspaces, so trees stay in
+// one.
 type linkedWorkspaces struct {
 	store *Store
 	// openRoot has an open child, openChild. secretSee links to
@@ -33,15 +33,15 @@ func newLinkedWorkspaces(t *testing.T) linkedWorkspaces {
 	store := openTestStore(t)
 	secret := func(subject string, links ...api.Link) api.Post {
 		t.Helper()
-		entry := addTo(t, store, "personal", api.AddPostRequest{
+		post := addTo(t, store, "personal", api.AddPostRequest{
 			Subject: "SECRET " + subject,
 			Body:    "SECRET body",
 			Project: "SECRET-project",
 			Origin:  api.Origin{User: "SECRET-user", Dir: "/SECRET"},
 			Links:   links,
 		})
-		mustPost(t, store, entry.Ref, "SECRET message")
-		return entry
+		mustPostMessage(t, store, post.Ref, "SECRET message")
+		return post
 	}
 	open := func(subject string, links ...api.Link) api.Post {
 		t.Helper()
@@ -89,14 +89,14 @@ func assertNoSecret(t *testing.T, what string, value any) {
 func TestAProtectedLinkShowsAsItsBareRef(t *testing.T) {
 	w := newLinkedWorkspaces(t)
 	detail := w.detail(t, w.openSee.Ref)
-	assertNoSecret(t, "an entry linking to a protected one", detail)
+	assertNoSecret(t, "a post linking to a protected one", detail)
 	if !reflect.DeepEqual(detail.Links,
 		[]api.Link{link("see", w.secretSee.Ref)}) {
 		t.Fatalf("links = %+v", detail.Links)
 	}
 
 	root := w.detail(t, w.openRoot.Ref)
-	assertNoSecret(t, "an entry a protected one links to", root)
+	assertNoSecret(t, "a post a protected one links to", root)
 	if !reflect.DeepEqual(root.Backlinks, []api.Link{
 		link("parent", w.openChild.Ref), link("see", w.secretSee.Ref),
 	}) {
@@ -105,14 +105,14 @@ func TestAProtectedLinkShowsAsItsBareRef(t *testing.T) {
 	}
 
 	old := w.detail(t, w.openOld.Ref)
-	assertNoSecret(t, "an entry a protected one supersedes", old)
+	assertNoSecret(t, "a post a protected one supersedes", old)
 	if !reflect.DeepEqual(old.SupersededBy,
 		[]api.Ref{w.secretSuperseder.Ref}) {
 		t.Fatalf("superseded by %+v, want the bare ref", old.SupersededBy)
 	}
 }
 
-func TestProtectedEntriesStayOutOfListings(t *testing.T) {
+func TestProtectedPostsStayOutOfListings(t *testing.T) {
 	ctx := context.Background()
 	w := newLinkedWorkspaces(t)
 	open := w.openAccess(t)
@@ -146,7 +146,7 @@ func TestProtectedEntriesStayOutOfListings(t *testing.T) {
 	assertNoSecret(t, "a listing", listing)
 	for _, match := range listing.Matches {
 		if match.Post.Ref == w.openOld.Ref {
-			t.Fatalf("search lists %s, which a protected entry "+
+			t.Fatalf("search lists %s, which a protected post "+
 				"supersedes", match.Post.Ref)
 		}
 	}
@@ -158,7 +158,7 @@ func TestProtectedEntriesStayOutOfListings(t *testing.T) {
 	assertNoSecret(t, "the chat overview", overview)
 }
 
-func TestLinkingToAnUnreadableEntryIsRefusedAsMissing(t *testing.T) {
+func TestLinkingToAnUnreadablePostIsRefusedAsMissing(t *testing.T) {
 	ctx := context.Background()
 	w := newLinkedWorkspaces(t)
 	add := func(target api.Ref) error {
@@ -186,6 +186,6 @@ func TestLinkingToAnUnreadableEntryIsRefusedAsMissing(t *testing.T) {
 			AddLinks: []api.Link{link("see", w.secretSee.Ref)},
 			User:     testUser,
 		}); !errors.Is(err, ErrLinkTarget) {
-		t.Fatalf("editing in a link to an unreadable entry = %v", err)
+		t.Fatalf("editing in a link to an unreadable post = %v", err)
 	}
 }

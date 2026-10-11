@@ -75,7 +75,7 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrUnknownPrefix):
 		status, code, message = http.StatusNotFound,
 			api.CodeUnknownPrefix, err.Error()
-	case errors.Is(err, store.ErrEntryNotFound):
+	case errors.Is(err, store.ErrPostNotFound):
 		status, code, message = http.StatusNotFound,
 			api.CodePostNotFound, err.Error()
 	case errors.Is(err, store.ErrMessageNotFound):
@@ -239,9 +239,9 @@ func (h *handler) workspace(
 	return store.Workspace{}, false
 }
 
-// entryKey finds the entry a ref names, in a workspace the request
-// must be able to read. The entry may not exist.
-func (h *handler) entryKey(
+// postKey finds the post a ref names, in a workspace the request must
+// be able to read. The post may not exist.
+func (h *handler) postKey(
 	w http.ResponseWriter, access store.Access, text string,
 ) (store.Key, bool) {
 	ref, err := api.ParseRef(text)

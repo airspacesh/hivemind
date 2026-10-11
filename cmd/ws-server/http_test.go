@@ -100,7 +100,7 @@ func (s testServer) must(
 	return text
 }
 
-func entryBody(subject string, links ...string) string {
+func postBody(subject string, links ...string) string {
 	body := `{"subject":"` + subject + `",` +
 		`"project":"p","origin":{"user":"duck"}`
 	if len(links) > 0 {
@@ -121,9 +121,9 @@ func errorCode(t *testing.T, text string) api.ErrorCode {
 func TestEachSecretGrantsOnlyItsOwnWorkspace(t *testing.T) {
 	s := startServer(t, testConfig(t))
 	s.must(t, "POST", "/api/workspaces/personal/posts",
-		entryBody("private"), personalSecret, http.StatusCreated)
+		postBody("private"), personalSecret, http.StatusCreated)
 	s.must(t, "POST", "/api/workspaces/team/posts",
-		entryBody("shared"), teamSecret, http.StatusCreated)
+		postBody("shared"), teamSecret, http.StatusCreated)
 
 	for _, test := range []struct {
 		secret string
@@ -164,7 +164,7 @@ func TestEachSecretGrantsOnlyItsOwnWorkspace(t *testing.T) {
 	}
 
 	s.must(t, "POST", "/api/workspaces/personal/posts",
-		entryBody("written with the wrong secret"), teamSecret,
+		postBody("written with the wrong secret"), teamSecret,
 		http.StatusUnauthorized)
 	s.must(t, "POST", "/api/posts/p1/messages",
 		`{"body":"hi","origin":{}}`, teamSecret, http.StatusUnauthorized)
@@ -198,7 +198,7 @@ func TestEachSecretGrantsOnlyItsOwnWorkspace(t *testing.T) {
 
 func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 	s := startServer(t, testConfig(t))
-	s.must(t, "POST", "/api/workspaces/general/posts", entryBody("one"),
+	s.must(t, "POST", "/api/workspaces/general/posts", postBody("one"),
 		"", http.StatusCreated)
 	for _, test := range []struct {
 		method string
@@ -226,10 +226,10 @@ func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 		{"GET", "/api/workspaces/general/posts?under=e9", "", 404,
 			api.CodePostNotFound},
 		{"POST", "/api/workspaces/general/posts",
-			entryBody("probe", `{"name":"see","ref":"x1"}`), 404,
+			postBody("probe", `{"name":"see","ref":"x1"}`), 404,
 			api.CodeUnknownPrefix},
 		{"POST", "/api/workspaces/general/posts",
-			entryBody("probe", `{"name":"see","ref":"e9"}`), 400,
+			postBody("probe", `{"name":"see","ref":"e9"}`), 400,
 			api.CodeLinkTargetNotFound},
 		{"GET", "/api/posts/E1", "", 400, api.CodeBadRequest},
 		{"GET", "/api/posts/e1/messages?after=1&latest=2", "", 400,
@@ -265,14 +265,14 @@ func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 	}
 }
 
-// TestUnreadableEntriesShowNoTextOverHTTP links open entries every way
-// a link may cross workspaces to protected ones holding SECRET, then
+// TestUnreadablePostsShowNoTextOverHTTP links open posts every way a
+// link may cross workspaces to protected ones holding SECRET, then
 // reads every open route without a credential.
-func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
+func TestUnreadablePostsShowNoTextOverHTTP(t *testing.T) {
 	s := startServer(t, testConfig(t))
 	addOpen := func(subject string, links ...string) {
 		s.must(t, "POST", "/api/workspaces/general/posts",
-			entryBody(subject, links...), personalSecret, http.StatusCreated)
+			postBody(subject, links...), personalSecret, http.StatusCreated)
 	}
 	addSecret := func(links ...string) {
 		body := `{"subject":"SECRET","body":"SECRET",` +
@@ -288,8 +288,8 @@ func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
 	addOpen("open see", `{"name":"see","ref":"p1"}`)      // e2
 	addOpen("open child", `{"name":"parent","ref":"e1"}`) // e3
 	addSecret(`{"name":"supersedes","ref":"e3"}`)         // p2
-	for _, entry := range []string{"p1", "p2"} {
-		s.must(t, "POST", "/api/posts/"+entry+"/messages",
+	for _, post := range []string{"p1", "p2"} {
+		s.must(t, "POST", "/api/posts/"+post+"/messages",
 			`{"body":"SECRET","origin":{"user":"SECRET"}}`, personalSecret,
 			http.StatusCreated)
 	}
@@ -297,12 +297,12 @@ func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
 		`{"body":"open","origin":{}}`, "", http.StatusCreated)
 
 	var paths []string
-	for _, entry := range []string{"e1", "e2", "e3"} {
-		paths = append(paths, "/api/posts/"+entry,
-			"/api/posts/"+entry+"/tree?include-superseded=true",
-			"/api/posts/"+entry+"/messages",
+	for _, post := range []string{"e1", "e2", "e3"} {
+		paths = append(paths, "/api/posts/"+post,
+			"/api/posts/"+post+"/tree?include-superseded=true",
+			"/api/posts/"+post+"/messages",
 			"/api/workspaces/general/posts?include-superseded=true&"+
-				"include-chat=true&under="+entry)
+				"include-chat=true&under="+post)
 	}
 	paths = append(paths,
 		"/api/workspaces/general/posts?include-superseded=true",
@@ -328,25 +328,25 @@ func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
 	}
 
 	_, crossParent := s.do(t, "POST", "/api/workspaces/general/posts",
-		entryBody("child", `{"name":"parent","ref":"p1"}`), personalSecret)
+		postBody("child", `{"name":"parent","ref":"p1"}`), personalSecret)
 	if !strings.Contains(crossParent, "a parent must be in the same "+
 		"workspace") {
 		t.Fatalf("a parent in another workspace gave %s", crossParent)
 	}
 
 	_, unreadable := s.do(t, "POST", "/api/workspaces/general/posts",
-		entryBody("probe", `{"name":"see","ref":"p1"}`), "")
+		postBody("probe", `{"name":"see","ref":"p1"}`), "")
 	_, missing := s.do(t, "POST", "/api/workspaces/general/posts",
-		entryBody("probe", `{"name":"see","ref":"p9"}`), "")
+		postBody("probe", `{"name":"see","ref":"p9"}`), "")
 	if strings.Replace(missing, "p9", "p1", 1) != unreadable {
-		t.Fatalf("linking to an unreadable entry gave %s, but to a "+
+		t.Fatalf("linking to an unreadable post gave %s, but to a "+
 			"missing one %s", unreadable, missing)
 	}
 }
 
 func TestRefusedEditsAndDeletesOverHTTP(t *testing.T) {
 	s := startServer(t, testConfig(t))
-	s.must(t, "POST", "/api/workspaces/general/posts", entryBody("mine"),
+	s.must(t, "POST", "/api/workspaces/general/posts", postBody("mine"),
 		"", http.StatusCreated)
 	s.must(t, "POST", "/api/posts/e1/messages",
 		`{"body":"hi","origin":{"user":"duck"}}`, "", http.StatusCreated)
@@ -405,17 +405,17 @@ func TestRefusedEditsAndDeletesOverHTTP(t *testing.T) {
 	}
 }
 
-// No request names an origin or creation time but the one that adds an
-// entry or posts a message, so they stay as that request recorded them.
+// No request names an origin or creation time but the one that adds a
+// post or posts a message, so they stay as that request recorded them.
 func TestNoRequestChangesAnOriginOverHTTP(t *testing.T) {
 	s := startServer(t, testConfig(t))
 	origin := `{"user":"duck","host":"nest","dir":"/pond",` +
 		`"claude_session":"s1"}`
-	var entry api.Post
+	var post api.Post
 	if err := json.Unmarshal([]byte(s.must(t, "POST",
 		"/api/workspaces/general/posts",
 		`{"subject":"mine","project":"p","origin":`+origin+`}`, "",
-		http.StatusCreated)), &entry); err != nil {
+		http.StatusCreated)), &post); err != nil {
 		t.Fatal(err)
 	}
 	var message api.Message
@@ -460,9 +460,9 @@ func TestNoRequestChangesAnOriginOverHTTP(t *testing.T) {
 		"", http.StatusOK)), &detail); err != nil {
 		t.Fatal(err)
 	}
-	if detail.Origin != entry.Origin || !detail.Created.Equal(entry.Created) {
-		t.Fatalf("entry origin %+v created %v, want %+v created %v",
-			detail.Origin, detail.Created, entry.Origin, entry.Created)
+	if detail.Origin != post.Origin || !detail.Created.Equal(post.Created) {
+		t.Fatalf("post origin %+v created %v, want %+v created %v",
+			detail.Origin, detail.Created, post.Origin, post.Created)
 	}
 	var page api.ChatPage
 	if err := json.Unmarshal([]byte(s.must(t, "GET",
@@ -479,7 +479,7 @@ func TestNoRequestChangesAnOriginOverHTTP(t *testing.T) {
 
 func TestChatReadsOverHTTP(t *testing.T) {
 	s := startServer(t, testConfig(t))
-	s.must(t, "POST", "/api/workspaces/general/posts", entryBody("chat"),
+	s.must(t, "POST", "/api/workspaces/general/posts", postBody("chat"),
 		"", http.StatusCreated)
 	for _, body := range []string{"one", "two", "three"} {
 		s.must(t, "POST", "/api/posts/e1/messages",
@@ -522,7 +522,7 @@ func TestChatReadsOverHTTP(t *testing.T) {
 // session, not every change by the user.
 func TestExcludedSessionlessKeyOverHTTP(t *testing.T) {
 	s := startServer(t, testConfig(t))
-	s.must(t, "POST", "/api/workspaces/general/posts", entryBody("chat"),
+	s.must(t, "POST", "/api/workspaces/general/posts", postBody("chat"),
 		"", http.StatusCreated)
 	for _, session := range []string{"", "lead", ""} {
 		s.must(t, "POST", "/api/posts/e1/messages",

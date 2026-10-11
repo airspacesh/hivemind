@@ -19,13 +19,14 @@ func addAs(
 }
 
 func postAs(
-	t *testing.T, store *Store, user string, entry api.Ref, body string,
+	t *testing.T, store *Store, user string, post api.Ref, body string,
 ) api.Message {
 	t.Helper()
-	message, err := store.Post(context.Background(), store.mustKey(entry),
+	message, err := store.PostMessage(context.Background(),
+		store.mustKey(post),
 		api.PostMessageRequest{Body: body, Origin: api.Origin{User: user}})
 	if err != nil {
-		t.Fatalf("posting to %s as %s: %v", entry, user, err)
+		t.Fatalf("posting to %s as %s: %v", post, user, err)
 	}
 	return message
 }
@@ -38,7 +39,7 @@ func assertNotOwner(t *testing.T, err error, want string) {
 	}
 }
 
-func TestOnlyThePosterCanEditOrDeleteAnEntry(t *testing.T) {
+func TestOnlyThePosterCanEditOrDeleteAPost(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	topic := addAs(t, store, "alice", "topic")
@@ -64,7 +65,7 @@ func TestOnlyThePosterCanEditOrDeleteAnEntry(t *testing.T) {
 	if got := mustGet(t, store, topic.Ref); got.Subject != "topic" ||
 		len(got.Metadata) != 0 || len(got.Links) != 0 ||
 		!got.Modified.Equal(topic.Modified) {
-		t.Fatalf("a refused change changed the entry: %+v", got)
+		t.Fatalf("a refused change changed the post: %+v", got)
 	}
 
 	edited, err := store.Edit(ctx, everyAccess(store), key,
@@ -74,7 +75,7 @@ func TestOnlyThePosterCanEditOrDeleteAnEntry(t *testing.T) {
 	}
 }
 
-func TestOthersCanStillAddUnderAnEntryAndChatOnIt(t *testing.T) {
+func TestOthersCanStillAddUnderAPostAndChatOnIt(t *testing.T) {
 	store := openTestStore(t)
 	topic := addAs(t, store, "alice", "topic")
 
@@ -101,8 +102,8 @@ func TestOnlyThePosterCanEditOrDeleteAMessage(t *testing.T) {
 	refusal := "e1-m1 was posted by alice, so only alice can edit or " +
 		"delete it"
 
-	// The entry's own poster cannot edit its chat either, even with
-	// text that would change nothing.
+	// The post's own poster cannot edit its chat either, even with text
+	// that would change nothing.
 	for _, body := range []string{"a different answer", "the answer"} {
 		_, _, err := store.EditMessage(ctx, key, message.Number,
 			api.EditMessageRequest{Body: body, User: "bob"})
@@ -128,26 +129,26 @@ func TestOnlyThePosterCanEditOrDeleteAMessage(t *testing.T) {
 func TestNobodyCanEditOrDeleteWhatRecordsNoUser(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	entry, err := store.Add(ctx, everyAccess(store),
+	post, err := store.Add(ctx, everyAccess(store),
 		workspaceID(t, store, "general"),
 		api.AddPostRequest{Subject: "anonymous"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	message := postAs(t, store, "", entry.Ref, "anonymous")
-	key := store.mustKey(entry.Ref)
+	message := postAs(t, store, "", post.Ref, "anonymous")
+	key := store.mustKey(post.Ref)
 
 	subject := "claimed"
-	entryRefusal := "e1 records no user, so nobody can edit or delete it"
+	postRefusal := "e1 records no user, so nobody can edit or delete it"
 	messageRefusal := "e1-m1 records no user, so nobody can edit or " +
 		"delete it"
 	for _, user := range []string{"duck", ""} {
 		_, err := store.Edit(ctx, everyAccess(store), key,
 			api.EditPostRequest{Subject: &subject, User: user})
-		assertNotOwner(t, err, entryRefusal)
+		assertNotOwner(t, err, postRefusal)
 		_, err = store.Delete(ctx, everyAccess(store), key,
 			api.DeleteRequest{User: user})
-		assertNotOwner(t, err, entryRefusal)
+		assertNotOwner(t, err, postRefusal)
 		_, _, err = store.EditMessage(ctx, key, message.Number,
 			api.EditMessageRequest{Body: "claimed", User: user})
 		assertNotOwner(t, err, messageRefusal)

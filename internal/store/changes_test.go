@@ -24,7 +24,7 @@ func readChanges(
 	return page
 }
 
-// changeIDs names each change in a page by the entry or message that
+// changeIDs names each change in a page by the post or message that
 // changed.
 func changeIDs(page api.ChangesPage) []string {
 	ids := []string{}
@@ -59,9 +59,9 @@ func TestChangesPageOnceEachInTheOrderTheyHappened(t *testing.T) {
 	store := openTestStore(t)
 	first := mustAdd(t, store, "first", "", nil)
 	second := mustAdd(t, store, "second", "", nil)
-	mustPost(t, store, second.Ref, "hi")
-	mustPost(t, store, first.Ref, "hi")
-	mustPost(t, store, first.Ref, "again")
+	mustPostMessage(t, store, second.Ref, "hi")
+	mustPostMessage(t, store, first.Ref, "hi")
+	mustPostMessage(t, store, first.Ref, "again")
 	mustAdd(t, store, "third", "", nil)
 
 	want := []string{"e1", "e2", "e2-m1", "e1-m1", "e1-m2", "e3"}
@@ -77,14 +77,14 @@ func TestChangesListAChangeAgainOnlyWhenItChangesAfterTheCursor(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	seen := mustAdd(t, store, "seen", "", nil)
-	message := mustPost(t, store, seen.Ref, "hi")
+	message := mustPostMessage(t, store, seen.Ref, "hi")
 	_, cursor := readAllChanges(t, store, 0, 10)
 
 	unseen := mustAdd(t, store, "unseen", "", nil)
-	for _, entry := range []api.Post{unseen, seen, unseen} {
+	for _, post := range []api.Post{unseen, seen, unseen} {
 		subject := "edited"
 		if _, err := store.Edit(ctx, everyAccess(store),
-			store.mustKey(entry.Ref),
+			store.mustKey(post.Ref),
 			api.EditPostRequest{Subject: &subject, User: testUser},
 		); err != nil {
 			t.Fatal(err)
@@ -122,8 +122,8 @@ func TestChangesLeaveOutEditsToLinksAlone(t *testing.T) {
 
 func TestLatestRevisionSkipsEveryChangeSoFar(t *testing.T) {
 	store := openTestStore(t)
-	entry := mustAdd(t, store, "first", "", nil)
-	mustPost(t, store, entry.Ref, "hi")
+	post := mustAdd(t, store, "first", "", nil)
+	mustPostMessage(t, store, post.Ref, "hi")
 	addTo(t, store, "personal", api.AddPostRequest{Subject: "private"})
 	latest, err := store.LatestRevision(context.Background())
 	if err != nil {
@@ -133,7 +133,7 @@ func TestLatestRevisionSkipsEveryChangeSoFar(t *testing.T) {
 		t.Fatalf("after the latest revision read %v", got)
 	}
 
-	mustPost(t, store, entry.Ref, "later")
+	mustPostMessage(t, store, post.Ref, "later")
 	if got := changeIDs(readChanges(t, store, latest, 10)); !reflect.DeepEqual(
 		got, []string{"e1-m2"}) {
 		t.Fatalf("read %v, want the later message alone", got)
@@ -143,8 +143,8 @@ func TestLatestRevisionSkipsEveryChangeSoFar(t *testing.T) {
 func TestRefusedEditsTakeNoRevision(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	entry := mustAdd(t, store, "mine", "", nil)
-	message := mustPost(t, store, entry.Ref, "hi")
+	post := mustAdd(t, store, "mine", "", nil)
+	message := mustPostMessage(t, store, post.Ref, "hi")
 	before, err := store.LatestRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -152,11 +152,11 @@ func TestRefusedEditsTakeNoRevision(t *testing.T) {
 
 	subject := "taken"
 	if _, err := store.Edit(ctx, everyAccess(store),
-		store.mustKey(entry.Ref), api.EditPostRequest{
+		store.mustKey(post.Ref), api.EditPostRequest{
 			Subject: &subject, User: "heron"}); err == nil {
-		t.Fatal("another user edited the entry")
+		t.Fatal("another user edited the post")
 	}
-	if _, _, err := store.EditMessage(ctx, store.mustKey(entry.Ref),
+	if _, _, err := store.EditMessage(ctx, store.mustKey(post.Ref),
 		message.Number, api.EditMessageRequest{
 			Body: "taken", User: "heron"}); err == nil {
 		t.Fatal("another user edited the message")
@@ -174,14 +174,14 @@ func TestRefusedEditsTakeNoRevision(t *testing.T) {
 func TestChangesReadDuringWritesMissNone(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	entry := mustAdd(t, store, "busy", "", nil)
-	const posts = 40
+	post := mustAdd(t, store, "busy", "", nil)
+	const messages = 40
 	var wg sync.WaitGroup
-	for range posts {
+	for range messages {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := store.Post(ctx, store.mustKey(entry.Ref),
+			if _, err := store.PostMessage(ctx, store.mustKey(post.Ref),
 				api.PostMessageRequest{Body: "hi"}); err != nil {
 				t.Errorf("posting: %v", err)
 			}
@@ -203,8 +203,8 @@ func TestChangesReadDuringWritesMissNone(t *testing.T) {
 		default:
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the posts did not finish in a minute, after %d "+
-				"changes read", len(read))
+			t.Fatalf("the messages were not all sent in a minute, "+
+				"after %d changes read", len(read))
 		}
 		var ids []string
 		ids, cursor = readAllChanges(t, store, cursor, 3)
@@ -212,8 +212,8 @@ func TestChangesReadDuringWritesMissNone(t *testing.T) {
 			read[id]++
 		}
 	}
-	if len(read) != posts+1 {
-		t.Fatalf("read %d changes, want %d: %v", len(read), posts+1, read)
+	if len(read) != messages+1 {
+		t.Fatalf("read %d changes, want %d: %v", len(read), messages+1, read)
 	}
 	for id, count := range read {
 		if count != 1 {
@@ -229,7 +229,7 @@ func TestChangesStayInTheirWorkspace(t *testing.T) {
 		Subject: "PRIVATEMARK",
 		Links:   []api.Link{link("see", open.Ref)},
 	})
-	mustPost(t, store, private.Ref, "PRIVATEMARK")
+	mustPostMessage(t, store, private.Ref, "PRIVATEMARK")
 	if _, err := store.Edit(context.Background(), everyAccess(store),
 		store.mustKey(open.Ref), api.EditPostRequest{
 			AddLinks: []api.Link{link("see", private.Ref)},
@@ -293,10 +293,10 @@ func latestRevision(t *testing.T, store *Store) int64 {
 
 // postFrom posts a message with the given origin.
 func postFrom(
-	t *testing.T, store *Store, entry api.Ref, body string, origin api.Origin,
+	t *testing.T, store *Store, post api.Ref, body string, origin api.Origin,
 ) {
 	t.Helper()
-	if _, err := store.Post(context.Background(), store.mustKey(entry),
+	if _, err := store.PostMessage(context.Background(), store.mustKey(post),
 		api.PostMessageRequest{Body: body, Origin: origin}); err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,7 @@ func TestFilteredChangesShowEachMatchOnceAtAnyLimitAndSpan(t *testing.T) {
 	postFrom(t, store, pond.Ref, "honk", bare)
 	addTo(t, store, "general", api.AddPostRequest{
 		Project: "pond", Subject: "reeds", Origin: heron})
-	// An edit stores no origin, so the entry keeps its creator's key.
+	// An edit stores no origin, so the post keeps its creator's key.
 	subject := "pond, edited"
 	if _, err := store.Edit(context.Background(), everyAccess(store),
 		store.mustKey(pond.Ref), api.EditPostRequest{
@@ -376,9 +376,9 @@ func TestFilteredChangesShowEachMatchOnceAtAnyLimitAndSpan(t *testing.T) {
 func TestChangesCursorPassesWhatDoesNotMatch(t *testing.T) {
 	store := openTestStore(t)
 	duck := Filter{Project: []FieldCond{{Value: "duck"}}}
-	entry := addTo(t, store, "general", api.AddPostRequest{
+	post := addTo(t, store, "general", api.AddPostRequest{
 		Project: "heron", Subject: "not a duck"})
-	mustPost(t, store, entry.Ref, "still not")
+	mustPostMessage(t, store, post.Ref, "still not")
 	latest := latestRevision(t, store)
 
 	page, err := store.Changes(context.Background(), everyAccess(store),
@@ -431,10 +431,10 @@ func TestExcludedOriginKeysMatchExactly(t *testing.T) {
 		{User: "Duck", ClaudeSession: "lead"},
 		{User: testUser, ClaudeSession: "Lead"},
 	}
-	entry := addTo(t, store, "general", api.AddPostRequest{
+	post := addTo(t, store, "general", api.AddPostRequest{
 		Subject: "chat", Origin: api.Origin{User: "nobody"}})
 	for i, origin := range origins {
-		postFrom(t, store, entry.Ref, fmt.Sprint(i+1), origin)
+		postFrom(t, store, post.Ref, fmt.Sprint(i+1), origin)
 	}
 
 	for _, test := range []struct {
@@ -459,7 +459,7 @@ func TestExcludedOriginKeysMatchExactly(t *testing.T) {
 	}
 }
 
-func TestChangesUnderAnEntryKeepToItsSubtree(t *testing.T) {
+func TestChangesUnderAPostKeepToItsSubtree(t *testing.T) {
 	store := openTestStore(t)
 	root := mustAdd(t, store, "root", "", nil)
 	child := addTo(t, store, "general", api.AddPostRequest{
@@ -467,8 +467,8 @@ func TestChangesUnderAnEntryKeepToItsSubtree(t *testing.T) {
 	grandchild := addTo(t, store, "general", api.AddPostRequest{
 		Subject: "grandchild", Links: []api.Link{link("parent", child.Ref)}})
 	other := mustAdd(t, store, "other", "", nil)
-	mustPost(t, store, grandchild.Ref, "deep")
-	mustPost(t, store, other.Ref, "aside")
+	mustPostMessage(t, store, grandchild.Ref, "deep")
+	mustPostMessage(t, store, other.Ref, "aside")
 
 	for _, test := range []struct {
 		under api.Ref
@@ -487,18 +487,18 @@ func TestChangesUnderAnEntryKeepToItsSubtree(t *testing.T) {
 	}
 }
 
-// A read that checks a few revisions at a time, while others post,
+// A read that checks a few revisions at a time, while others send,
 // still shows every message that matches exactly once.
 func TestFilteredChangesReadDuringWritesMissNone(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	entry := mustAdd(t, store, "busy", "", nil)
+	post := mustAdd(t, store, "busy", "", nil)
 	mine := api.Origin{User: testUser, ClaudeSession: "mine"}
 	theirs := api.Origin{User: testUser, ClaudeSession: "theirs"}
 	start := latestRevision(t, store)
-	const posts = 40
+	const messages = 40
 	var wg sync.WaitGroup
-	for i := range posts {
+	for i := range messages {
 		origin := mine
 		if i%2 == 0 {
 			origin = theirs
@@ -506,7 +506,7 @@ func TestFilteredChangesReadDuringWritesMissNone(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := store.Post(ctx, store.mustKey(entry.Ref),
+			if _, err := store.PostMessage(ctx, store.mustKey(post.Ref),
 				api.PostMessageRequest{Body: "hi", Origin: origin}); err != nil {
 				t.Errorf("posting: %v", err)
 			}
@@ -529,8 +529,8 @@ func TestFilteredChangesReadDuringWritesMissNone(t *testing.T) {
 		default:
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the posts did not finish in a minute, after %d "+
-				"changes read", len(read))
+			t.Fatalf("the messages were not all sent in a minute, "+
+				"after %d changes read", len(read))
 		}
 		var ids []string
 		ids, cursor = readAllMatching(t, store, cursor, Filter{}, exclude, 2,
@@ -540,13 +540,13 @@ func TestFilteredChangesReadDuringWritesMissNone(t *testing.T) {
 		}
 	}
 
-	page, err := store.Messages(ctx, store.mustKey(entry.Ref),
-		api.ChatBound{}, Filter{}, exclude, posts)
+	page, err := store.Messages(ctx, store.mustKey(post.Ref),
+		api.ChatBound{}, Filter{}, exclude, messages)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(read) != posts/2 || len(page.Messages) != posts/2 {
-		t.Fatalf("read %d changes, want %d: %v", len(read), posts/2, read)
+	if len(read) != messages/2 || len(page.Messages) != messages/2 {
+		t.Fatalf("read %d changes, want %d: %v", len(read), messages/2, read)
 	}
 	for _, message := range page.Messages {
 		if read[message.Ref().String()] != 1 {

@@ -18,17 +18,16 @@ var (
 	ErrParentWorkspace = errors.New("a parent must be in the same workspace")
 )
 
-// acyclicLinks are the link names whose chains must never loop: an
-// entry cannot be its own ancestor, nor supersede itself.
+// acyclicLinks are the link names whose chains must never loop: a post
+// cannot be its own ancestor, nor supersede itself.
 var acyclicLinks = map[string]bool{
 	api.ParentLink:     true,
 	api.SupersedesLink: true,
 }
 
-// supersededClause is true for an entry e that another entry
-// supersedes.
+// supersededClause is true for a post e that another post supersedes.
 const supersededClause = `EXISTS (
-	SELECT 1 FROM entry_links AS superseding
+	SELECT 1 FROM post_links AS superseding
 	WHERE superseding.target_workspace_id = e.workspace_id
 		AND superseding.target_id = e.id
 		AND superseding.name = 'supersedes'
@@ -46,7 +45,7 @@ func (v view) reaches(
 			SELECT ?, ?
 			UNION
 			SELECT l.target_workspace_id, l.target_id
-			FROM entry_links AS l JOIN reach
+			FROM post_links AS l JOIN reach
 				ON l.source_workspace_id = reach.workspace_id
 				AND l.source_id = reach.id
 			WHERE l.name = ?
@@ -62,7 +61,7 @@ func (v view) reaches(
 	return found, nil
 }
 
-// addLink links source to an entry the request can read. A target it
+// addLink links source to a post the request can read. A target it
 // cannot read is refused as if it were missing, so a link cannot probe
 // another workspace.
 func (v view) addLink(ctx context.Context, source Key, link api.Link) error {
@@ -77,8 +76,8 @@ func (v view) addLink(ctx context.Context, source Key, link api.Link) error {
 	if !v.access.CanRead(target.Workspace) {
 		return fmt.Errorf("%w: %s", ErrLinkTarget, link.Ref)
 	}
-	err = v.checkEntryExists(ctx, target)
-	if errors.Is(err, ErrEntryNotFound) {
+	err = v.checkPostExists(ctx, target)
+	if errors.Is(err, ErrPostNotFound) {
 		return fmt.Errorf("%w: %s", ErrLinkTarget, link.Ref)
 	}
 	if err != nil {
@@ -87,7 +86,7 @@ func (v view) addLink(ctx context.Context, source Key, link api.Link) error {
 
 	if link.Name == api.ParentLink {
 		if _, err := v.tx.ExecContext(ctx, `
-			DELETE FROM entry_links
+			DELETE FROM post_links
 			WHERE source_workspace_id = ? AND source_id = ? AND name = ?
 				AND NOT (target_workspace_id = ? AND target_id = ?)`,
 			source.Workspace, source.ID, api.ParentLink,
@@ -107,7 +106,7 @@ func (v view) addLink(ctx context.Context, source Key, link api.Link) error {
 		}
 	}
 	if _, err := v.tx.ExecContext(ctx, `
-		INSERT INTO entry_links (source_workspace_id, source_id, name,
+		INSERT INTO post_links (source_workspace_id, source_id, name,
 			target_workspace_id, target_id)
 		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT DO NOTHING`,
@@ -126,7 +125,7 @@ func (v view) removeLink(
 		return err
 	}
 	result, err := v.tx.ExecContext(ctx, `
-		DELETE FROM entry_links
+		DELETE FROM post_links
 		WHERE source_workspace_id = ? AND source_id = ? AND name = ?
 			AND target_workspace_id = ? AND target_id = ?`,
 		source.Workspace, source.ID, link.Name, target.Workspace, target.ID,
@@ -145,8 +144,8 @@ func (v view) removeLink(
 	return nil
 }
 
-// writeLinks applies an entry's link changes: removals first, then
-// additions, then the cap on how many links the entry holds.
+// writeLinks applies a post's link changes: removals first, then
+// additions, then the cap on how many links the post holds.
 func (v view) writeLinks(
 	ctx context.Context,
 	source Key,
@@ -156,7 +155,7 @@ func (v view) writeLinks(
 ) error {
 	for _, name := range removeNames {
 		if _, err := v.tx.ExecContext(ctx, `
-			DELETE FROM entry_links
+			DELETE FROM post_links
 			WHERE source_workspace_id = ? AND source_id = ? AND name = ?`,
 			source.Workspace, source.ID, name,
 		); err != nil {
@@ -179,7 +178,7 @@ func (v view) writeLinks(
 
 	var count int
 	if err := v.tx.QueryRowContext(ctx, `
-		SELECT count(*) FROM entry_links
+		SELECT count(*) FROM post_links
 		WHERE source_workspace_id = ? AND source_id = ?`,
 		source.Workspace, source.ID,
 	).Scan(&count); err != nil {
@@ -193,7 +192,7 @@ func (v view) writeLinks(
 }
 
 // readLinks reads (name, workspace, id) rows into links, leaving out
-// entries in workspaces the config no longer names, which have no ref.
+// posts in workspaces the config no longer names, which have no ref.
 func (v view) readLinks(
 	ctx context.Context, query string, args ...any,
 ) ([]api.Link, error) {
@@ -218,7 +217,7 @@ func (v view) readLinks(
 
 func (v view) linksFrom(ctx context.Context, key Key) ([]api.Link, error) {
 	links, err := v.readLinks(ctx, `
-		SELECT name, target_workspace_id, target_id FROM entry_links
+		SELECT name, target_workspace_id, target_id FROM post_links
 		WHERE source_workspace_id = ? AND source_id = ?
 		ORDER BY name, target_workspace_id, target_id`,
 		key.Workspace, key.ID,
@@ -231,7 +230,7 @@ func (v view) linksFrom(ctx context.Context, key Key) ([]api.Link, error) {
 
 func (v view) linksTo(ctx context.Context, key Key) ([]api.Link, error) {
 	links, err := v.readLinks(ctx, `
-		SELECT name, source_workspace_id, source_id FROM entry_links
+		SELECT name, source_workspace_id, source_id FROM post_links
 		WHERE target_workspace_id = ? AND target_id = ?
 		ORDER BY name, source_workspace_id, source_id`,
 		key.Workspace, key.ID,
@@ -246,13 +245,13 @@ func (v view) supersedersOf(
 	ctx context.Context, key Key,
 ) ([]api.Ref, error) {
 	links, err := v.readLinks(ctx, `
-		SELECT name, source_workspace_id, source_id FROM entry_links
+		SELECT name, source_workspace_id, source_id FROM post_links
 		WHERE target_workspace_id = ? AND target_id = ? AND name = ?
 		ORDER BY source_workspace_id, source_id`,
 		key.Workspace, key.ID, api.SupersedesLink,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("reading superseding entries: %w", err)
+		return nil, fmt.Errorf("reading superseding posts: %w", err)
 	}
 	var refs []api.Ref
 	for _, link := range links {
@@ -261,11 +260,11 @@ func (v view) supersedersOf(
 	return refs, nil
 }
 
-// attachLinks fills in each entry's outgoing links and the entries that
+// attachLinks fills in each post's outgoing links and the posts that
 // supersede it.
-func (v view) attachLinks(ctx context.Context, entries []api.Post) error {
-	for i := range entries {
-		key := v.store.mustKey(entries[i].Ref)
+func (v view) attachLinks(ctx context.Context, posts []api.Post) error {
+	for i := range posts {
+		key := v.store.mustKey(posts[i].Ref)
 		links, err := v.linksFrom(ctx, key)
 		if err != nil {
 			return err
@@ -274,21 +273,21 @@ func (v view) attachLinks(ctx context.Context, entries []api.Post) error {
 		if err != nil {
 			return err
 		}
-		entries[i].Links = links
-		entries[i].SupersededBy = supersededBy
+		posts[i].Links = links
+		posts[i].SupersededBy = supersededBy
 	}
 	return nil
 }
 
-// entryRef describes an entry by its ref, and by its subject, whether
-// it is deleted, and its superseders when the request can read it.
-func (v view) entryRef(ctx context.Context, key Key) (api.PostRef, error) {
+// postRef describes a post by its ref, and by its subject, whether it
+// is deleted, and its superseders when the request can read it.
+func (v view) postRef(ctx context.Context, key Key) (api.PostRef, error) {
 	described := api.PostRef{Ref: v.store.mustRef(key)}
 	if !v.access.CanRead(key.Workspace) {
 		return described, nil
 	}
 	if err := v.tx.QueryRowContext(ctx, `
-		SELECT subject, deleted FROM entries
+		SELECT subject, deleted FROM posts
 		WHERE workspace_id = ? AND id = ?`, key.Workspace, key.ID,
 	).Scan(&described.Subject, &described.Deleted); err != nil {
 		return api.PostRef{}, fmt.Errorf("reading %s: %w",
@@ -299,16 +298,16 @@ func (v view) entryRef(ctx context.Context, key Key) (api.PostRef, error) {
 	return described, err
 }
 
-// pathUp lists an entry's ancestors, its parent first.
+// pathUp lists a post's ancestors, its parent first.
 func (v view) pathUp(ctx context.Context, key Key) ([]Key, error) {
 	rows, err := v.tx.QueryContext(ctx, `
 		WITH RECURSIVE up(workspace_id, id, depth) AS (
-			SELECT target_workspace_id, target_id, 1 FROM entry_links
+			SELECT target_workspace_id, target_id, 1 FROM post_links
 			WHERE source_workspace_id = ? AND source_id = ?
 				AND name = 'parent'
 			UNION ALL
 			SELECT l.target_workspace_id, l.target_id, up.depth + 1
-			FROM entry_links AS l JOIN up
+			FROM post_links AS l JOIN up
 				ON l.source_workspace_id = up.workspace_id
 				AND l.source_id = up.id
 			WHERE l.name = 'parent'
@@ -330,8 +329,7 @@ func (v view) pathUp(ctx context.Context, key Key) ([]Key, error) {
 	return path, rows.Err()
 }
 
-// ancestors lists an entry's ancestors, from the root down to its
-// parent.
+// ancestors lists a post's ancestors, from the root down to its parent.
 func (v view) ancestors(
 	ctx context.Context, key Key,
 ) ([]api.PostRef, error) {
@@ -342,7 +340,7 @@ func (v view) ancestors(
 
 	path := make([]api.PostRef, len(upward))
 	for i, ancestor := range upward {
-		described, err := v.entryRef(ctx, ancestor)
+		described, err := v.postRef(ctx, ancestor)
 		if err != nil {
 			return nil, err
 		}
@@ -351,22 +349,22 @@ func (v view) ancestors(
 	return path, nil
 }
 
-// Detail returns an entry with its place in its tree, the links that
+// Detail returns a post with its place in its tree, the links that
 // point at it, its child count, and a summary of its chat.
 func (s *Store) Detail(
 	ctx context.Context, access Access, key Key,
 ) (api.PostDetail, error) {
 	v, err := s.begin(ctx, access, true)
 	if err != nil {
-		return api.PostDetail{}, fmt.Errorf("getting entry: %w", err)
+		return api.PostDetail{}, fmt.Errorf("getting post: %w", err)
 	}
 	defer v.tx.Rollback()
 
-	entry, err := v.getEntry(ctx, key)
+	post, err := v.getPost(ctx, key)
 	if err != nil {
 		return api.PostDetail{}, err
 	}
-	listed, err := v.listEntries(ctx, []api.Post{entry})
+	listed, err := v.listPosts(ctx, []api.Post{post})
 	if err != nil {
 		return api.PostDetail{}, err
 	}
@@ -375,7 +373,7 @@ func (s *Store) Detail(
 		return api.PostDetail{}, err
 	}
 	if err := v.tx.QueryRowContext(ctx, `
-		SELECT count(*) FROM entry_links AS l JOIN entries AS e
+		SELECT count(*) FROM post_links AS l JOIN posts AS e
 			ON e.workspace_id = l.source_workspace_id AND e.id = l.source_id
 		WHERE l.target_workspace_id = ? AND l.target_id = ?
 			AND l.name = 'parent' AND NOT `+supersededClause,
@@ -384,13 +382,13 @@ func (s *Store) Detail(
 		return api.PostDetail{}, fmt.Errorf("counting children: %w", err)
 	}
 	if err := v.tx.QueryRowContext(ctx, `
-		SELECT count(*), coalesce(max(id), 0) FROM entry_messages
-		WHERE workspace_id = ? AND entry_id = ?`, key.Workspace, key.ID,
+		SELECT count(*), coalesce(max(id), 0) FROM post_messages
+		WHERE workspace_id = ? AND post_id = ?`, key.Workspace, key.ID,
 	).Scan(&detail.Messages, &detail.LastMessage); err != nil {
 		return api.PostDetail{}, fmt.Errorf("reading chat summary: %w", err)
 	}
 	if err := v.tx.Commit(); err != nil {
-		return api.PostDetail{}, fmt.Errorf("finishing entry read: %w", err)
+		return api.PostDetail{}, fmt.Errorf("finishing post read: %w", err)
 	}
 	return detail, nil
 }

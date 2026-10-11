@@ -16,28 +16,29 @@ import (
 	"github.com/airspacesh/workstream/internal/api"
 )
 
-func mustPost(
-	t *testing.T, store *Store, entry api.Ref, body string,
+func mustPostMessage(
+	t *testing.T, store *Store, post api.Ref, body string,
 ) api.Message {
 	t.Helper()
-	message, err := store.Post(context.Background(), store.mustKey(entry),
+	message, err := store.PostMessage(context.Background(),
+		store.mustKey(post),
 		api.PostMessageRequest{Body: body, Origin: api.Origin{User: testUser}})
 	if err != nil {
-		t.Fatalf("posting to %s: %v", entry, err)
+		t.Fatalf("posting to %s: %v", post, err)
 	}
 	return message
 }
 
-// ownEdit is an edit to a message by the user mustPost posts as.
+// ownEdit is an edit to a message by the user mustPostMessage posts as.
 func ownEdit(body string) api.EditMessageRequest {
 	return api.EditMessageRequest{Body: body, User: testUser}
 }
 
 func readChat(
-	t *testing.T, store *Store, entry api.Ref, since int64, limit int,
+	t *testing.T, store *Store, post api.Ref, since int64, limit int,
 ) api.ChatPage {
 	t.Helper()
-	page, err := store.Messages(context.Background(), store.mustKey(entry),
+	page, err := store.Messages(context.Background(), store.mustKey(post),
 		api.ChatBound{Number: since}, Filter{}, nil, limit)
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +57,7 @@ func chatText(page api.ChatPage) string {
 		strings.Join(text, " "), page.Cursor, page.Remaining)
 }
 
-func TestMessageNumbersCountFromOnePerEntry(t *testing.T) {
+func TestMessageNumbersCountFromOnePerPost(t *testing.T) {
 	store := openTestStore(t)
 	first := mustAdd(t, store, "first", "", nil)
 	second := mustAdd(t, store, "second", "", nil)
@@ -64,9 +65,10 @@ func TestMessageNumbersCountFromOnePerEntry(t *testing.T) {
 		api.AddPostRequest{Subject: "private"})
 
 	var got []string
-	for _, entry := range []api.Ref{first.Ref, second.Ref, first.Ref,
+	for _, post := range []api.Ref{first.Ref, second.Ref, first.Ref,
 		private.Ref, first.Ref} {
-		got = append(got, mustPost(t, store, entry, "hi").Ref().String())
+		message := mustPostMessage(t, store, post, "hi")
+		got = append(got, message.Ref().String())
 	}
 	want := []string{"e1-m1", "e2-m1", "e1-m2", "p1-m1", "e1-m3"}
 	if !reflect.DeepEqual(got, want) {
@@ -79,16 +81,16 @@ func TestConcurrentPostsGetUniqueNumbersCountingFromOne(t *testing.T) {
 	first := mustAdd(t, store, "first", "", nil)
 	second := mustAdd(t, store, "second", "", nil)
 
-	const perEntry = 10
+	const perPost = 10
 	var wg sync.WaitGroup
-	refs := make(chan string, 2*perEntry)
-	for i := range 2 * perEntry {
+	refs := make(chan string, 2*perPost)
+	for i := range 2 * perPost {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			entry := []api.Ref{first.Ref, second.Ref}[i%2]
-			message, err := store.Post(context.Background(),
-				store.mustKey(entry), api.PostMessageRequest{Body: "hi"})
+			post := []api.Ref{first.Ref, second.Ref}[i%2]
+			message, err := store.PostMessage(context.Background(),
+				store.mustKey(post), api.PostMessageRequest{Body: "hi"})
 			if err != nil {
 				t.Errorf("posting: %v", err)
 				return
@@ -105,9 +107,9 @@ func TestConcurrentPostsGetUniqueNumbersCountingFromOne(t *testing.T) {
 		}
 		seen[ref] = true
 	}
-	for _, entry := range []string{"e1", "e2"} {
-		for n := 1; n <= perEntry; n++ {
-			if ref := fmt.Sprintf("%s-m%d", entry, n); !seen[ref] {
+	for _, post := range []string{"e1", "e2"} {
+		for n := 1; n <= perPost; n++ {
+			if ref := fmt.Sprintf("%s-m%d", post, n); !seen[ref] {
 				t.Fatalf("%s was never issued: %v", ref, seen)
 			}
 		}
@@ -116,13 +118,13 @@ func TestConcurrentPostsGetUniqueNumbersCountingFromOne(t *testing.T) {
 
 func TestChatReadsPageAfterTheCursor(t *testing.T) {
 	store := openTestStore(t)
-	entry := mustAdd(t, store, "thread", "", nil)
-	if got := chatText(readChat(t, store, entry.Ref, 0, 2)); got !=
+	post := mustAdd(t, store, "thread", "", nil)
+	if got := chatText(readChat(t, store, post.Ref, 0, 2)); got !=
 		" cursor=0 remaining=0" {
 		t.Fatalf("empty chat = %q", got)
 	}
 	for i := 1; i <= 5; i++ {
-		mustPost(t, store, entry.Ref, fmt.Sprint(i))
+		mustPostMessage(t, store, post.Ref, fmt.Sprint(i))
 	}
 
 	for _, test := range []struct {
@@ -136,7 +138,7 @@ func TestChatReadsPageAfterTheCursor(t *testing.T) {
 		{5, 2, " cursor=5 remaining=0"},
 		{9, 2, " cursor=9 remaining=0"},
 	} {
-		got := chatText(readChat(t, store, entry.Ref, test.since,
+		got := chatText(readChat(t, store, post.Ref, test.since,
 			test.limit))
 		if got != test.want {
 			t.Fatalf("since %d limit %d = %q, want %q", test.since,
@@ -145,7 +147,7 @@ func TestChatReadsPageAfterTheCursor(t *testing.T) {
 	}
 
 	latest, err := store.LatestMessages(context.Background(),
-		store.mustKey(entry.Ref), 3)
+		store.mustKey(post.Ref), 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,20 +157,20 @@ func TestChatReadsPageAfterTheCursor(t *testing.T) {
 	}
 	if _, err := store.Messages(context.Background(),
 		Key{Workspace: workspaceID(t, store, "general"), ID: 99},
-		api.ChatBound{}, Filter{}, nil, 2); !errors.Is(err, ErrEntryNotFound) {
-		t.Fatalf("reading a missing entry's chat = %v", err)
+		api.ChatBound{}, Filter{}, nil, 2); !errors.Is(err, ErrPostNotFound) {
+		t.Fatalf("reading a missing post's chat = %v", err)
 	}
 }
 
 func TestFilteredChatCursorPassesWhatDoesNotMatch(t *testing.T) {
 	store := openTestStore(t)
-	entry := mustAdd(t, store, "thread", "", nil)
+	post := mustAdd(t, store, "thread", "", nil)
 	lead := api.Origin{User: testUser, ClaudeSession: "lead"}
-	postFrom(t, store, entry.Ref, "asked", lead)
-	postFrom(t, store, entry.Ref, "quack", api.Origin{User: "heron"})
-	postFrom(t, store, entry.Ref, "asked again", lead)
-	postFrom(t, store, entry.Ref, "quack quack", api.Origin{User: testUser})
-	postFrom(t, store, entry.Ref, "noted", lead)
+	postFrom(t, store, post.Ref, "asked", lead)
+	postFrom(t, store, post.Ref, "quack", api.Origin{User: "heron"})
+	postFrom(t, store, post.Ref, "asked again", lead)
+	postFrom(t, store, post.Ref, "quack quack", api.Origin{User: testUser})
+	postFrom(t, store, post.Ref, "noted", lead)
 	notLead := &OriginKey{User: testUser, ClaudeSession: "lead"}
 	quack := Filter{Content: []FieldCond{{Value: "QUACK"}}}
 
@@ -191,7 +193,7 @@ func TestFilteredChatCursorPassesWhatDoesNotMatch(t *testing.T) {
 			"e1-m2:quack cursor=5 remaining=0"},
 	} {
 		page, err := store.Messages(context.Background(),
-			store.mustKey(entry.Ref), api.ChatBound{Number: test.since},
+			store.mustKey(post.Ref), api.ChatBound{Number: test.since},
 			test.filter, test.exclude, test.limit)
 		if err != nil {
 			t.Fatal(err)
@@ -207,16 +209,16 @@ func TestFilteredChatCursorPassesWhatDoesNotMatch(t *testing.T) {
 // after it, and its cursor passes every message it checked.
 func TestChatReadFromATime(t *testing.T) {
 	store := openTestStore(t)
-	entry := mustAdd(t, store, "thread", "", nil)
-	key := store.mustKey(entry.Ref)
+	post := mustAdd(t, store, "thread", "", nil)
+	key := store.mustKey(post.Ref)
 	hour := func(n int) time.Time {
 		return time.Date(2026, 10, 9, n, 0, 0, 0, time.UTC)
 	}
 	for n, body := range []string{"one", "two", "three"} {
-		message := mustPost(t, store, entry.Ref, body)
-		if _, err := store.db.Exec(`UPDATE entry_messages
+		message := mustPostMessage(t, store, post.Ref, body)
+		if _, err := store.db.Exec(`UPDATE post_messages
 			SET created_utc = ?1, modified_utc = ?1
-			WHERE workspace_id = ?2 AND entry_id = ?3 AND id = ?4`,
+			WHERE workspace_id = ?2 AND post_id = ?3 AND id = ?4`,
 			formatTime(hour(n)), key.Workspace, key.ID, message.Number,
 		); err != nil {
 			t.Fatal(err)
@@ -247,12 +249,12 @@ func TestChatReadFromATime(t *testing.T) {
 func TestEditsKeepTheirPlaceAndAreNotReadAgain(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	entry := mustAdd(t, store, "thread", "", nil)
-	question := mustPost(t, store, entry.Ref, "question")
-	mustPost(t, store, entry.Ref, "answer")
-	cursor := readChat(t, store, entry.Ref, 0, 20).Cursor
+	post := mustAdd(t, store, "thread", "", nil)
+	question := mustPostMessage(t, store, post.Ref, "question")
+	mustPostMessage(t, store, post.Ref, "answer")
+	cursor := readChat(t, store, post.Ref, 0, 20).Cursor
 
-	edited, changed, err := store.EditMessage(ctx, store.mustKey(entry.Ref),
+	edited, changed, err := store.EditMessage(ctx, store.mustKey(post.Ref),
 		question.Number, ownEdit("question, edited"))
 	if err != nil || !changed {
 		t.Fatalf("edit = %v, %v", changed, err)
@@ -261,27 +263,27 @@ func TestEditsKeepTheirPlaceAndAreNotReadAgain(t *testing.T) {
 		!edited.Modified.After(question.Modified) {
 		t.Fatalf("edited times = %v, %v", edited.Created, edited.Modified)
 	}
-	if got := chatText(readChat(t, store, entry.Ref, cursor, 20)); got !=
+	if got := chatText(readChat(t, store, post.Ref, cursor, 20)); got !=
 		" cursor=2 remaining=0" {
 		t.Fatalf("read after an edit = %q, want nothing new", got)
 	}
-	if got := chatText(readChat(t, store, entry.Ref, 0, 20)); got !=
+	if got := chatText(readChat(t, store, post.Ref, 0, 20)); got !=
 		"e1-m1:question, edited e1-m2:answer cursor=2 remaining=0" {
 		t.Fatalf("full read = %q, want the edit in its place", got)
 	}
 
-	if _, changed, err := store.EditMessage(ctx, store.mustKey(entry.Ref),
+	if _, changed, err := store.EditMessage(ctx, store.mustKey(post.Ref),
 		question.Number, ownEdit("question, edited")); err != nil || changed {
 		t.Fatalf("repeating an edit = %v, %v; want no change", changed, err)
 	}
-	if _, _, err := store.EditMessage(ctx, store.mustKey(entry.Ref), 9,
+	if _, _, err := store.EditMessage(ctx, store.mustKey(post.Ref), 9,
 		ownEdit("text")); !errors.Is(err, ErrMessageNotFound) {
 		t.Fatalf("editing a missing message = %v", err)
 	}
 }
 
 // Each write sets the activity time itself, so after every kind of
-// write it must still be the latest change to the entry or its chat.
+// write it must still be the latest change to the post or its chat.
 func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
@@ -289,19 +291,19 @@ func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
 		t.Helper()
 		var stale int
 		if err := store.db.QueryRowContext(ctx, `
-			SELECT count(*) FROM entries AS e
+			SELECT count(*) FROM posts AS e
 			WHERE e.activity_utc <> `+activityExpr,
 		).Scan(&stale); err != nil {
 			t.Fatal(err)
 		}
 		if stale != 0 {
-			t.Fatalf("after %s, %d entries have stale activity", after,
+			t.Fatalf("after %s, %d posts have stale activity", after,
 				stale)
 		}
 	}
-	editMessage := func(entry api.Ref, body string) {
+	editMessage := func(post api.Ref, body string) {
 		t.Helper()
-		if _, _, err := store.EditMessage(ctx, store.mustKey(entry), 1,
+		if _, _, err := store.EditMessage(ctx, store.mustKey(post), 1,
 			ownEdit(body)); err != nil {
 			t.Fatal(err)
 		}
@@ -310,8 +312,8 @@ func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
 	nest := mustAdd(t, store, "nest", "", nil)
 	checkActivity("adding")
 
-	mustPost(t, store, pond.Ref, "first")
-	mustPost(t, store, nest.Ref, "second")
+	mustPostMessage(t, store, pond.Ref, "first")
+	mustPostMessage(t, store, nest.Ref, "second")
 	checkActivity("posting")
 	editMessage(pond.Ref, "first, edited")
 	checkActivity("editing a message")
@@ -323,7 +325,7 @@ func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
 		api.EditPostRequest{Project: &project, User: testUser}); err != nil {
 		t.Fatal(err)
 	}
-	checkActivity("editing an entry")
+	checkActivity("editing a post")
 	if err := addLinks(t, store, pond.Ref,
 		link("see", nest.Ref)); err != nil {
 		t.Fatal(err)
@@ -331,7 +333,7 @@ func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
 	checkActivity("linking")
 }
 
-func TestOverviewGroupsTheNewestMessagesByEntry(t *testing.T) {
+func TestOverviewGroupsTheNewestMessagesByPost(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	a := mustAdd(t, store, "a", "", nil)
@@ -339,12 +341,12 @@ func TestOverviewGroupsTheNewestMessagesByEntry(t *testing.T) {
 	c := mustAdd(t, store, "c", "", nil)
 	private := addTo(t, store, "personal",
 		api.AddPostRequest{Subject: "private"})
-	first := mustPost(t, store, a.Ref, "a1")
-	mustPost(t, store, b.Ref, "b1")
-	mustPost(t, store, a.Ref, "a2")
-	mustPost(t, store, c.Ref, "c1")
-	mustPost(t, store, private.Ref, "private")
-	mustPost(t, store, b.Ref, "b2")
+	first := mustPostMessage(t, store, a.Ref, "a1")
+	mustPostMessage(t, store, b.Ref, "b1")
+	mustPostMessage(t, store, a.Ref, "a2")
+	mustPostMessage(t, store, c.Ref, "c1")
+	mustPostMessage(t, store, private.Ref, "private")
+	mustPostMessage(t, store, b.Ref, "b2")
 	if _, _, err := store.EditMessage(ctx, store.mustKey(a.Ref),
 		first.Number, ownEdit("a1 edited")); err != nil {
 		t.Fatal(err)
@@ -372,17 +374,17 @@ func TestOverwrittenTextLeavesNoCopyInTheDatabase(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	store := openStoreAt(t, filepath.Join(dir, "ws.db"), testBusyTimeout)
-	entry := mustAdd(t, store, "SUBJECTMARK "+
+	post := mustAdd(t, store, "SUBJECTMARK "+
 		strings.Repeat("x", 100), "", nil)
-	message := mustPost(t, store, entry.Ref, "EDITEDAWAYMARK "+
+	message := mustPostMessage(t, store, post.Ref, "EDITEDAWAYMARK "+
 		strings.Repeat("x", 200))
 	subject := "short"
 	if _, err := store.Edit(ctx, everyAccess(store),
-		store.mustKey(entry.Ref),
+		store.mustKey(post.Ref),
 		api.EditPostRequest{Subject: &subject, User: testUser}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.EditMessage(ctx, store.mustKey(entry.Ref),
+	if _, _, err := store.EditMessage(ctx, store.mustKey(post.Ref),
 		message.Number, ownEdit("short")); err != nil {
 		t.Fatal(err)
 	}

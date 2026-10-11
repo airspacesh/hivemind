@@ -14,15 +14,14 @@ const MaxTreeLimit = 500
 
 var ErrInvalidTreeLimit = errors.New("invalid tree limit")
 
-// subtreeCTE names an entry and its descendants as
-// name(workspace_id, id). It takes the entry's workspace id and id as
-// its two arguments. A parent is always in its child's workspace, so
-// the subtree is too.
+// subtreeCTE names a post and its descendants as name(workspace_id,
+// id). It takes the post's workspace id and id as its two arguments. A
+// parent is always in its child's workspace, so the subtree is too.
 func subtreeCTE(name string) string {
 	return name + `(workspace_id, id) AS (
 	SELECT ?, ?
 	UNION ALL
-	SELECT l.source_workspace_id, l.source_id FROM entry_links AS l
+	SELECT l.source_workspace_id, l.source_id FROM post_links AS l
 	JOIN ` + name + ` ON l.target_workspace_id = ` + name + `.workspace_id
 		AND l.target_id = ` + name + `.id
 	WHERE l.name = 'parent'
@@ -34,9 +33,9 @@ type treeFacts struct {
 	descendants int
 }
 
-// readTreeFacts reads the latest activity anywhere in an entry's
-// subtree, and how many current entries are under it. Superseded
-// entries count towards activity but not towards descendants.
+// readTreeFacts reads the latest activity anywhere in a post's subtree,
+// and how many current posts are under it. Superseded posts count
+// towards activity but not towards descendants.
 func (v view) readTreeFacts(ctx context.Context, key Key) (treeFacts, error) {
 	var facts treeFacts
 	var activity string
@@ -45,7 +44,7 @@ func (v view) readTreeFacts(ctx context.Context, key Key) (treeFacts, error) {
 		SELECT max(e.activity_utc),
 			coalesce(sum(NOT (e.workspace_id = ? AND e.id = ?)
 				AND NOT `+supersededClause+`), 0)
-		FROM subtree JOIN entries AS e
+		FROM subtree JOIN posts AS e
 			ON e.workspace_id = subtree.workspace_id
 			AND e.id = subtree.id`,
 		key.Workspace, key.ID, key.Workspace, key.ID,
@@ -60,13 +59,13 @@ func (v view) readTreeFacts(ctx context.Context, key Key) (treeFacts, error) {
 	return facts, nil
 }
 
-// listEntries adds each entry's ancestors and subtree facts.
-func (v view) listEntries(
-	ctx context.Context, entries []api.Post,
+// listPosts adds each post's ancestors and subtree facts.
+func (v view) listPosts(
+	ctx context.Context, posts []api.Post,
 ) ([]api.ListedPost, error) {
-	listed := make([]api.ListedPost, len(entries))
-	for i, entry := range entries {
-		key := v.store.mustKey(entry.Ref)
+	listed := make([]api.ListedPost, len(posts))
+	for i, post := range posts {
+		key := v.store.mustKey(post.Ref)
 		path, err := v.ancestors(ctx, key)
 		if err != nil {
 			return nil, err
@@ -76,7 +75,7 @@ func (v view) listEntries(
 			return nil, err
 		}
 		listed[i] = api.ListedPost{
-			Post:        entry,
+			Post:        post,
 			Ancestors:   path,
 			Activity:    facts.activity,
 			Descendants: facts.descendants,
@@ -85,7 +84,7 @@ func (v view) listEntries(
 	return listed, nil
 }
 
-// treeNode is one entry of a subtree while Tree decides what to show.
+// treeNode is one post of a subtree while Tree decides what to show.
 type treeNode struct {
 	key        Key
 	created    string
@@ -103,10 +102,10 @@ func (v view) readSubtree(ctx context.Context, root Key) (*treeNode, error) {
 		WITH RECURSIVE `+subtreeCTE("subtree")+`
 		SELECT e.workspace_id, e.id, e.created_utc, `+supersededClause+`,
 			p.target_workspace_id, p.target_id
-		FROM subtree JOIN entries AS e
+		FROM subtree JOIN posts AS e
 			ON e.workspace_id = subtree.workspace_id
 			AND e.id = subtree.id
-		LEFT JOIN entry_links AS p
+		LEFT JOIN post_links AS p
 			ON p.source_workspace_id = e.workspace_id
 			AND p.source_id = e.id AND p.name = 'parent'`,
 		root.Workspace, root.ID,
@@ -152,9 +151,9 @@ func (v view) readSubtree(ctx context.Context, root Key) (*treeNode, error) {
 	return nodes[root], nil
 }
 
-// pruneSuperseded drops each superseded node with no current node
-// under it, and sets every remaining node's size. It reports whether
-// the node holds a current entry, itself included.
+// pruneSuperseded drops each superseded node with no current node under
+// it, and sets every remaining node's size. It reports whether the node
+// holds a current post, itself included.
 func pruneSuperseded(node *treeNode) bool {
 	node.size = 1
 	current := !node.superseded
@@ -179,7 +178,7 @@ func countSizes(node *treeNode) {
 }
 
 // showLevels marks up to limit nodes as shown, a level at a time, so
-// every entry near the root is shown before any deeper one.
+// every post near the root is shown before any deeper one.
 func showLevels(root *treeNode, limit int) {
 	root.shown = true
 	count := 1
@@ -211,7 +210,7 @@ func shownDepthFirst(node *treeNode, out []*treeNode) []*treeNode {
 	return out
 }
 
-// treeCuts counts the visible entries under a shown node that are not
+// treeCuts counts the visible posts under a shown node that are not
 // shown, as more below it when none of its children are shown, and
 // otherwise as more under it.
 func treeCuts(node *treeNode) (moreBelow, moreUnder int) {
@@ -230,11 +229,10 @@ func treeCuts(node *treeNode) (moreBelow, moreUnder int) {
 	return hidden, 0
 }
 
-// Tree returns up to limit entries of an entry's subtree, filled level
-// by level, with where it was cut. A superseded entry is left out
-// unless includeSuperseded is set or a current entry is under it,
-// which it then gives context to. The requested entry is always
-// included.
+// Tree returns up to limit posts of a post's subtree, filled level by
+// level, with where it was cut. A superseded post is left out unless
+// includeSuperseded is set or a current post is under it, which it then
+// gives context to. The requested post is always included.
 func (s *Store) Tree(
 	ctx context.Context,
 	access Access,
@@ -253,7 +251,7 @@ func (s *Store) Tree(
 	}
 	defer v.tx.Rollback()
 
-	if err := v.checkEntryExists(ctx, key); err != nil {
+	if err := v.checkPostExists(ctx, key); err != nil {
 		return api.TreeResponse{}, err
 	}
 	root, err := v.readSubtree(ctx, key)
@@ -269,11 +267,11 @@ func (s *Store) Tree(
 
 	response := api.TreeResponse{}
 	for _, node := range shownDepthFirst(root, nil) {
-		entry, err := v.getEntry(ctx, node.key)
+		post, err := v.getPost(ctx, node.key)
 		if err != nil {
 			return api.TreeResponse{}, err
 		}
-		listed, err := v.listEntries(ctx, []api.Post{entry})
+		listed, err := v.listPosts(ctx, []api.Post{post})
 		if err != nil {
 			return api.TreeResponse{}, err
 		}

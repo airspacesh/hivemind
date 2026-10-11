@@ -8,15 +8,15 @@ import (
 	"github.com/airspacesh/workstream/internal/api"
 )
 
-// globMatches lists the entries of the general workspace that a
-// condition on an entry e matches, given a pattern as ?2, read without
-// the text indexes.
+// globMatches lists the posts of the general workspace that a condition
+// on a post e matches, given a pattern as ?2, read without the text
+// indexes.
 func globMatches(
 	t *testing.T, store *Store, condition, pattern string,
 ) []int64 {
 	t.Helper()
 	rows, err := store.db.Query(`
-		SELECT e.id FROM entries AS e
+		SELECT e.id FROM posts AS e
 		WHERE e.workspace_id = ?1 AND (`+condition+`)
 		ORDER BY e.id`,
 		workspaceID(t, store, "general"), pattern)
@@ -38,7 +38,7 @@ func globMatches(
 	return ids
 }
 
-// addFiller adds more entries than a search reads by key from the
+// addFiller adds more posts than a search reads by key from the
 // indexes, all newer than everything else, so a search that walks
 // rather than reading what the indexes find reads them all first. Each
 // one's subject is 0 and its body empty.
@@ -48,11 +48,11 @@ func addFiller(t *testing.T, store *Store) {
 		WITH RECURSIVE n(i) AS (
 			SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?1
 		)
-		INSERT INTO entries (
+		INSERT INTO posts (
 			workspace_id, id, created_utc, modified_utc, activity_utc,
 			revision, activity_revision, project, subject
 		)
-		SELECT ?2, (SELECT max(id) FROM entries WHERE workspace_id = ?2) + i,
+		SELECT ?2, (SELECT max(id) FROM posts WHERE workspace_id = ?2) + i,
 			?3, ?3, ?3, revision + i, revision + i, 'pond', '0'
 		FROM n, revision_counter`, `
 		UPDATE revision_counter SET revision = revision + ?1`,
@@ -71,8 +71,8 @@ func TestTextIndexKeepsGlobSemantics(t *testing.T) {
 	mustAdd(t, store, `Say "quack" ]twice[`, "", nil)
 	mustAdd(t, store, "Æther pond", "a\nduck", nil)
 	chatty := mustAdd(t, store, "Chat", "", nil)
-	mustPost(t, store, chatty.Ref, "The ducklings hid in the reeds")
-	mustPost(t, store, chatty.Ref, "fix the nest by noon")
+	mustPostMessage(t, store, chatty.Ref, "The ducklings hid in the reeds")
+	mustPostMessage(t, store, chatty.Ref, "fix the nest by noon")
 	// Every run of a pattern is in this subject, but in another order.
 	mustAdd(t, store, "nest fix", "", nil)
 	addFiller(t, store)
@@ -91,9 +91,9 @@ func TestTextIndexKeepsGlobSemantics(t *testing.T) {
 	}{
 		{"content", `e.subject_lower GLOB ?2 OR e.body_lower GLOB ?2
 			OR EXISTS (
-				SELECT 1 FROM entry_messages AS m
+				SELECT 1 FROM post_messages AS m
 				WHERE m.workspace_id = e.workspace_id
-					AND m.entry_id = e.id AND lower(m.body) GLOB ?2
+					AND m.post_id = e.id AND lower(m.body) GLOB ?2
 			)`, func(conditions []FieldCond) Filter {
 			return Filter{Content: conditions, IncludeChat: true}
 		}},
@@ -123,7 +123,7 @@ func TestTextIndexKeepsGlobSemantics(t *testing.T) {
 				slices.Sort(got)
 				got = slices.Compact(got)
 				if !slices.Equal(got, want) {
-					t.Fatalf("matched entries %v, want %v", got, want)
+					t.Fatalf("matched posts %v, want %v", got, want)
 				}
 			})
 		}
@@ -133,16 +133,16 @@ func TestTextIndexKeepsGlobSemantics(t *testing.T) {
 func TestTextIndexFollowsEdits(t *testing.T) {
 	store := openTestStore(t)
 	ctx := context.Background()
-	entry := mustAdd(t, store, "Count the herons", "In the reeds", nil)
-	message := mustPost(t, store, entry.Ref, "Saw an egret")
+	post := mustAdd(t, store, "Count the herons", "In the reeds", nil)
+	message := mustPostMessage(t, store, post.Ref, "Saw an egret")
 	subject, body := "Count the ducks", "On the pond"
 	if _, err := store.Edit(ctx, everyAccess(store),
-		store.mustKey(entry.Ref), api.EditPostRequest{
+		store.mustKey(post.Ref), api.EditPostRequest{
 			Subject: &subject, Body: &body, User: testUser,
 		}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.EditMessage(ctx, store.mustKey(entry.Ref),
+	if _, _, err := store.EditMessage(ctx, store.mustKey(post.Ref),
 		message.Number, ownEdit("Saw a swan")); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestTextIndexFollowsEdits(t *testing.T) {
 			Content: []FieldCond{{Value: text}}, IncludeChat: true,
 		})
 		if got := len(result.Matches) == 1; got != found {
-			t.Errorf("search for %q found the entry: %v, want %v", text,
+			t.Errorf("search for %q found the post: %v, want %v", text,
 				got, found)
 		}
 	}
@@ -170,21 +170,21 @@ func TestTextIndexForgetsOverwrittenText(t *testing.T) {
 	// No other text holds this character, so its trigram is stored
 	// whole, not as a suffix of another term.
 	const secret = "ǂǂǂ"
-	entry := mustAdd(t, store, "Heron "+secret, "", nil)
-	message := mustPost(t, store, entry.Ref, "Egret "+secret)
+	post := mustAdd(t, store, "Heron "+secret, "", nil)
+	message := mustPostMessage(t, store, post.Ref, "Egret "+secret)
 	subject := "Heron"
 	if _, err := store.Edit(ctx, everyAccess(store),
-		store.mustKey(entry.Ref), api.EditPostRequest{
+		store.mustKey(post.Ref), api.EditPostRequest{
 			Subject: &subject, User: testUser,
 		}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.EditMessage(ctx, store.mustKey(entry.Ref),
+	if _, _, err := store.EditMessage(ctx, store.mustKey(post.Ref),
 		message.Number, ownEdit("Egret")); err != nil {
 		t.Fatal(err)
 	}
 
-	for _, index := range []string{"entry_text", "message_text"} {
+	for _, index := range []string{"post_text", "message_text"} {
 		var blocks int
 		if err := store.db.QueryRow(`
 			SELECT count(*) FROM `+index+`_data
@@ -204,8 +204,8 @@ func TestTextIndexForgetsOverwrittenText(t *testing.T) {
 func TestTextIndexForgetsDeletedText(t *testing.T) {
 	store := openTestStore(t)
 	const secret = "ǂǂǂ"
-	entry := mustAdd(t, store, "Heron "+secret, "Egret "+secret, nil)
-	message := mustPost(t, store, entry.Ref, "Swan "+secret)
+	post := mustAdd(t, store, "Heron "+secret, "Egret "+secret, nil)
+	message := mustPostMessage(t, store, post.Ref, "Swan "+secret)
 	addFiller(t, store)
 	for _, text := range []string{"heron", "egret", "swan", secret} {
 		result := runSearch(t, store, Filter{
@@ -217,7 +217,7 @@ func TestTextIndexForgetsDeletedText(t *testing.T) {
 		}
 	}
 
-	mustDelete(t, store, entry.Ref)
+	mustDelete(t, store, post.Ref)
 	mustDeleteMessage(t, store, message.Ref())
 
 	for _, text := range []string{"heron", "egret", "swan", secret} {
@@ -228,7 +228,7 @@ func TestTextIndexForgetsDeletedText(t *testing.T) {
 			t.Errorf("a search for %q still finds the deleted text", text)
 		}
 	}
-	for _, index := range []string{"entry_text", "message_text"} {
+	for _, index := range []string{"post_text", "message_text"} {
 		var blocks int
 		if err := store.db.QueryRow(`
 			SELECT count(*) FROM `+index+`_data
@@ -243,7 +243,7 @@ func TestTextIndexForgetsDeletedText(t *testing.T) {
 	}
 }
 
-// The text indexes find old matches beneath newer entries that do not
+// The text indexes find old matches beneath newer posts that do not
 // match, page after page.
 func TestSearchPagesBackThroughTheIndex(t *testing.T) {
 	store := openTestStore(t)
@@ -251,7 +251,7 @@ func TestSearchPagesBackThroughTheIndex(t *testing.T) {
 	addFiller(t, store)
 	older := mustAdd(t, store, "Heron at noon", "", nil)
 	newest := mustAdd(t, store, "Count", "", nil)
-	mustPost(t, store, newest.Ref, "A heron at dusk")
+	mustPostMessage(t, store, newest.Ref, "A heron at dusk")
 
 	want := []string{messageRef(newest.Ref, 1), older.Ref.String(),
 		oldest.Ref.String()}

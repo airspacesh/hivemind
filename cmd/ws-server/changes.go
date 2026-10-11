@@ -54,7 +54,7 @@ func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if values := query["under"]; len(values) != 0 {
-		under, ok := h.entryKey(w, access, values[0])
+		under, ok := h.postKey(w, access, values[0])
 		if !ok {
 			return
 		}
