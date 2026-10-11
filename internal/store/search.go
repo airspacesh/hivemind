@@ -440,6 +440,7 @@ func originLookup(workspace int64, filter Filter) (candidateLookup, bool) {
 			SELECT post_order FROM post_messages
 			WHERE workspace_id = ? AND origin_user_lower GLOB ? LIMIT ?`,
 		messageArgs: []any{workspace, pattern},
+		costed:      true,
 	}, true
 }
 
@@ -448,10 +449,11 @@ func originLookup(workspace int64, filter Filter) (candidateLookup, bool) {
 const candidateReadCost = 8
 
 // lookupPostLimit bounds the posts a listing reads by key when the
-// project or metadata filters narrow it to those. A listing that reads
-// posts newest first reads about limit*total/n of a workspace's total
-// to find a page among n that match, if they are spread evenly, so it
-// reads by key only while candidateReadCost*n costs less.
+// origin user, project or metadata filters narrow it to those. A
+// listing that reads posts newest first reads about limit*total/n of a
+// workspace's total to find a page among n that match, if they are
+// spread evenly, so it reads by key only while candidateReadCost*n
+// costs less.
 func (v view) lookupPostLimit(
 	ctx context.Context, workspace int64, limit int,
 ) (int, error) {
