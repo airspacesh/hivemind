@@ -13,8 +13,9 @@ import (
 // store.
 const (
 	MaxProjectLen = 256
-	MaxSubjectLen = 128
+	MaxSubjectLen = 72
 	MaxBodyLen    = 2048
+	MaxMessageLen = 512
 	MaxKeyLen     = 64
 	MaxValueLen   = 256
 	MaxMetadata   = 16
@@ -148,6 +149,22 @@ func validateProject(project string) error {
 	return checkLen("project", project, MaxProjectLen)
 }
 
+// validateSubject keeps a subject to one line of headline length.
+func validateSubject(subject string) error {
+	if err := checkOneLine("subject", subject); err != nil {
+		return err
+	}
+	if !utf8.ValidString(subject) {
+		return fmt.Errorf("subject is not valid UTF-8")
+	}
+	if n := utf8.RuneCountInString(subject); n > MaxSubjectLen {
+		return fmt.Errorf("subject is too long: %d chars (max %d). Keep "+
+			"it to a headline, and put the detail in the body", n,
+			MaxSubjectLen)
+	}
+	return nil
+}
+
 func validateMessageBody(body string) error {
 	if body == "" {
 		return fmt.Errorf("a message needs text")
@@ -155,7 +172,15 @@ func validateMessageBody(body string) error {
 	if err := checkBody(body); err != nil {
 		return err
 	}
-	return checkLen("message", body, MaxBodyLen)
+	if !utf8.ValidString(body) {
+		return fmt.Errorf("message is not valid UTF-8")
+	}
+	if n := utf8.RuneCountInString(body); n > MaxMessageLen {
+		return fmt.Errorf("message is too long: %d chars (max %d). Send "+
+			"it as several messages, or write it as a post", n,
+			MaxMessageLen)
+	}
+	return nil
 }
 
 func (r PostMessageRequest) Validate() error {
@@ -240,10 +265,7 @@ func (r AddEntryRequest) Validate() error {
 	if err := validateProject(r.Project); err != nil {
 		return err
 	}
-	if err := checkOneLine("subject", r.Subject); err != nil {
-		return err
-	}
-	if err := checkLen("subject", r.Subject, MaxSubjectLen); err != nil {
+	if err := validateSubject(r.Subject); err != nil {
 		return err
 	}
 	if err := checkLen("body", r.Body, MaxBodyLen); err != nil {
@@ -294,10 +316,7 @@ func (r EditEntryRequest) Validate() error {
 		if *r.Subject == "" {
 			return fmt.Errorf("subject cannot be set to empty")
 		}
-		if err := checkOneLine("subject", *r.Subject); err != nil {
-			return err
-		}
-		if err := checkLen("subject", *r.Subject, MaxSubjectLen); err != nil {
+		if err := validateSubject(*r.Subject); err != nil {
 			return err
 		}
 	}

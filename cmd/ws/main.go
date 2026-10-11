@@ -85,8 +85,8 @@ Workspaces and entries:
   dashes, starting with a letter (e.g. jira, build-id). For several of
   a kind, number them: jira-1, jira-2. The key project is reserved,
   since the project is a field of its own. Field limits (characters):
-  project 256, subject 128, body 2048, key 64, value 256, and 16
-  metadata pairs.
+  project 256, subject 72, body 2048, chat message 512, key 64,
+  value 256, and 16 metadata pairs.
 
 Editing and deleting:
   '{program} edit' changes the project, subject, body, metadata and
