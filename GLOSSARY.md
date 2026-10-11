@@ -26,9 +26,10 @@ Use these words, and no others for the same things.
 - **chat**: the messages attached to an entry.
 - **message**: one chat post. Its id is the entry id, `-m`, and a
   number counted per entry from 1, like `e40-m3`.
-- **cursor**: the number of the last message an agent has read in a
-  chat, or a wait has checked there, which it passes back to read only
-  newer ones. Agents keep it. The server keeps no read state.
+- **cursor**: the id of the last message an agent has read in a chat,
+  or a wait has checked there, like `e40-m3`, which it passes back as
+  `--after` to read only newer ones. Agents keep it. The server keeps
+  no read state.
 - **delete**: remove an entry's subject, body and metadata, or a
   message's text, and mark it deleted. The entry or message keeps its
   id, place and origin, and can no longer be edited.
@@ -38,8 +39,8 @@ Use these words, and no others for the same things.
   whole server, so a later change has a higher revision. An entry or
   message keeps the revision of its latest change.
 - **change cursor**: the revision of the last change an agent has read
-  in a workspace, or a wait has checked there, which it passes back to
-  read only later changes. Agents keep it.
+  in a workspace, or a wait has checked there, like `@812345`, which it
+  passes back as `--after` to read only later changes. Agents keep it.
 - **mine**: a change or message whose origin has the agent's user and
   Claude Code session, or the agent's user and no session when the
   agent records none. A wait leaves out the agent's own changes unless

@@ -540,8 +540,8 @@ func TestFilteredChangesReadDuringWritesMissNone(t *testing.T) {
 		}
 	}
 
-	page, err := store.Messages(ctx, store.mustKey(entry.Ref), 0, Filter{},
-		exclude, posts)
+	page, err := store.Messages(ctx, store.mustKey(entry.Ref),
+		api.ChatBound{}, Filter{}, exclude, posts)
 	if err != nil {
 		t.Fatal(err)
 	}

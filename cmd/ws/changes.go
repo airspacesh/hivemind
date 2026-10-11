@@ -5,7 +5,6 @@ import (
 	"maps"
 	"math"
 	"net/url"
-	"strconv"
 	"time"
 
 	"github.com/airspacesh/workstream/internal/api"
@@ -15,37 +14,33 @@ import (
 const forever = time.Duration(math.MaxInt64)
 
 func (c *client) changesPage(
-	t target, since string, filters url.Values,
+	t target, query url.Values,
 ) (api.ChangesPage, error) {
-	query := maps.Clone(filters)
-	query.Set("since", since)
 	var page api.ChangesPage
 	path := workspacePath(t, "/changes?"+query.Encode())
 	err := c.do(t, "GET", path, nil, &page)
 	return page, err
 }
 
-// startRevision is the revision a read of changes from since starts
-// after, which is the latest change when since is now.
-func (c *client) startRevision(t target, since string) (int64, error) {
-	if since != "now" {
-		return strconv.ParseInt(since, 10, 64)
-	}
-	page, err := c.changesPage(t, since, url.Values{})
+// latestRevision is the revision of the latest change on the server.
+func (c *client) latestRevision(t target) (int64, error) {
+	page, err := c.changesPage(t, url.Values{})
 	return page.Cursor, err
 }
 
-// pollChanges polls a workspace's changes that match filters from
-// since on, moving since to each page's cursor.
+// pollChanges polls a workspace's changes that match filters after the
+// revision after, moving after to each page's cursor.
 func (c *client) pollChanges(
-	t target, since int64, filters url.Values,
+	t target, after int64, filters url.Values,
 ) func() (api.ChangesPage, pollOutcome, error) {
+	query := maps.Clone(filters)
 	return func() (api.ChangesPage, pollOutcome, error) {
-		page, err := c.changesPage(t, fmt.Sprint(since), filters)
+		query.Set("after", api.FormatRevision(after))
+		page, err := c.changesPage(t, query)
 		if err != nil {
 			return page, nothingYet, err
 		}
-		since = page.Cursor
+		after = page.Cursor
 		switch {
 		case len(page.Changes) > 0:
 			return page, found, nil
@@ -79,9 +74,9 @@ func follow(
 
 type changesArgs struct {
 	target target
-	// since is a change cursor, 0 for the start, or now for the
-	// latest change.
-	since   string
+	// after is the revision to read changes after, which is the latest
+	// change when the command names none.
+	after   int64
 	timeout time.Duration
 	// filters holds the query parameters that pick the changes shown.
 	filters url.Values
@@ -95,7 +90,7 @@ func (c *client) parseChangesArgs(
 	command string, args []string, timeout time.Duration, mine bool,
 ) (changesArgs, error) {
 	p, err := parseArgs(args, flagSpec{
-		strs:   []string{"--since", "--timeout", "--workspace", "--under"},
+		strs:   []string{"--after", "--timeout", "--workspace", "--under"},
 		bools:  mineFlags,
 		repeat: searchFilterFlags(),
 	})
@@ -103,18 +98,16 @@ func (c *client) parseChangesArgs(
 		return changesArgs{}, err
 	}
 	if len(p.pos) != 0 {
-		return changesArgs{}, usageError(command + " [--since <cursor>] " +
+		return changesArgs{}, usageError(command + " [--after @<revision>] " +
 			"[--timeout <d>] [--under <ref>] [search filters] " +
 			"[--exclude-mine|--include-mine] [--workspace <name>]")
 	}
-	parsed := changesArgs{since: "now", filterArgs: filterArgs(p)}
-	if p.has("--since") {
-		parsed.since = p.strs["--since"]
-	}
-	revision, err := strconv.ParseInt(parsed.since, 10, 64)
-	if parsed.since != "now" && (err != nil || revision < 0) {
-		return changesArgs{}, fmt.Errorf("--since must be a cursor, 0 for "+
-			"the start, or now, not %q", parsed.since)
+	parsed := changesArgs{filterArgs: filterArgs(p)}
+	if p.has("--after") {
+		parsed.after, err = parseRevisionFlag("--after", p.strs["--after"])
+		if err != nil {
+			return changesArgs{}, err
+		}
 	}
 	if parsed.timeout, err = parseTimeout(p, timeout); err != nil {
 		return changesArgs{}, err
@@ -138,14 +131,19 @@ func (c *client) parseChangesArgs(
 			return changesArgs{}, err
 		}
 	}
+	if !p.has("--after") {
+		if parsed.after, err = c.latestRevision(parsed.target); err != nil {
+			return changesArgs{}, err
+		}
+	}
 	return parsed, nil
 }
 
 // waitCommand is the wait command that reads a workspace's changes
 // after a revision, with the filters it was given.
 func waitCommand(t target, revision int64, filterArgs string) string {
-	return fmt.Sprintf("%s wait --since %d --workspace %s%s", programName,
-		revision, t.workspace, filterArgs)
+	return fmt.Sprintf("%s wait --after %s --workspace %s%s", programName,
+		api.FormatRevision(revision), t.workspace, filterArgs)
 }
 
 func cmdFirehose(c *client, args []string) error {
@@ -154,23 +152,20 @@ func cmdFirehose(c *client, args []string) error {
 		return err
 	}
 	t := parsed.target
-	since, err := c.startRevision(t, parsed.since)
-	if err != nil {
-		return err
-	}
 
-	fmt.Printf("Following workspace %s after %d.\n", t.workspace, since)
+	fmt.Printf("Following workspace %s after %s.\n", t.workspace,
+		api.FormatRevision(parsed.after))
 	show := func(page api.ChangesPage) {
 		printChanges(page.Changes)
-		fmt.Printf("Cursor: %d\n", page.Cursor)
+		fmt.Printf("Cursor: %s\n", api.FormatRevision(page.Cursor))
 	}
-	last, err := follow(c.pollChanges(t, since, parsed.filters), show,
-		parsed.timeout, systemClock{})
+	last, err := follow(c.pollChanges(t, parsed.after, parsed.filters),
+		show, parsed.timeout, systemClock{})
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Stopped at the %s timeout. Cursor: %d\n", parsed.timeout,
-		last.Cursor)
+	fmt.Printf("Stopped at the %s timeout. Cursor: %s\n", parsed.timeout,
+		api.FormatRevision(last.Cursor))
 	return nil
 }
 
@@ -181,19 +176,15 @@ func cmdWait(c *client, args []string) error {
 		return err
 	}
 	t := parsed.target
-	since, err := c.startRevision(t, parsed.since)
-	if err != nil {
-		return err
-	}
-	page, err := waitFor(c.pollChanges(t, since, parsed.filters),
+	page, err := waitFor(c.pollChanges(t, parsed.after, parsed.filters),
 		parsed.timeout, systemClock{})
 	if err != nil {
 		return err
 	}
 
 	if len(page.Changes) == 0 {
-		fmt.Printf("No matching changes after %d within %s.\n", since,
-			parsed.timeout)
+		fmt.Printf("No matching changes after %s within %s.\n",
+			api.FormatRevision(parsed.after), parsed.timeout)
 	}
 	printChanges(page.Changes)
 	next := waitCommand(t, page.Cursor, parsed.filterArgs)
@@ -201,6 +192,7 @@ func cmdWait(c *client, args []string) error {
 		fmt.Printf("Next: %s (more changes to check)\n", next)
 		return nil
 	}
-	fmt.Printf("Cursor: %d (wait for more: %s)\n", page.Cursor, next)
+	fmt.Printf("Cursor: %s (wait for more: %s)\n",
+		api.FormatRevision(page.Cursor), next)
 	return nil
 }

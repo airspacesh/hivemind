@@ -435,10 +435,10 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 	}
 }
 
-// sendSinceServer serves e1, where a send posts message number sent
+// sendAfterServer serves e1, where a send posts message number sent
 // and the chat then holds messages 1 to newest. Heron sent all the
 // others.
-func sendSinceServer(t *testing.T, sent, newest int64) string {
+func sendAfterServer(t *testing.T, sent, newest int64) string {
 	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
 	message := func(number int64) api.Message {
 		user := "heron"
@@ -472,13 +472,13 @@ func sendSinceServer(t *testing.T, sent, newest int64) string {
 // A message sent after yours, between the send and the read that
 // follows it, shows too, and the cursor moves past it, so a wait from
 // the cursor neither repeats nor skips a message.
-func TestSendSinceShowsMessagesThatRaceIt(t *testing.T) {
-	config := sendSinceServer(t, 3, 4)
-	got := ws(t, config, "chat", "send", "e1", "quack", "--since", "1")
+func TestSendAfterShowsMessagesThatRaceIt(t *testing.T) {
+	config := sendAfterServer(t, 3, 4)
+	got := ws(t, config, "chat", "send", "e1", "quack", "--after", "e1-m1")
 	want := "Sent [e1-m3].\n" +
 		"[e1-m2] 05:20 heron: quack\n[e1-m3] 05:20 duck: quack\n" +
 		"[e1-m4] 05:20 heron: quack\n" +
-		"Cursor: 4 (wait for more: ws chat wait e1 --since 4)\n"
+		"Cursor: e1-m4 (wait for more: ws chat wait e1 --after e1-m4)\n"
 	if !got.ok || got.stdout != want {
 		t.Fatalf("send =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
 	}
@@ -486,22 +486,22 @@ func TestSendSinceShowsMessagesThatRaceIt(t *testing.T) {
 
 // When more than 20 messages follow the cursor, a send shows the
 // newest 20 and says how to read the ones it left out.
-func TestSendSinceLeavesOutOlderMessages(t *testing.T) {
-	config := sendSinceServer(t, 24, 25)
-	got := ws(t, config, "chat", "send", "e1", "quack", "--since", "1")
+func TestSendAfterLeavesOutOlderMessages(t *testing.T) {
+	config := sendAfterServer(t, 24, 25)
+	got := ws(t, config, "chat", "send", "e1", "quack", "--after", "e1-m1")
 	lines := strings.Split(strings.TrimSuffix(got.stdout, "\n"), "\n")
 	if !got.ok || len(lines) != 23 {
 		t.Fatalf("send printed %d lines, want 23:\n%s (%+v)",
 			len(lines), got.stdout, got)
 	}
 	want := []string{"Sent [e1-m24].",
-		"... 4 earlier (ws chat read e1 --since 1)",
+		"... 4 earlier (ws chat read e1 --after e1-m1)",
 		"[e1-m6] 05:20 heron: quack"}
 	if !slices.Equal(lines[:3], want) {
 		t.Fatalf("send began\n%s\nwant\n%s", strings.Join(lines[:3], "\n"),
 			strings.Join(want, "\n"))
 	}
-	end := "Cursor: 25 (wait for more: ws chat wait e1 --since 25)"
+	end := "Cursor: e1-m25 (wait for more: ws chat wait e1 --after e1-m25)"
 	if lines[22] != end {
 		t.Fatalf("send ended %q, want %q", lines[22], end)
 	}
@@ -1026,21 +1026,21 @@ func TestWaitsExcludeTheirOwnSession(t *testing.T) {
 		session       []string
 		next          string
 	}{
-		{"wait", "all", []string{"wait", "--since", "3", "--project",
+		{"wait", "all", []string{"wait", "--after", "@3", "--project",
 			"duck pond"}, []string{"lead"},
-			"Cursor: 9 (wait for more: ws wait --since 9 --workspace " +
+			"Cursor: @9 (wait for more: ws wait --after @9 --workspace " +
 				"general --project 'duck pond')"},
-		{"wait without the session", "none", []string{"wait", "--since",
-			"3"}, []string{""}, "--since 9 --workspace general)"},
-		{"wait including mine", "all", []string{"wait", "--since", "3",
+		{"wait without the session", "none", []string{"wait", "--after",
+			"@3"}, []string{""}, "--after @9 --workspace general)"},
+		{"wait including mine", "all", []string{"wait", "--after", "@3",
 			"--include-mine"}, nil,
-			"--since 9 --workspace general --include-mine)"},
-		{"chat wait", "all", []string{"chat", "wait", "e1", "--since", "3",
-			"--content", "quack"}, []string{"lead"},
-			"Cursor: 7 (wait for more: ws chat wait e1 --since 7 " +
+			"--after @9 --workspace general --include-mine)"},
+		{"chat wait", "all", []string{"chat", "wait", "e1", "--after",
+			"e1-m3", "--content", "quack"}, []string{"lead"},
+			"Cursor: e1-m7 (wait for more: ws chat wait e1 --after e1-m7 " +
 				"--content quack)"},
 		{"chat wait without the session", "none", []string{"chat", "wait",
-			"e1", "--since", "3"}, []string{""}, "--since 7)"},
+			"e1", "--after", "e1-m3"}, []string{""}, "--after e1-m7)"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1057,7 +1057,7 @@ func TestWaitsExcludeTheirOwnSession(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			for _, query := range queries {
-				if query.Get("since") == "" {
+				if query.Get("after") == "" {
 					continue
 				}
 				if !slices.Equal(query["exclude-claude-session"],
@@ -1099,5 +1099,45 @@ func TestBoundFlagsReadLocalDatesSpansAndRevisions(t *testing.T) {
 		if _, err := parseBoundFlag("--after", value, now); err == nil {
 			t.Errorf("%q was accepted", value)
 		}
+	}
+}
+
+// A chat's --after names a message of that chat, or its start as -m0,
+// or a time. A message of another chat, or a revision, is refused
+// rather than read as a number in this one.
+func TestChatAfterKeepsToItsOwnChat(t *testing.T) {
+	now := time.Date(2026, 10, 11, 9, 30, 0, 0, time.UTC)
+	entry := api.Ref{Prefix: "e", ID: 40}
+	for value, want := range map[string]api.ChatBound{
+		"e40-m3": {Number: 3},
+		"e40-m0": {},
+		"2h":     {Time: now.Add(-2 * time.Hour)},
+	} {
+		got, err := parseChatAfter(entry, value, now)
+		if err != nil || !got.Time.Equal(want.Time) ||
+			got.Number != want.Number {
+			t.Errorf("%q = %v, %v, want %v", value, got, err, want)
+		}
+	}
+	for _, value := range []string{"e41-m3", "e4-m0", "f40-m3", "@3"} {
+		if got, err := parseChatAfter(entry, value, now); err == nil {
+			t.Errorf("%q was accepted as %v", value, got)
+		}
+	}
+}
+
+// A change cursor is a revision, @0 included, and a time is refused
+// with the command that lists what changed since it.
+func TestChangeCursorIsARevision(t *testing.T) {
+	for value, want := range map[string]int64{"@0": 0, "@812345": 812345} {
+		got, err := parseRevisionFlag("--after", value)
+		if err != nil || got != want {
+			t.Errorf("%q = %d, %v, want %d", value, got, err, want)
+		}
+	}
+	_, err := parseRevisionFlag("--after", "2h")
+	if err == nil || !strings.Contains(err.Error(),
+		"'ws recent --include-chat --after 2h'") {
+		t.Errorf("a time gave %v", err)
 	}
 }

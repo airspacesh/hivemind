@@ -44,17 +44,17 @@ Usage:
          [search filters] [--workspace <name>]
   {program} list-workspaces
   {program} list-projects [--limit 30] [--workspace <name>]
-  {program} chat send <ref> <message> [--since <n>]
+  {program} chat send <ref> <message> [--after <ref>-m<n>|<time>]
   {program} chat recent [<ref>] [--limit 20] [--workspace <name>]
-  {program} chat read <ref> --since <n> [--limit 20]
-  {program} chat wait <ref> --since <n> [--timeout 10m]
+  {program} chat read <ref> [--after <ref>-m<n>|<time>] [--limit 20]
+  {program} chat wait <ref> [--after <ref>-m<n>|<time>] [--timeout 10m]
          [--content <pattern>]... [--exclude-mine|--include-mine]
   {program} chat edit <ref>-m<n> <message>
   {program} chat delete <ref>-m<n>
-  {program} wait [--since <cursor>] [--timeout 10m] [--under <ref>]
+  {program} wait [--after @<revision>] [--timeout 10m] [--under <ref>]
          [search filters] [--exclude-mine|--include-mine]
          [--workspace <name>]
-  {program} firehose [--since <cursor>] [--timeout <d>] [--under <ref>]
+  {program} firehose [--after @<revision>] [--timeout <d>] [--under <ref>]
          [search filters] [--exclude-mine|--include-mine]
          [--workspace <name>]
   {program} status
@@ -183,23 +183,28 @@ Chat:
   Every entry has a chat. A message's id is the entry id, -m, and a
   number counted from 1 in that entry, like e40-m3. Messages stay in
   the order they were sent, and an edit overwrites one in place. Your
-  cursor is the number of the last message you read. Keep it, since
-  the server keeps no read state.
-  '{program} chat send' sends a message and prints its id. With --since,
-  it then shows the messages after --since, yours among them, and the
+  cursor is the id of the last message you read, like e40-m3. Pass it
+  as --after to read only later messages, and keep it, since the
+  server keeps no read state. --after e40-m0 starts before the first
+  message. --after also takes a time as in recent, like 2h, for the
+  messages posted at or after it.
+  '{program} chat send' sends a message and prints its id. With --after,
+  it then shows the messages after --after, yours among them, and the
   cursor. It shows the newest 20 at most, and says how to read any it
   left out.
   '{program} chat recent <ref>' shows the newest messages, oldest first,
   and the cursor. '{program} chat recent' alone shows the newest messages
   across the workspace, under their entries.
-  '{program} chat read' shows the messages after --since a page at a
-  time, and says how to read the next page.
+  '{program} chat read' shows the messages after --after, or from the
+  start with no --after, a page at a time, and says how to read the
+  next page.
   '{program} chat wait' returns as soon as a message arrives after
-  --since that matches its filters and is not yours, and prints only
-  the messages that match, then the cursor. --content and the origin
-  filters, and their no- forms, match each message itself, as in a
-  search. The cursor passes every message the wait checked, matching
-  or not, so wait on from it.
+  --after that matches its filters and is not yours, and prints only
+  the messages that match, then the cursor. With no --after it waits
+  for the next message. --content and the origin filters, and their
+  no- forms, match each message itself, as in a search. The cursor
+  passes every message the wait checked, matching or not, so wait on
+  from it.
   A message is yours when it came from your user in your current Claude
   Code session. Outside a session, or when the workspace does not
   capture the session, it is yours when it came from your user outside
@@ -214,21 +219,22 @@ Changes:
   A change is an entry added, edited or deleted, or a message sent,
   edited or deleted. Editing only links is not a change. Each change
   takes the next revision, a number counted across the whole server. A
-  change cursor is the revision of the last change read. Pass it as
-  --since to read only later changes, and keep it, since the server
-  keeps no read state. --since 0 starts before every change, and with no
-  --since a command starts from now. An entry or message changed again
-  after your cursor shows once, at its latest change, with its current
-  text. '{program} wait' returns as soon as a change after --since
-  matches its filters and is not yours, and prints only the changes that
-  match, then the cursor. The search filters and --under match an
-  entry's change against the entry, and a message's change as in a
-  search, so the text and origin filters match the message itself and
-  the others its entry. A change is yours as in chat wait, by the origin
-  of the entry or message. An edit or delete keeps the origin, so it
-  counts as a change by the session that added the entry or sent the
-  message. The cursor passes every change the wait checked, matching or
-  not, so wait on from it. It polls as chat wait does.
+  change cursor is the revision of the last change read, like @812345.
+  Pass it as --after to read only later changes, and keep it, since the
+  server keeps no read state. --after @0 starts before every change, and
+  with no --after a command starts from now. --after takes no time, since
+  changes are read by revision. An entry or message changed again after
+  your cursor shows once, at its latest change, with its current text.
+  '{program} wait' returns as soon as a change after --after matches its
+  filters and is not yours, and prints only the changes that match, then
+  the cursor. The search filters and --under match an entry's change
+  against the entry, and a message's change as in a search, so the text
+  and origin filters match the message itself and the others its entry.
+  A change is yours as in chat wait, by the origin of the entry or
+  message. An edit or delete keeps the origin, so it counts as a change
+  by the session that added the entry or sent the message. The cursor
+  passes every change the wait checked, matching or not, so wait on from
+  it. It polls as chat wait does.
   '{program} firehose' prints every change that matches its filters as
   it arrives, each batch followed by its cursor, until interrupted or
   --timeout passes. It shows your own changes unless --exclude-mine

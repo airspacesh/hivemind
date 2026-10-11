@@ -103,9 +103,8 @@ func (h *handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, message)
 }
 
-// listMessages returns a page of the messages after a cursor that
-// match the query's conditions, given since, or the newest messages,
-// given latest.
+// listMessages returns a page of the messages after the query's after
+// that match its conditions, or the newest messages, given latest.
 func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 	query, ok := parseQuery(w, r)
 	if !ok || !validateQuery(w, query, messageConditionParameters,
@@ -117,10 +116,13 @@ func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, "latest takes no other parameter")
 		return
 	}
-	since, err := queryInteger(query, "since", 0, 0, 1<<62)
-	if err != nil {
-		writeBadRequest(w, err.Error())
-		return
+	var after api.ChatBound
+	if values := query["after"]; len(values) != 0 {
+		var err error
+		if after, err = api.ParseChatBound(values[0]); err != nil {
+			writeBadRequest(w, "after: "+err.Error())
+			return
+		}
 	}
 	limit, err := queryInteger(query, "limit", defaultChatLimit,
 		1, maxChatLimit)
@@ -152,7 +154,7 @@ func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 	if hasLatest {
 		page, err = h.store.LatestMessages(r.Context(), entry, int(latest))
 	} else {
-		page, err = h.store.Messages(r.Context(), entry, since, filter,
+		page, err = h.store.Messages(r.Context(), entry, after, filter,
 			exclude, int(limit))
 	}
 	if err != nil {

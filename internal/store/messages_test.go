@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/airspacesh/workstream/internal/api"
 )
@@ -37,7 +38,7 @@ func readChat(
 ) api.ChatPage {
 	t.Helper()
 	page, err := store.Messages(context.Background(), store.mustKey(entry),
-		since, Filter{}, nil, limit)
+		api.ChatBound{Number: since}, Filter{}, nil, limit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +155,7 @@ func TestChatReadsPageAfterTheCursor(t *testing.T) {
 	}
 	if _, err := store.Messages(context.Background(),
 		Key{Workspace: workspaceID(t, store, "general"), ID: 99},
-		0, Filter{}, nil, 2); !errors.Is(err, ErrEntryNotFound) {
+		api.ChatBound{}, Filter{}, nil, 2); !errors.Is(err, ErrEntryNotFound) {
 		t.Fatalf("reading a missing entry's chat = %v", err)
 	}
 }
@@ -190,14 +191,55 @@ func TestFilteredChatCursorPassesWhatDoesNotMatch(t *testing.T) {
 			"e1-m2:quack cursor=5 remaining=0"},
 	} {
 		page, err := store.Messages(context.Background(),
-			store.mustKey(entry.Ref), test.since, test.filter, test.exclude,
-			test.limit)
+			store.mustKey(entry.Ref), api.ChatBound{Number: test.since},
+			test.filter, test.exclude, test.limit)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if got := chatText(page); got != test.want {
 			t.Fatalf("since %d excluding %+v limit %d = %q, want %q",
 				test.since, test.exclude, test.limit, got, test.want)
+		}
+	}
+}
+
+// A chat read from a time starts at the first message posted at or
+// after it, and its cursor passes every message it checked.
+func TestChatReadFromATime(t *testing.T) {
+	store := openTestStore(t)
+	entry := mustAdd(t, store, "thread", "", nil)
+	key := store.mustKey(entry.Ref)
+	hour := func(n int) time.Time {
+		return time.Date(2026, 10, 9, n, 0, 0, 0, time.UTC)
+	}
+	for n, body := range []string{"one", "two", "three"} {
+		message := mustPost(t, store, entry.Ref, body)
+		if _, err := store.db.Exec(`UPDATE entry_messages
+			SET created_utc = ?1, modified_utc = ?1
+			WHERE workspace_id = ?2 AND entry_id = ?3 AND id = ?4`,
+			formatTime(hour(n)), key.Workspace, key.ID, message.Number,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, test := range []struct {
+		after time.Time
+		limit int
+		want  string
+	}{
+		{hour(1), 10, "e1-m2:two e1-m3:three cursor=3 remaining=0"},
+		{hour(1), 1, "e1-m2:two cursor=2 remaining=1"},
+		{hour(3), 10, " cursor=3 remaining=0"},
+	} {
+		page, err := store.Messages(context.Background(), key,
+			api.ChatBound{Time: test.after}, Filter{}, nil, test.limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := chatText(page); got != test.want {
+			t.Fatalf("after %s limit %d = %q, want %q", test.after,
+				test.limit, got, test.want)
 		}
 	}
 }

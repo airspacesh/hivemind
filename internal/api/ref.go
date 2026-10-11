@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // Ref names an entry by its workspace prefix and its number within
@@ -93,6 +94,18 @@ func ParseMessageRef(text string) (MessageRef, error) {
 		Entry:  Ref{Prefix: match[1], ID: id},
 		Number: number,
 	}, nil
+}
+
+// ParseMessageCursor reads a chat cursor, the message read up to, as
+// a message id. Unlike an id it may number 0, like e40-m0, to stand
+// before the chat's first message.
+func ParseMessageCursor(text string) (MessageRef, error) {
+	if entry, ok := strings.CutSuffix(text, "-m0"); ok {
+		if ref, err := ParseRef(entry); err == nil {
+			return MessageRef{Entry: ref}, nil
+		}
+	}
+	return ParseMessageRef(text)
 }
 
 func (m MessageRef) String() string {

@@ -100,13 +100,13 @@ ws edit e1 --meta pr=https://example.com/pond/pull/123 --unlink see
 # Talk in an entry's chat, keeping the cursor to read only newer
 # messages.
 ws chat send e1 "Are the ducklings counted yet?"
-ws chat read e1 --since 0
-ws chat wait e1 --since 1 --timeout 1m
+ws chat read e1
+ws chat wait e1 --after e1-m1 --timeout 1m
 ws chat recent
 
 # Wait for anything to change in a workspace, or print every change
 # as it arrives.
-ws wait --since 0
+ws wait --after @0
 ws firehose
 
 # Check every configured workspace.

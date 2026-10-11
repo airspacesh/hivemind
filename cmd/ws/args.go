@@ -273,3 +273,23 @@ func parseBoundFlag(flag, value string, now time.Time) (api.Bound, error) {
 		"span back from now like 2d, 6h or 90m, a date like 2026-10-09, "+
 		"or a date and time like 2026-10-09T14:30, not %q", flag, value)
 }
+
+// parseRevisionFlag reads a flag that takes a change cursor, which is a
+// revision like @812345, or @0 for the start.
+func parseRevisionFlag(flag, value string) (int64, error) {
+	if strings.HasPrefix(value, "@") {
+		revision, err := api.ParseRevision(value)
+		if err != nil {
+			return 0, fmt.Errorf("%s: %w", flag, err)
+		}
+		return revision, nil
+	}
+	if _, err := parseBoundFlag(flag, value, time.Now()); err == nil {
+		return 0, fmt.Errorf("%s takes a revision like @812345, not a "+
+			"time, because the server reads changes by revision. To list "+
+			"what changed after a time, run '%s recent --include-chat %s "+
+			"%s'", flag, programName, flag, shellQuote(value))
+	}
+	return 0, fmt.Errorf("%s must be a revision like @812345, or @0 for "+
+		"the start, not %q", flag, value)
+}

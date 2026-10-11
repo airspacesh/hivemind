@@ -341,17 +341,18 @@ func printMessage(
 // printCursorLine ends a chat output with the cursor to read on from,
 // as the command that uses it. A suggested wait repeats filterArgs.
 func printCursorLine(entry api.Ref, page api.ChatPage, filterArgs string) {
+	cursor := api.MessageRef{Entry: entry, Number: page.Cursor}
 	if page.Remaining > 0 {
 		noun := "messages"
 		if page.Remaining == 1 {
 			noun = "message"
 		}
-		fmt.Printf("Next: %s chat read %s --since %d (%d more %s)\n",
-			programName, entry, page.Cursor, page.Remaining, noun)
+		fmt.Printf("Next: %s chat read %s --after %s (%d more %s)\n",
+			programName, entry, cursor, page.Remaining, noun)
 		return
 	}
-	fmt.Printf("Cursor: %d (wait for more: %s chat wait %s --since %d%s)\n",
-		page.Cursor, programName, entry, page.Cursor, filterArgs)
+	fmt.Printf("Cursor: %s (wait for more: %s chat wait %s --after %s%s)\n",
+		cursor, programName, entry, cursor, filterArgs)
 }
 
 // printChatPage prints one chat's messages oldest first, then the

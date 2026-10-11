@@ -141,11 +141,11 @@ func TestEachSecretGrantsOnlyItsOwnWorkspace(t *testing.T) {
 		{personalSecret, "/api/entries/t1", http.StatusUnauthorized},
 		{personalSecret, "/api/workspaces/team/messages",
 			http.StatusUnauthorized},
-		{"", "/api/workspaces/personal/changes?since=0",
+		{"", "/api/workspaces/personal/changes?after=@0",
 			http.StatusUnauthorized},
-		{teamSecret, "/api/workspaces/personal/changes?since=now",
+		{teamSecret, "/api/workspaces/personal/changes",
 			http.StatusUnauthorized},
-		{personalSecret, "/api/workspaces/personal/changes?since=0",
+		{personalSecret, "/api/workspaces/personal/changes?after=@0",
 			http.StatusOK},
 		{teamSecret, "/api/entries/t1", http.StatusOK},
 		{teamSecret, "/api/entries/p1", http.StatusUnauthorized},
@@ -209,7 +209,7 @@ func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 	}{
 		{"GET", "/api/entries/x1", "", 404, api.CodeUnknownPrefix},
 		{"GET", "/api/entries/e9", "", 404, api.CodeEntryNotFound},
-		{"GET", "/api/entries/e1/messages?since=0", "", 200, ""},
+		{"GET", "/api/entries/e1/messages?after=0", "", 200, ""},
 		{"GET", "/api/entries/x1/messages", "", 404, api.CodeUnknownPrefix},
 		{"GET", "/api/entries/e9/tree", "", 404, api.CodeEntryNotFound},
 		{"PATCH", "/api/entries/e1/messages/3",
@@ -232,7 +232,7 @@ func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 			entryBody("probe", `{"name":"see","ref":"e9"}`), 400,
 			api.CodeLinkTargetNotFound},
 		{"GET", "/api/entries/E1", "", 400, api.CodeBadRequest},
-		{"GET", "/api/entries/e1/messages?since=1&latest=2", "", 400,
+		{"GET", "/api/entries/e1/messages?after=1&latest=2", "", 400,
 			api.CodeBadRequest},
 		{"GET", "/nowhere", "", 404, api.CodeRouteNotFound},
 	} {
@@ -506,9 +506,11 @@ func TestChatReadsOverHTTP(t *testing.T) {
 			strconv.Itoa(page.Remaining)
 	}
 	for query, want := range map[string]string{
-		"?since=0&limit=2": "e1-m1:one! e1-m2:two cursor=2 remaining=1",
-		"?since=2":         "e1-m3:three cursor=3 remaining=0",
-		"?latest=2":        "e1-m2:two e1-m3:three cursor=3 remaining=0",
+		"?after=0&limit=2": "e1-m1:one! e1-m2:two cursor=2 remaining=1",
+		"?after=2":         "e1-m3:three cursor=3 remaining=0",
+		"?after=2000-01-01T00:00:00Z&limit=1": "e1-m1:one! cursor=1 " +
+			"remaining=2",
+		"?latest=2": "e1-m2:two e1-m3:three cursor=3 remaining=0",
 	} {
 		if got := read(query); got != want {
 			t.Fatalf("messages%s = %q, want %q", query, got, want)
@@ -530,7 +532,7 @@ func TestExcludedSessionlessKeyOverHTTP(t *testing.T) {
 
 	exclude := "exclude-user=duck&exclude-claude-session="
 	var chat api.ChatPage
-	text := s.must(t, "GET", "/api/entries/e1/messages?since=0&"+exclude,
+	text := s.must(t, "GET", "/api/entries/e1/messages?after=0&"+exclude,
 		"", "", http.StatusOK)
 	if err := json.Unmarshal([]byte(text), &chat); err != nil {
 		t.Fatal(err)
@@ -541,7 +543,7 @@ func TestExcludedSessionlessKeyOverHTTP(t *testing.T) {
 	}
 
 	var changes api.ChangesPage
-	text = s.must(t, "GET", "/api/workspaces/general/changes?since=0&"+
+	text = s.must(t, "GET", "/api/workspaces/general/changes?after=@0&"+
 		exclude, "", "", http.StatusOK)
 	if err := json.Unmarshal([]byte(text), &changes); err != nil {
 		t.Fatal(err)

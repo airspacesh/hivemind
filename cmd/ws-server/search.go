@@ -47,7 +47,7 @@ var singleQueryParameters = map[string]bool{
 // changesQueryParameters are the parameters of the changes feed,
 // besides its conditions.
 var changesQueryParameters = map[string]bool{
-	"since":                  true,
+	"after":                  true,
 	"limit":                  true,
 	"under":                  true,
 	"exclude-user":           true,
@@ -73,7 +73,7 @@ var messageConditionParameters = map[string]bool{
 // chatQueryParameters are the parameters of a chat read, besides its
 // conditions.
 var chatQueryParameters = map[string]bool{
-	"since":                  true,
+	"after":                  true,
 	"latest":                 true,
 	"limit":                  true,
 	"exclude-user":           true,

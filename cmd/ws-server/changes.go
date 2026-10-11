@@ -2,7 +2,6 @@ package main
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/airspacesh/workstream/internal/api"
 )
@@ -13,21 +12,22 @@ const (
 )
 
 // changes returns a page of a workspace's changes after the revision
-// since that match the query's conditions, or an empty page whose
-// cursor is the latest revision, given since=now.
+// the query's after names that match its conditions, or an empty page
+// whose cursor is the latest revision, given no after.
 func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 	query, ok := parseQuery(w, r)
 	if !ok || !validateQuery(w, query, repeatedQueryParameters,
 		changesQueryParameters) {
 		return
 	}
-	text := query.Get("since")
-	now := text == "now"
-	since, err := strconv.ParseInt(text, 10, 64)
-	if !now && (err != nil || since < 0) {
-		writeBadRequest(w, "since must be a revision, 0 for the start, "+
-			"or now for the latest change")
-		return
+	_, hasAfter := query["after"]
+	var after int64
+	if hasAfter {
+		var err error
+		if after, err = api.ParseRevision(query.Get("after")); err != nil {
+			writeBadRequest(w, "after: "+err.Error())
+			return
+		}
 	}
 	limit, err := queryInteger(query, "limit", defaultChangesLimit,
 		1, maxChangesLimit)
@@ -62,12 +62,12 @@ func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var page api.ChangesPage
-	if now {
+	if !hasAfter {
 		page.Changes = []api.Change{}
 		page.Cursor, err = h.store.LatestRevision(r.Context())
 	} else {
 		page, err = h.store.Changes(r.Context(), access, workspace.ID,
-			since, filter, exclude, int(limit))
+			after, filter, exclude, int(limit))
 	}
 	if err != nil {
 		writeStoreError(w, err)

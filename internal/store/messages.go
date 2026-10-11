@@ -294,8 +294,8 @@ func (s *Store) readChatPage(
 	return page, nil
 }
 
-// Messages returns up to limit messages of an entry's chat after the
-// cursor since that match a filter, oldest first, leaving out those
+// Messages returns up to limit messages of an entry's chat from the
+// bound after on that match a filter, oldest first, leaving out those
 // whose origin has the key exclude, when there is one. The filter's
 // text matches each message.
 //
@@ -305,7 +305,7 @@ func (s *Store) readChatPage(
 func (s *Store) Messages(
 	ctx context.Context,
 	entry Key,
-	since int64,
+	after api.ChatBound,
 	filter Filter,
 	exclude *OriginKey,
 	limit int,
@@ -315,9 +315,10 @@ func (s *Store) Messages(
 		return api.ChatPage{}, err
 	}
 	where.excludeOrigin("m", exclude)
+	where.addSpan(`m.created_utc`, Span{After: after.Time})
 	where.clauses = append(where.clauses, `m.workspace_id = ?`,
 		`m.entry_id = ?`, `m.id > ?`)
-	where.args = append(where.args, entry.Workspace, entry.ID, since)
+	where.args = append(where.args, entry.Workspace, entry.ID, after.Number)
 
 	tx, err := s.reads.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -328,7 +329,7 @@ func (s *Store) Messages(
 	if err := v.checkEntryExists(ctx, entry); err != nil {
 		return api.ChatPage{}, err
 	}
-	return s.readChatPage(ctx, tx, entry, since, limit, `
+	return s.readChatPage(ctx, tx, entry, after.Number, limit, `
 		SELECT `+messageColumns+`
 		FROM entry_messages AS m CROSS JOIN entries AS e
 			ON e.workspace_id = m.workspace_id AND e.id = m.entry_id`+

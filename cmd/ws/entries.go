@@ -582,18 +582,6 @@ func searchQuery(p *parsedArgs) (url.Values, error) {
 			query.Add(parameter, value)
 		}
 	}
-
-	now := time.Now()
-	for _, flag := range []string{"--after", "--before"} {
-		if !p.has(flag) {
-			continue
-		}
-		bound, err := parseBoundFlag(flag, p.strs[flag], now)
-		if err != nil {
-			return nil, err
-		}
-		query.Set(strings.TrimPrefix(flag, "--"), bound.String())
-	}
 	return query, nil
 }
 
@@ -691,6 +679,19 @@ func cmdListing(c *client, command string, args []string) error {
 	if len(p.pos) == 1 {
 		query.Add("content", p.pos[0])
 	}
+
+	now := time.Now()
+	for _, flag := range []string{"--after", "--before"} {
+		if !p.has(flag) {
+			continue
+		}
+		bound, err := parseBoundFlag(flag, p.strs[flag], now)
+		if err != nil {
+			return err
+		}
+		query.Set(strings.TrimPrefix(flag, "--"), bound.String())
+	}
+
 	limit := 20
 	if p.has("--limit") {
 		if limit, err = parsePositive("--limit", p.strs["--limit"]); err != nil {
