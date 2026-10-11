@@ -57,6 +57,38 @@ func (s *Store) getMessage(
 	return message, nil
 }
 
+// MessageDetail returns one message of a post's chat, with the post and
+// the path to it.
+func (s *Store) MessageDetail(
+	ctx context.Context, access Access, post Key, number int64,
+) (api.MessageDetail, error) {
+	v, err := s.begin(ctx, access, true)
+	if err != nil {
+		return api.MessageDetail{}, fmt.Errorf("reading message: %w", err)
+	}
+	defer v.tx.Rollback()
+	if err := v.checkPostExists(ctx, post); err != nil {
+		return api.MessageDetail{}, err
+	}
+
+	message, err := s.getMessage(ctx, v.tx, post, number)
+	if err != nil {
+		return api.MessageDetail{}, err
+	}
+	detail := api.MessageDetail{Message: message}
+	if detail.Post, err = v.postRef(ctx, post); err != nil {
+		return api.MessageDetail{}, err
+	}
+	if detail.Ancestors, err = v.ancestors(ctx, post); err != nil {
+		return api.MessageDetail{}, err
+	}
+	if err := v.tx.Commit(); err != nil {
+		return api.MessageDetail{}, fmt.Errorf("finishing message read: %w",
+			err)
+	}
+	return detail, nil
+}
+
 // recordChatActivity moves a post's activity time and revision to a
 // change in its chat, in the transaction that makes the change.
 func recordChatActivity(

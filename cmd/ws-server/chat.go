@@ -43,21 +43,37 @@ func (h *handler) postMessage(w http.ResponseWriter, r *http.Request) {
 // post the request must be able to read. The message may not exist.
 func (h *handler) pathMessage(
 	w http.ResponseWriter, r *http.Request,
-) (store.Key, int64, bool) {
+) (store.Access, store.Key, int64, bool) {
 	number, err := strconv.ParseInt(r.PathValue("n"), 10, 64)
 	if err != nil || number <= 0 {
 		writeBadRequest(w, "the message number must be a positive integer")
-		return store.Key{}, 0, false
+		return store.Access{}, store.Key{}, 0, false
 	}
-	_, post, ok := h.pathPost(w, r)
-	return post, number, ok
+	access, post, ok := h.pathPost(w, r)
+	return access, post, number, ok
+}
+
+func (h *handler) getMessage(w http.ResponseWriter, r *http.Request) {
+	if !requireNoQuery(w, r) {
+		return
+	}
+	access, post, number, ok := h.pathMessage(w, r)
+	if !ok {
+		return
+	}
+	detail, err := h.store.MessageDetail(r.Context(), access, post, number)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
 }
 
 func (h *handler) editMessage(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return
 	}
-	post, number, ok := h.pathMessage(w, r)
+	_, post, number, ok := h.pathMessage(w, r)
 	if !ok {
 		return
 	}
@@ -82,7 +98,7 @@ func (h *handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return
 	}
-	post, number, ok := h.pathMessage(w, r)
+	_, post, number, ok := h.pathMessage(w, r)
 	if !ok {
 		return
 	}

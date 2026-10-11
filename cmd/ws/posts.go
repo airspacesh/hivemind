@@ -478,9 +478,27 @@ func cmdDelete(c *client, args []string) error {
 	return nil
 }
 
+// showMessage shows one message in full, under its post's line.
+func (c *client) showMessage(ref api.MessageRef) error {
+	t, err := c.resolve(ref.Post)
+	if err != nil {
+		return err
+	}
+	var detail api.MessageDetail
+	path := postPath(ref.Post, fmt.Sprintf("/messages/%d", ref.Number))
+	if err := c.do(t, "GET", path, nil, &detail); err != nil {
+		return err
+	}
+	printMessageDetail(detail)
+	return nil
+}
+
 func cmdPost(c *client, args []string) error {
 	if len(args) != 1 {
-		return usageError("post <ref>")
+		return usageError("post <ref>|<ref>-m<n>")
+	}
+	if message, err := api.ParseMessageRef(args[0]); err == nil {
+		return c.showMessage(message)
 	}
 	ref, err := api.ParseRef(args[0])
 	if err != nil {

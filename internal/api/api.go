@@ -140,6 +140,14 @@ func (m Message) Ref() MessageRef {
 	return MessageRef{Post: m.Post, Number: m.Number}
 }
 
+// MessageDetail is one message with the post whose chat holds it, and
+// the path to that post from the root.
+type MessageDetail struct {
+	Message   Message   `json:"message"`
+	Post      PostRef   `json:"post"`
+	Ancestors []PostRef `json:"ancestors,omitempty"`
+}
+
 type PostMessageRequest struct {
 	Body   string `json:"body"`
 	Origin Origin `json:"origin"`

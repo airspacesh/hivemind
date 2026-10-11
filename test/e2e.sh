@@ -409,6 +409,14 @@ check_equal "chat recent says how to read what it left out" \
 ws chat edit "$chat-m1" "First, edited" >/dev/null
 check "an edit stays in place" "[$chat-m1]" \
     "$(ws chat read "$chat" --after "$chat-m0" --limit 1)"
+message_detail="$(ws post "$chat-m1")"
+check_equal "post shows a message under its post's line" "[$chat] Chat thread
+  [$chat-m1] $(id -un) (edited): First, edited" \
+    "$(echo "$message_detail" | head -2 |
+        sed -E 's/ [0-9]{2}:[0-9]{2}( |$)/\1/')"
+check "post shows when a message was edited" "Modified: " "$message_detail"
+check "post says a missing message is missing" \
+    "message not found: $chat-m99" "$(ws post "$chat-m99" 2>&1 || true)"
 check_equal "no read returns the old text" "" \
     "$(ws chat read "$chat" | grep QUESTIONMARK || true)"
 overview="$(ws chat recent)"
@@ -562,6 +570,9 @@ check_equal "you can delete your own message" "Deleted [$gadwall-m2] at @R." \
 gadwall_post="$(ws post "$gadwall")"
 check "a deleted post shows as deleted" "[$gadwall] (deleted)" \
     "$gadwall_post"
+check "post shows a deleted message as deleted" \
+    "  [$gadwall-m2] $(id -un) (deleted)" \
+    "$(ws post "$gadwall-m2" | sed -E 's/ [0-9]{2}:[0-9]{2} / /')"
 check "a deleted post shows when it was deleted" "Deleted: " \
     "$gadwall_post"
 check_equal "a deleted post keeps no body or metadata" "" \

@@ -280,6 +280,25 @@ func printPostDetail(d api.PostDetail) {
 	}
 }
 
+// printMessageDetail prints a message under the line of its post, then
+// when and where it was written.
+func printMessageDetail(d api.MessageDetail) {
+	m := d.Message
+	printChatHeader(d.Post)
+	printMessage(m, nil, m.Created, "  ", clockLayout)
+	fmt.Println()
+	fmt.Println("Created: " + localTimeDetail(m.Created))
+	if m.Deleted {
+		fmt.Println("Deleted: " + localTimeDetail(m.Modified))
+	} else {
+		fmt.Println("Modified: " + localTimeDetail(m.Modified))
+	}
+	printOrigin(m.Origin)
+	if len(d.Ancestors) > 0 {
+		fmt.Println("Path: " + formatPath(d.Ancestors))
+	}
+}
+
 // printTree prints a post's subtree, each post indented under its
 // parent, with the path to the post above it and a marker wherever the
 // tree was cut.

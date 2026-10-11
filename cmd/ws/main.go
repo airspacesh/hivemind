@@ -36,7 +36,7 @@ Usage:
          [--supersedes <ref>]... [--link <name>=<ref>]...
          [--unlink <name>[=<ref>]]... [--no-recent]
   {program} delete <ref>
-  {program} post <ref>
+  {program} post <ref>|<ref>-m<n>
   {program} tree <ref> [--limit 30] [--include-superseded]
   {program} recent [--include-chat] [--under <ref>] [search filters]
          [--workspace <name>]
@@ -208,6 +208,8 @@ Chat:
   messages across the workspace, under their posts, and ends with the
   revision it read at, as a listing does. Both say how to read the
   earlier messages they leave out, as a send does.
+  '{program} post <ref>-m<n>' shows one message under its post's line,
+  with when and where it was written, as '{program} post' shows a post.
   '{program} chat read' shows the messages after --after, or from the
   start with no --after, a page at a time, and says how to read the
   next page.
