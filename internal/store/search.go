@@ -393,16 +393,30 @@ func (c candidateSet) within(others candidateSet) candidateSet {
 const eachChat = `CROSS JOIN post_messages AS m
 	INDEXED BY sqlite_autoindex_post_messages_1`
 
-// findOriginCandidates lists the posts of a workspace, and when the
-// search covers chat, the messages, that came from a user, by looking
-// up the first origin user pattern that starts with literal text in the
-// origin user indexes. SQLite reads only the part of an index that
-// starts with that text, as its LIKE optimization describes. The
-// candidates come sorted. It reports false when no pattern starts with
-// literal text, or when a lookup finds more than limit rows.
-func (v view) findOriginCandidates(
-	ctx context.Context, workspace int64, filter Filter, limit int,
-) (candidateSet, bool, error) {
+// candidateLookup finds the posts and messages of a workspace that a
+// search may match, for one kind of filter. posts selects post ids and
+// messages selects message post_orders, each taking its args and then a
+// limit. Without a messages query, the messages that may match are
+// those in the chats of the posts found, as for a filter that only a
+// post can match.
+type candidateLookup struct {
+	// what names what the lookup reads, for its errors.
+	what        string
+	posts       string
+	postArgs    []any
+	messages    string
+	messageArgs []any
+	// costed keeps the posts read by key to those cheaper to read than
+	// a page found newest first, as lookupPostLimit has it.
+	costed bool
+}
+
+// originLookup looks up the posts, and the messages, that came from a
+// user, by the first origin user pattern that starts with literal text,
+// in the origin user indexes. SQLite reads only the part of an index
+// that starts with that text, as its LIKE optimization describes. It
+// reports false when no pattern starts with literal text.
+func originLookup(workspace int64, filter Filter) (candidateLookup, bool) {
 	var pattern string
 	for _, condition := range filter.OriginUser {
 		value := lowerASCII(condition.Value)
@@ -414,39 +428,19 @@ func (v view) findOriginCandidates(
 		break
 	}
 	if pattern == "" {
-		return candidateSet{}, false, nil
+		return candidateLookup{}, false
 	}
-
-	var found candidateSet
-	var ok bool
-	var err error
-	found.posts, ok, err = v.readCandidates(ctx, `
-		SELECT id FROM posts
-		WHERE workspace_id = ? AND origin_user_lower GLOB ? LIMIT ?`,
-		limit, workspace, pattern)
-	if err != nil {
-		return candidateSet{}, false, fmt.Errorf(
-			"looking up origin users: %w", err)
-	}
-	if !ok {
-		return candidateSet{}, false, nil
-	}
-	if filter.IncludeChat {
-		found.messages, ok, err = v.readCandidates(ctx, `
+	return candidateLookup{
+		what: "origin users",
+		posts: `
+			SELECT id FROM posts
+			WHERE workspace_id = ? AND origin_user_lower GLOB ? LIMIT ?`,
+		postArgs: []any{workspace, pattern},
+		messages: `
 			SELECT post_order FROM post_messages
 			WHERE workspace_id = ? AND origin_user_lower GLOB ? LIMIT ?`,
-			limit, workspace, pattern)
-		if err != nil {
-			return candidateSet{}, false, fmt.Errorf(
-				"looking up origin users: %w", err)
-		}
-		if !ok {
-			return candidateSet{}, false, nil
-		}
-	}
-	slices.Sort(found.posts)
-	slices.Sort(found.messages)
-	return found, true, nil
+		messageArgs: []any{workspace, pattern},
+	}, true
 }
 
 // candidateReadCost is what reading a candidate post by key, and the
@@ -472,72 +466,41 @@ func (v view) lookupPostLimit(
 	return int(math.Sqrt(float64(limit*total) / candidateReadCost)), nil
 }
 
-// findProjectCandidates lists the posts of a workspace in the projects
-// the project filters match, and when the search covers chat, the
-// messages in their chats. It matches the filters against the
-// workspace's project names, then finds each matching project's posts
-// in the project indexes. The candidates come sorted. It reports false
-// when there are no project filters, when a lookup finds more than
-// limit rows, or when the projects hold too many posts to read them
-// sooner than a page found newest first, as lookupPostLimit has it.
-func (v view) findProjectCandidates(
-	ctx context.Context, workspace int64, filter Filter, limit int,
-) (candidateSet, bool, error) {
+// projectLookup looks up the posts in the projects the project filters
+// match. It matches the filters against the workspace's project names,
+// then finds each matching project's posts in the project indexes. It
+// reports false when there are no project filters.
+func projectLookup(
+	workspace int64, filter Filter,
+) (candidateLookup, bool, error) {
 	if len(filter.Project) == 0 {
-		return candidateSet{}, false, nil
+		return candidateLookup{}, false, nil
 	}
 	var where whereBuilder
 	if err := where.addField("project", "lower(names.project)",
 		filter.Project); err != nil {
-		return candidateSet{}, false, err
+		return candidateLookup{}, false, err
 	}
-	postLimit, err := v.lookupPostLimit(ctx, workspace, filter.Limit)
-	if err != nil {
-		return candidateSet{}, false, err
-	}
-
-	var found candidateSet
-	var ok bool
 	// projectNames takes the workspace as ?1, so the patterns after it
 	// take ?2 on.
-	found.posts, ok, err = v.readCandidates(ctx, projectNames+`
-		SELECT e.id FROM names CROSS JOIN posts AS e
-			ON e.workspace_id = ?1 AND e.project = names.project`+
-		where.sql()+` LIMIT ?`,
-		min(limit, postLimit), append([]any{workspace}, where.args...)...)
-	if err != nil {
-		return candidateSet{}, false, fmt.Errorf(
-			"looking up projects: %w", err)
-	}
-	if !ok {
-		return candidateSet{}, false, nil
-	}
-	if filter.IncludeChat {
-		found.messages, ok, err = v.readChatCandidates(ctx, workspace,
-			found.posts, limit)
-		if err != nil {
-			return candidateSet{}, false, err
-		}
-		if !ok {
-			return candidateSet{}, false, nil
-		}
-	}
-	slices.Sort(found.posts)
-	slices.Sort(found.messages)
-	return found, true, nil
+	return candidateLookup{
+		what: "projects",
+		posts: projectNames + `
+			SELECT e.id FROM names CROSS JOIN posts AS e
+				ON e.workspace_id = ?1 AND e.project = names.project` +
+			where.sql() + ` LIMIT ?`,
+		postArgs: append([]any{workspace}, where.args...),
+		costed:   true,
+	}, true, nil
 }
 
-// findMetadataCandidates lists the posts of a workspace that hold the
-// pair the first metadata filter not negated asks for, or failing that,
-// the key the first key filter not negated asks for, and when the
-// search covers chat, the messages in their chats. It finds them in the
-// metadata key index. The candidates come sorted. It reports false when
-// there is no such filter, when a lookup finds more than limit rows, or
-// when the posts are too many to read them sooner than a page found
-// newest first, as lookupPostLimit has it.
-func (v view) findMetadataCandidates(
-	ctx context.Context, workspace int64, filter Filter, limit int,
-) (candidateSet, bool, error) {
+// metadataLookup looks up the posts that hold the pair the first
+// metadata filter not negated asks for, or failing that, the key the
+// first key filter not negated asks for, in the metadata key index. It
+// reports false when there is no such filter.
+func metadataLookup(
+	workspace int64, filter Filter,
+) (candidateLookup, bool) {
 	// A key pattern with no wildcard or class matches that one key, and
 	// = rather than GLOB lets SQLite seek to the value pattern's literal
 	// start within the key.
@@ -564,32 +527,57 @@ func (v view) findMetadataCandidates(
 	case key >= 0:
 		match, args = keyMatch(filter.Key[key].Value)
 	default:
-		return candidateSet{}, false, nil
+		return candidateLookup{}, false
 	}
-	postLimit, err := v.lookupPostLimit(ctx, workspace, filter.Limit)
-	if err != nil {
-		return candidateSet{}, false, err
-	}
+	// A key pattern may match several keys of one post.
+	return candidateLookup{
+		what: "metadata",
+		posts: `
+			SELECT DISTINCT post_id FROM post_metadata
+			WHERE workspace_id = ?` + match + ` LIMIT ?`,
+		postArgs: append([]any{workspace}, args...),
+		costed:   true,
+	}, true
+}
 
+// readLookup runs a lookup in a workspace, reading at most postLimit
+// posts and, when the search covers chat, at most limit messages. The
+// candidates come sorted. It reports false when either read finds more.
+func (v view) readLookup(
+	ctx context.Context,
+	workspace int64,
+	lookup candidateLookup,
+	includeChat bool,
+	postLimit int,
+	limit int,
+) (candidateSet, bool, error) {
 	var found candidateSet
 	var ok bool
-	// A key pattern may match several keys of one post.
-	found.posts, ok, err = v.readCandidates(ctx, `
-		SELECT DISTINCT post_id FROM post_metadata
-		WHERE workspace_id = ?`+match+` LIMIT ?`,
-		min(limit, postLimit), append([]any{workspace}, args...)...)
+	var err error
+	found.posts, ok, err = v.readCandidates(ctx, lookup.posts, postLimit,
+		lookup.postArgs...)
 	if err != nil {
-		return candidateSet{}, false, fmt.Errorf(
-			"looking up metadata: %w", err)
+		return candidateSet{}, false, fmt.Errorf("looking up %s: %w",
+			lookup.what, err)
 	}
 	if !ok {
 		return candidateSet{}, false, nil
 	}
-	if filter.IncludeChat {
-		found.messages, ok, err = v.readChatCandidates(ctx, workspace,
-			found.posts, limit)
+	if includeChat {
+		messages, args := lookup.messages, lookup.messageArgs
+		if messages == "" {
+			messages = `
+				SELECT m.post_order FROM json_each(?) AS candidate ` +
+				eachChat + `
+					ON m.workspace_id = ? AND m.post_id = candidate.value
+				LIMIT ?`
+			args = []any{idsJSON(found.posts), workspace}
+		}
+		found.messages, ok, err = v.readCandidates(ctx, messages, limit,
+			args...)
 		if err != nil {
-			return candidateSet{}, false, err
+			return candidateSet{}, false, fmt.Errorf(
+				"looking up the messages of %s: %w", lookup.what, err)
 		}
 		if !ok {
 			return candidateSet{}, false, nil
@@ -607,19 +595,35 @@ func (v view) findMetadataCandidates(
 func (v view) findIndexedCandidates(
 	ctx context.Context, workspace int64, filter Filter, limit int,
 ) (candidateSet, bool, error) {
-	candidates, found, err := v.findTextCandidates(ctx, workspace, filter,
-		limit)
+	var lookups []candidateLookup
+	use := func(lookup candidateLookup, ok bool) {
+		if ok {
+			lookups = append(lookups, lookup)
+		}
+	}
+	use(textLookup(workspace, filter))
+	use(originLookup(workspace, filter))
+	project, ok, err := projectLookup(workspace, filter)
 	if err != nil {
 		return candidateSet{}, false, err
 	}
-	// These lookups list their candidates sorted, as within needs.
-	for _, find := range []func(
-		context.Context, int64, Filter, int,
-	) (candidateSet, bool, error){
-		v.findOriginCandidates, v.findProjectCandidates,
-		v.findMetadataCandidates,
-	} {
-		others, othersFound, err := find(ctx, workspace, filter, limit)
+	use(project, ok)
+	use(metadataLookup(workspace, filter))
+
+	var candidates candidateSet
+	found := false
+	for _, lookup := range lookups {
+		postLimit := limit
+		if lookup.costed {
+			costLimit, err := v.lookupPostLimit(ctx, workspace,
+				filter.Limit)
+			if err != nil {
+				return candidateSet{}, false, err
+			}
+			postLimit = min(limit, costLimit)
+		}
+		others, othersFound, err := v.readLookup(ctx, workspace, lookup,
+			filter.IncludeChat, postLimit, limit)
 		if err != nil {
 			return candidateSet{}, false, err
 		}

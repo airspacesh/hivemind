@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"unicode/utf8"
 )
@@ -82,99 +81,43 @@ func (q *indexQuery) add(conditions []FieldCond) {
 	}
 }
 
-// findTextCandidates lists the posts of a workspace whose text holds
-// the literal text the search requires, and when the search covers
-// chat, the messages whose text does, by looking it up in the text
-// indexes. It reports false when the search names no text the indexes
-// can look up for the posts, or when a lookup finds more than limit
-// rows.
-func (v view) findTextCandidates(
-	ctx context.Context,
-	workspace int64,
-	filter Filter,
-	limit int,
-) (candidateSet, bool, error) {
+// sql is the query as FTS5 takes it.
+func (q indexQuery) sql() string {
+	return strings.Join(q, " AND ")
+}
+
+// textLookup looks up the posts whose text holds the literal text the
+// search requires, and the messages whose text does, in the text
+// indexes. Without content filters, the messages that may match are
+// those in the chats of the posts found. It reports false when the
+// search names no text the indexes can look up for the posts.
+func textLookup(workspace int64, filter Filter) (candidateLookup, bool) {
 	var postQuery indexQuery
 	postQuery.add(filter.Subject)
 	postQuery.add(filter.Body)
 	postQuery.add(filter.Content)
-	var found candidateSet
-	var ok bool
-	var err error
-	found.posts, ok, err = v.lookUpText(ctx, `
-		SELECT rowid & 0xffffffff FROM post_text
-		WHERE post_text MATCH ? AND rowid BETWEEN ? AND ? LIMIT ?`,
-		postQuery, workspace, limit)
-	if err != nil || !ok {
-		return candidateSet{}, false, err
+	if len(postQuery) == 0 {
+		return candidateLookup{}, false
 	}
-	if !filter.IncludeChat {
-		return found, true, nil
+	first := workspace << 32
+	lookup := candidateLookup{
+		what: "search text",
+		posts: `
+			SELECT rowid & 0xffffffff FROM post_text
+			WHERE post_text MATCH ? AND rowid BETWEEN ? AND ? LIMIT ?`,
+		postArgs: []any{postQuery.sql(), first, first | 0xffffffff},
 	}
 
 	var messageQuery indexQuery
 	messageQuery.add(filter.Content)
-	if len(messageQuery) == 0 {
-		// A matching message's post holds the subject and body text, so
-		// with no text for the messages, the messages in the chats of
-		// the posts found are the candidates.
-		found.messages, ok, err = v.readChatCandidates(ctx, workspace,
-			found.posts, limit)
-		if err != nil {
-			return candidateSet{}, false, err
-		}
-	} else {
-		found.messages, ok, err = v.lookUpText(ctx, `
+	if len(messageQuery) > 0 {
+		lookup.messages = `
 			SELECT rowid & 0xffffffff FROM message_text
-			WHERE message_text MATCH ? AND rowid BETWEEN ? AND ? LIMIT ?`,
-			messageQuery, workspace, limit)
-		if err != nil {
-			return candidateSet{}, false, err
-		}
+			WHERE message_text MATCH ? AND rowid BETWEEN ? AND ? LIMIT ?`
+		lookup.messageArgs = []any{messageQuery.sql(), first,
+			first | 0xffffffff}
 	}
-	if !ok {
-		return candidateSet{}, false, nil
-	}
-	return found, true, nil
-}
-
-// lookUpText runs a lookup in a text index, restricted to one
-// workspace's rows, and lists the ids it selects. It reports false
-// when the query is empty or finds more than limit rows.
-func (v view) lookUpText(
-	ctx context.Context,
-	lookup string,
-	query indexQuery,
-	workspace int64,
-	limit int,
-) ([]int64, bool, error) {
-	if len(query) == 0 {
-		return nil, false, nil
-	}
-	first := workspace << 32
-	ids, ok, err := v.readCandidates(ctx, lookup, limit,
-		strings.Join(query, " AND "), first, first|0xffffffff)
-	if err != nil {
-		return nil, false, fmt.Errorf("looking up search text: %w", err)
-	}
-	return ids, ok, nil
-}
-
-// readChatCandidates lists the messages in the chats of the given posts
-// of a workspace, by post_order. It reports false when there are more
-// than limit.
-func (v view) readChatCandidates(
-	ctx context.Context, workspace int64, posts []int64, limit int,
-) ([]int64, bool, error) {
-	ids, ok, err := v.readCandidates(ctx, `
-		SELECT m.post_order FROM json_each(?) AS candidate `+eachChat+`
-			ON m.workspace_id = ? AND m.post_id = candidate.value
-		LIMIT ?`, limit, idsJSON(posts), workspace)
-	if err != nil {
-		return nil, false, fmt.Errorf(
-			"reading the chats of search candidates: %w", err)
-	}
-	return ids, ok, nil
+	return lookup, true
 }
 
 // readCandidates runs a lookup of candidates for a search, given its
