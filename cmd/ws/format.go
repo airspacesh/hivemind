@@ -339,9 +339,16 @@ func printMessage(
 	}
 }
 
-// printCursorLine ends a chat output with the cursor to read on from,
-// as the command that uses it. A suggested wait repeats filterArgs.
-func printCursorLine(post api.Ref, page api.ChatPage, filterArgs string) {
+// chatWaitCommand is the chat wait that reads a chat after cursor, with
+// the filters it was given.
+func chatWaitCommand(cursor api.MessageRef, filterArgs string) string {
+	return fmt.Sprintf("%s chat wait %s --after %s%s", programName,
+		cursor.Post, cursor, filterArgs)
+}
+
+// printCursorLine ends a chat read with the cursor to read on from, as
+// the command that uses it.
+func printCursorLine(post api.Ref, page api.ChatPage) {
 	cursor := api.MessageRef{Post: post, Number: page.Cursor}
 	if page.Remaining > 0 {
 		noun := "messages"
@@ -352,15 +359,13 @@ func printCursorLine(post api.Ref, page api.ChatPage, filterArgs string) {
 			programName, post, cursor, page.Remaining, noun)
 		return
 	}
-	fmt.Printf("Cursor: %s (wait for more: %s chat wait %s --after %s%s)\n",
-		cursor, programName, post, cursor, filterArgs)
+	fmt.Printf("Cursor: %s (wait for more: %s)\n", cursor,
+		chatWaitCommand(cursor, ""))
 }
 
-// printChatPage prints one chat's messages oldest first, then the
-// cursor line.
-func printChatPage(
-	post api.Ref, page api.ChatPage, empty string, filterArgs string,
-) {
+// printChatMessages prints one chat's messages oldest first, or empty
+// when there are none.
+func printChatMessages(page api.ChatPage, empty string) {
 	if len(page.Messages) == 0 {
 		fmt.Println(empty)
 	}
@@ -368,7 +373,13 @@ func printChatPage(
 	for _, m := range page.Messages {
 		printMessage(m, nil, "", layout)
 	}
-	printCursorLine(post, page, filterArgs)
+}
+
+// printChatPage prints one chat's messages oldest first, then the
+// cursor line.
+func printChatPage(post api.Ref, page api.ChatPage, empty string) {
+	printChatMessages(page, empty)
+	printCursorLine(post, page)
 }
 
 // printChatHeader names the post a run of chat messages belongs to.

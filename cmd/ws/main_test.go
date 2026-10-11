@@ -1090,6 +1090,27 @@ func TestWaitsExcludeTheirOwnSession(t *testing.T) {
 	}
 }
 
+// A chat wait that leaves messages unchecked reads on with another wait,
+// since a chat read would drop its filters and show your own messages.
+func TestChatWaitReadsOnWithItsFilters(t *testing.T) {
+	server := newFakeServer(t, hosting(func(w http.ResponseWriter,
+		r *http.Request) {
+		reply(w, http.StatusOK, api.ChatPage{
+			Messages: []api.Message{{Post: api.Ref{Prefix: "e", ID: 1},
+				Number: 20, Body: "quack"}},
+			Cursor: 20, Remaining: 6})
+	}, "general=e"))
+	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
+		server.URL+"\n", 0o600)
+	got := ws(t, config, "chat", "wait", "e1", "--after", "e1-m3",
+		"--content", "quack")
+	want := "Next: ws chat wait e1 --after e1-m20 --content quack " +
+		"(more messages to check)\n"
+	if !got.ok || !strings.HasSuffix(got.stdout, want) {
+		t.Fatalf("got %+v, want it to end with %q", got, want)
+	}
+}
+
 // A date, or a date and time, reads in local time, a span counts back
 // from now, and @ names a revision.
 func TestBoundFlagsReadLocalDatesSpansAndRevisions(t *testing.T) {

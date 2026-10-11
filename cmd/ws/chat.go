@@ -250,8 +250,7 @@ func cmdChatSend(c *client, args []string) error {
 	page.Messages = slices.DeleteFunc(page.Messages, func(m api.Message) bool {
 		return m.Number <= start
 	})
-	printChatPage(ref, page, fmt.Sprintf("No messages after %s.", cursor),
-		"")
+	printChatPage(ref, page, fmt.Sprintf("No messages after %s.", cursor))
 	return nil
 }
 
@@ -354,7 +353,7 @@ func cmdChatRecent(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	printChatPage(ref, page, fmt.Sprintf("%s has no messages yet.", ref), "")
+	printChatPage(ref, page, fmt.Sprintf("%s has no messages yet.", ref))
 	return nil
 }
 
@@ -415,7 +414,7 @@ func cmdChatRead(c *client, args []string) error {
 	if p.has("--after") {
 		empty = fmt.Sprintf("No messages %s.", describeChatAfter(ref, after))
 	}
-	printChatPage(ref, page, empty, "")
+	printChatPage(ref, page, empty)
 	return nil
 }
 
@@ -492,8 +491,18 @@ func cmdChatWait(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	printChatPage(ref, page, fmt.Sprintf("No matching messages %s within "+
-		"%s.", describeChatAfter(ref, after), timeout), filterArgs(p))
+	printChatMessages(page, fmt.Sprintf("No matching messages %s within "+
+		"%s.", describeChatAfter(ref, after), timeout))
+
+	// Remaining counts the messages the filters leave out too, so a wait
+	// with more to check reads on with another wait, not a count.
+	last := api.MessageRef{Post: ref, Number: page.Cursor}
+	next := chatWaitCommand(last, filterArgs(p))
+	if page.Remaining > 0 {
+		fmt.Printf("Next: %s (more messages to check)\n", next)
+		return nil
+	}
+	fmt.Printf("Cursor: %s (wait for more: %s)\n", last, next)
 	return nil
 }
 
