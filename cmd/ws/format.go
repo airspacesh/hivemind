@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -95,9 +96,9 @@ func formatPath(path []api.PostRef) string {
 	return strings.Join(parts, " > ")
 }
 
-// placeLabel shows where a listed post sits, as the ids of its
-// ancestors from the top down joined by dots, like " in e1.e34", or
-// nothing for a top-level post.
+// placeLabel shows where a listed post or message sits, as the ids of
+// the posts above it from the top down joined by dots, like
+// " in e1.e34", or nothing for a top-level post.
 func placeLabel(ancestors []api.PostRef) string {
 	if len(ancestors) == 0 {
 		return ""
@@ -107,6 +108,12 @@ func placeLabel(ancestors []api.PostRef) string {
 		ids[i] = post.Ref.String()
 	}
 	return " in " + strings.Join(ids, ".")
+}
+
+// pathTo is the path down to a post from the root, for a line about
+// something that sits in it, like a message in its chat.
+func pathTo(ancestors []api.PostRef, post api.Ref) []api.PostRef {
+	return append(slices.Clone(ancestors), api.PostRef{Ref: post})
 }
 
 // lineHead starts the line of a post or message with its ref, a time,
@@ -166,7 +173,8 @@ func printMatches(matches []api.Match) {
 	layout := timeLayout(times)
 	for _, m := range matches {
 		if m.Message != nil {
-			printMessage(*m.Message, m.Ancestors, m.At, "", layout)
+			printMessage(*m.Message, pathTo(m.Ancestors, m.Post.Ref), m.At,
+				"", layout)
 		} else {
 			printPostLine(m.Post, m.Ancestors, m.At, layout,
 				newMessagesLabel(m.NewMessages))
@@ -327,7 +335,8 @@ func messageTimes(messages []api.Message) []time.Time {
 
 // printMessage prints a message on one line, with a time, its author,
 // and any further lines of its text indented beneath. The path, when
-// given, is to the message's post. A deleted message shows no text.
+// given, runs down to the message's post. A deleted message shows no
+// text.
 func printMessage(
 	m api.Message, ancestors []api.PostRef, at time.Time,
 	indent, layout string,
@@ -504,7 +513,7 @@ func printChanges(changes []api.Change) {
 	for _, change := range changes {
 		post := change.Post
 		if change.Message != nil {
-			printMessage(*change.Message, post.Ancestors,
+			printMessage(*change.Message, pathTo(post.Ancestors, post.Ref),
 				change.Message.Modified, "", layout)
 		} else {
 			printPostLine(post.Post, post.Ancestors, post.Modified, layout, "")

@@ -461,11 +461,12 @@ check_equal "recent counts the messages posted since its oldest match" \
     "[$chat] $(id -un): Chat thread (1 new message)" \
     "$(ws recent --project chat -n 1 | untimed | head -1)"
 check_equal "recent with chat shares the limit with messages" \
-    "[$chat-m4] $(id -un): Woken
-[$race-m27] $(id -un): Within the hour
+    "[$chat-m4] $(id -un) in $chat: Woken
+[$race-m27] $(id -un) in $race: Within the hour
 Next: ws recent --before @R --workspace general --limit 2 --include-chat --project chat (more older matches)" \
     "$(ws recent --project chat --include-chat -n 2 | untimed)"
-check "search shows the matching messages" "[$chat-m4] $(id -un): Woken" \
+check "search shows the matching messages" \
+    "[$chat-m4] $(id -un) in $chat: Woken" \
     "$(ws search Woken | untimed)"
 
 # Only the user who wrote a post or message can edit or delete it, and
@@ -492,7 +493,7 @@ check_equal "anyone can chat on another user's post" "Sent [$heron-m1]." \
 post_as_heron "posts/$heron/messages" \
     '{"body":"Fixed soon","origin":{"user":"heron"}}'
 check "an origin filter finds that user's messages" \
-    "[$heron-m2] heron: Fixed soon" \
+    "[$heron-m2] heron in $heron: Fixed soon" \
     "$(ws search --origin-user heron | untimed)"
 check_equal "a message meets the text and origin filters itself" "" \
     "$(ws search Please --origin-user heron --id-only)"
@@ -510,7 +511,7 @@ check_equal "recent finds a post at any level by its origin" \
     "[$reply] $(id -un) in $heron: Reply under heron" \
     "$(ws recent --project owners --no-origin-user heron | untimed)"
 check_equal "recent with chat filters each message itself" \
-    "[$heron-m1] $(id -un): Please fix the subject
+    "[$heron-m1] $(id -un) in $heron: Please fix the subject
 [$reply] $(id -un) in $heron: Reply under heron" \
     "$(ws recent --project owners --no-origin-user heron --include-chat |
         untimed)"
@@ -566,7 +567,7 @@ check "a listing shows a deleted post as deleted" \
     "[$gadwall] $(id -un) in $heron.$reply (deleted)" \
     "$(ws recent --project owners | untimed)"
 check "a listing shows a deleted message as deleted" \
-    "[$gadwall-m2] $(id -un) in $heron.$reply (deleted)" \
+    "[$gadwall-m2] $(id -un) in $heron.$reply.$gadwall (deleted)" \
     "$(ws recent --project owners --include-chat | untimed)"
 check "a deleted message keeps its place and shows no text" \
     "[$gadwall-m1] $(id -un): Before
@@ -580,7 +581,7 @@ deletes="$(ws wait --after "$before_delete" --include-mine --timeout 1s |
     untimed)"
 check "a wait shows the deleted post and message" \
     "[$gadwall] $(id -un) in $heron.$reply (deleted)
-[$gadwall-m2] $(id -un) in $heron.$reply (deleted)" "$deletes"
+[$gadwall-m2] $(id -un) in $heron.$reply.$gadwall (deleted)" "$deletes"
 after_delete="$(echo "$deletes" | cursor_of)"
 check "an edit of a deleted post is refused" \
     "$gadwall was deleted, so it cannot be edited" \

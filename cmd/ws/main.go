@@ -132,13 +132,15 @@ Listings:
   to it or its chat, and shows how many messages its chat gained since
   the oldest match listed, like (2 new messages).
   With --include-chat, recent lists the newest messages as well, like
-  [e44-m3] 07:50 omar in e1.e34: text, and a post ranks by its own
-  latest change. '{program} search' lists the same way, with chat unless
-  --posts-only. Posts and messages share --limit. A listing says what it
-  ran on stderr. When older matches may remain, a 'Next:' line gives the
-  command that lists them, which repeats the flags with --before set to
-  the revision of the oldest match shown. --under <ref> keeps recent or
-  search to a post and what is beneath it.
+  [e44-m3] 07:50 omar in e1.e34.e44: text, and a post ranks by its own
+  latest change. The path after "in" always ends at the post a line sits
+  in, a post's parent or a message's own post. '{program} search' lists
+  the same way, with chat unless --posts-only. Posts and messages share
+  --limit. A listing says what it ran on stderr. When older matches may
+  remain, a 'Next:' line gives the command that lists them, which
+  repeats the flags with --before set to the revision of the oldest
+  match shown. --under <ref> keeps recent or search to a post and what
+  is beneath it.
   '{program} tree <ref>' shows the path to a post, then its subtree, at
   most --limit posts, marking where it was cut.
   '{program} list-projects' lists the --limit most recently active

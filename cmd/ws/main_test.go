@@ -578,10 +578,10 @@ func TestListingShowsAMatchALine(t *testing.T) {
 	got := ws(t, config, "recent", "-n", "4", "--project", "ai",
 		"--after", "@12")
 	want := `[f21] 08:59 ruth: Fixture rules (4 new messages)
-[f6-m4] 08:58 lena in f4.f5 (edited): two
+[f6-m4] 08:58 lena in f4.f5.f6 (edited): two
     lines
 [f7] 08:40 omar in f4 (deleted) (1 new message)
-[f6-m2] 08:38 ines in f4.f5 (deleted)
+[f6-m2] 08:38 ines in f4.f5.f6 (deleted)
 Next: ws recent --before @81 --workspace general --after @12 --limit 4 --project ai (more older matches)
 `
 	if !got.ok || got.stdout != want {
@@ -1150,8 +1150,8 @@ func TestChangesShowEachAtItsLatestChange(t *testing.T) {
 		server.URL+"\n", 0o600)
 	got := ws(t, config, "wait", "--after", "@3")
 	want := "[e1] 05:30 duck: Pond\n" +
-		"[e1-m2] 05:41 duck (edited): quack\n" +
-		"[e1-m3] 05:45 duck (deleted)\n"
+		"[e1-m2] 05:41 duck in e1 (edited): quack\n" +
+		"[e1-m3] 05:45 duck in e1 (deleted)\n"
 	if !got.ok || !strings.HasPrefix(got.stdout, want) {
 		t.Fatalf("wait =\n%s\nwant it to begin\n%s (%+v)", got.stdout,
 			want, got)
