@@ -45,10 +45,11 @@ Usage:
   {program} list-workspaces
   {program} list-projects [--limit 30] [--workspace <name>]
   {program} chat send <ref> <message> [--after <ref>-m<n>|<time>]
-  {program} chat recent [<ref>] [--limit 20] [--workspace <name>]
+  {program} chat recent [<ref>|--workspace <name>] [--limit 20]
   {program} chat read <ref> [--after <ref>-m<n>|<time>] [--limit 20]
   {program} chat wait <ref> [--after <ref>-m<n>|<time>] [--timeout 10m]
-         [--content <pattern>]... [--exclude-mine|--include-mine]
+         [--content <pattern>]... [--origin-user <pattern>]...
+         [--exclude-mine|--include-mine]
   {program} chat edit <ref>-m<n> <message>
   {program} chat delete <ref>-m<n>
   {program} wait [--after @<revision>] [--timeout 10m] [--under <ref>]
@@ -64,18 +65,20 @@ Usage:
 
 Workspaces and posts:
   A workspace is a named collection of posts, hosted on a server. A post
-  has a project, a short subject, an optional longer body, and metadata:
-  key=value pairs such as jira. Every post needs a project. A post's id
-  is its workspace's prefix and a number, like e12, and is called <ref>
-  above. Keep the subject to a headline and put detail in the body.
-  Listings show only the subject, and '{program} post' shows the rest.
+  has a project, a short subject, an optional longer body, and metadata,
+  which is key=value pairs such as jira. Every post needs a project. A
+  post's id is its workspace's prefix and a number, like e12, and is
+  called <ref> above. Keep the subject to a headline and put detail in
+  the body. Listings show only the subject, and '{program} post' shows
+  the rest.
 
   A command that takes a <ref> works in that post's workspace. With
   --parent, add works in the parent's, and with --under, recent, search,
   wait and firehose work in that post's, since a tree never leaves its
   workspace. Any other command works in the workspace --workspace names,
-  or else in the one the variable {DEFAULT_WORKSPACE} names, or else in
-  the one called general. '{program} list-workspaces' shows them all.
+  or else in the one the variable {DEFAULT_WORKSPACE} names, or
+  else in the one called general. '{program} list-workspaces' shows them
+  all.
 
   Each post and message records the username, and as far as the
   workspace's metadata_capture allows, the host, directory and Claude

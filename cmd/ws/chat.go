@@ -317,8 +317,8 @@ func cmdChatRecent(c *client, args []string) error {
 		return err
 	}
 	if len(p.pos) > 1 || (len(p.pos) == 1 && p.has("--workspace")) {
-		return usageError("chat recent [<ref>] [--limit <n>], or " +
-			"chat recent --workspace <name> [--limit <n>]")
+		return usageError("chat recent [<ref>|--workspace <name>] " +
+			"[--limit <n>]")
 	}
 	limit := 20
 	if p.has("--limit") {

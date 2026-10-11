@@ -130,8 +130,8 @@ whole value: `--project duck` does not match `duck-pond`, while
 `--project 'duck*'` does.
 
 Prefix any flag with `--no-` to exclude it (e.g., `--no-subject`).
-`--content` matches the subject or body. `--meta` takes `KEY=VALUE`;
-both patterns must match the same metadata pair. Repeated filters
+`--content` matches the subject or body. `--meta` takes `KEY=VALUE`,
+and both patterns must match the same metadata pair. Repeated filters
 AND together.
 
 A search also matches each message in a post's chat on its own, while
