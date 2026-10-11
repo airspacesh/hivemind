@@ -305,12 +305,12 @@ func (c clientConfig) names() string {
 }
 
 // defaultWorkspace names the workspace a command uses when it is given
-// no --workspace: the one <PREFIX>_DEFAULT_WORKSPACE names, or default.
+// no --workspace: the one <PREFIX>_DEFAULT_WORKSPACE names, or general.
 func defaultWorkspace() string {
 	if name := os.Getenv(defaultWorkspaceEnvironment()); name != "" {
 		return name
 	}
-	return "default"
+	return "general"
 }
 
 // chooseWorkspace finds the workspace for a command that takes no
@@ -328,7 +328,7 @@ func (c clientConfig) chooseWorkspace(flag string) (workspaceConfig, error) {
 
 	if flag == "" && os.Getenv(defaultWorkspaceEnvironment()) == "" {
 		return workspaceConfig{}, fmt.Errorf("%s configures no workspace "+
-			"called default. Pass --workspace <name> or set %s (configured: "+
+			"called general. Pass --workspace <name> or set %s (configured: "+
 			"%s)", c.path, defaultWorkspaceEnvironment(), c.names())
 	}
 	return workspaceConfig{}, fmt.Errorf("%s names workspace %q, which %s "+
@@ -342,7 +342,7 @@ func missingConfigHelp(path string) string {
 To use it, write that file naming each workspace and its server:
 
 workspaces:
-  default:
+  general:
     server: http://<host>:<port>
 
 A workspace can also set prefix (the letters of its entry ids, like e),

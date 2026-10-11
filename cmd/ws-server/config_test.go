@@ -30,7 +30,7 @@ workspaces:
     prefix: p
     auth:
       secret: s3cret
-  default:
+  general:
     prefix: e
 `, 0o600)
 	config, err := loadConfig(path)
@@ -42,11 +42,11 @@ workspaces:
 			config.Listen, config.Timeout)
 	}
 	if got := config.workspaceNames(); !reflect.DeepEqual(
-		got, []string{"default", "personal"}) {
+		got, []string{"general", "personal"}) {
 		t.Fatalf("workspaces = %v", got)
 	}
 	if config.Workspaces["personal"].Auth.Secret != "s3cret" ||
-		config.Workspaces["default"].Auth != nil {
+		config.Workspaces["general"].Auth != nil {
 		t.Fatalf("auth = %+v", config.Workspaces)
 	}
 }
@@ -77,13 +77,13 @@ workspaces:
 data: /srv/workstream
 port: 7139
 workspaces:
-  default:
+  general:
     prefix: e
 `, "port"},
 		{"shared prefix", `
 data: /srv/workstream
 workspaces:
-  default:
+  general:
     prefix: e
   other:
     prefix: e
@@ -129,7 +129,7 @@ func TestConfigHoldingASecretMustBeReadableByItsOwnerAlone(t *testing.T) {
 
 func TestStartupWarnsOfOpenWorkspacesBeyondLoopbackAndLostOnes(t *testing.T) {
 	open := serverWorkspace{}
-	open.Name = "default"
+	open.Name = "general"
 	protected := serverWorkspace{credential: &[32]byte{}}
 	protected.Name = "personal"
 	everywhere := &net.TCPAddr{IP: net.IPv4zero, Port: 7139}
@@ -137,8 +137,8 @@ func TestStartupWarnsOfOpenWorkspacesBeyondLoopbackAndLostOnes(t *testing.T) {
 
 	got := startupWarnings(everywhere,
 		[]serverWorkspace{open, protected}, nil)
-	if len(got) != 1 || !strings.HasSuffix(got[0], ": default") {
-		t.Fatalf("warnings = %q, want one naming only default", got)
+	if len(got) != 1 || !strings.HasSuffix(got[0], ": general") {
+		t.Fatalf("warnings = %q, want one naming only general", got)
 	}
 	if got := startupWarnings(loopback,
 		[]serverWorkspace{open, protected}, nil); len(got) != 0 {

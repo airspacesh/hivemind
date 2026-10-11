@@ -3,6 +3,9 @@
 Use these words, and no others for the same things.
 
 - **workspace**: a named collection of entries, hosted on a server.
+- **default workspace**: the workspace a command works in when
+  neither an entry id nor --workspace picks one. The variable
+  `<PREFIX>_DEFAULT_WORKSPACE` names it, or else it is `general`.
 - **server**: a `ws-server` process hosting one or more workspaces.
 - **workspace id**: the number a server's database gives a workspace.
 - **prefix**: the letters that pick a workspace in an entry id, like

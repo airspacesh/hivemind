@@ -193,15 +193,15 @@ func closedServer(t *testing.T) string {
 
 func TestConfigRefusesWhatItDoesNotKnow(t *testing.T) {
 	tests := map[string]struct{ config, want string }{
-		"unknown key": {"workspaces:\n  default:\n    server: http://h:1\n" +
+		"unknown key": {"workspaces:\n  general:\n    server: http://h:1\n" +
 			"    sever: http://h:2\n", "field sever not found"},
-		"unknown capture": {"workspaces:\n  default:\n    server: " +
+		"unknown capture": {"workspaces:\n  general:\n    server: " +
 			"http://h:1\n    metadata_capture: [hostname, user]\n",
 			`metadata_capture lists "user"`},
-		"capture scalar": {"workspaces:\n  default:\n    server: " +
+		"capture scalar": {"workspaces:\n  general:\n    server: " +
 			"http://h:1\n    metadata_capture: hostname\n",
 			"must be all, none, or a list"},
-		"no scheme": {"workspaces:\n  default:\n    server: h:1\n",
+		"no scheme": {"workspaces:\n  general:\n    server: h:1\n",
 			"must start with http://"},
 		"shared prefix": {"workspaces:\n  a:\n    server: http://h:1\n" +
 			"    prefix: e\n  b:\n    server: http://h:2\n    prefix: e\n",
@@ -219,8 +219,8 @@ func TestConfigRefusesWhatItDoesNotKnow(t *testing.T) {
 }
 
 func TestConfigHoldingSecretMustBeOwnerOnly(t *testing.T) {
-	server := newFakeServer(t, hosting(unexpected(t), "default=e"))
-	open := "workspaces:\n  default:\n    server: " + server.URL + "\n"
+	server := newFakeServer(t, hosting(unexpected(t), "general=e"))
+	open := "workspaces:\n  general:\n    server: " + server.URL + "\n"
 	secret := open + "    auth:\n      secret: quack\n"
 
 	if got := ws(t, writeConfig(t, open, 0o644), "list-workspaces"); !got.ok {
@@ -261,7 +261,7 @@ func TestWorkspaceChoiceOrder(t *testing.T) {
 		mu.Unlock()
 		reply(w, http.StatusOK, api.ProjectsResponse{})
 	})
-	config := writeConfig(t, fmt.Sprintf("workspaces:\n  default:\n    "+
+	config := writeConfig(t, fmt.Sprintf("workspaces:\n  general:\n    "+
 		"server: %s\n  other:\n    server: %[1]s\n  third:\n    "+
 		"server: %[1]s\n", server.URL), 0o600)
 	env := func(pairs ...string) []string {
@@ -273,7 +273,7 @@ func TestWorkspaceChoiceOrder(t *testing.T) {
 		args []string
 		want string
 	}{
-		{env(), nil, "default"},
+		{env(), nil, "general"},
 		{env("WORKSTREAM_DEFAULT_WORKSPACE=other"), nil, "other"},
 		{env("WORKSTREAM_DEFAULT_WORKSPACE=other"),
 			[]string{"--workspace", "third"}, "third"},
@@ -326,7 +326,7 @@ func TestListProjectsShowsSharesOfRecentEntries(t *testing.T) {
 			RecentEntries: 3200,
 		})
 	})
-	config := writeConfig(t, "workspaces:\n  default:\n    server: "+
+	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
 
 	got := ws(t, config, "list-projects", "--limit", "4")
@@ -346,7 +346,7 @@ old-lake    01/05/2026 10:00       0 entries    0%
 func TestConfiguredPrefixSkipsAskingServers(t *testing.T) {
 	first := newFakeServer(t, unexpected(t))
 	second := newFakeServer(t, answering("r7"))
-	config := writeConfig(t, fmt.Sprintf("workspaces:\n  default:\n    "+
+	config := writeConfig(t, fmt.Sprintf("workspaces:\n  general:\n    "+
 		"server: %s\n  remote:\n    server: %s\n    prefix: r\n",
 		first.URL, second.URL), 0o600)
 	if got := ws(t, config, "entry", "r7"); !got.ok {
@@ -372,7 +372,7 @@ func TestAddTakesItsParentsWorkspace(t *testing.T) {
 			refuse(w, http.StatusNotFound, api.CodeRouteNotFound, "no route")
 		}
 	})
-	config := writeConfig(t, fmt.Sprintf("workspaces:\n  default:\n    "+
+	config := writeConfig(t, fmt.Sprintf("workspaces:\n  general:\n    "+
 		"server: %s\n    prefix: e\n  personal:\n    server: %s\n    "+
 		"prefix: p\n", server.URL, server.URL), 0o600)
 	got := ws(t, config, "add", "Answer", "--project", "pond",
@@ -396,7 +396,7 @@ func TestSearchUnderTakesItsEntrysWorkspace(t *testing.T) {
 		}
 		reply(w, http.StatusOK, api.SearchResult{})
 	})
-	config := writeConfig(t, fmt.Sprintf("workspaces:\n  default:\n    "+
+	config := writeConfig(t, fmt.Sprintf("workspaces:\n  general:\n    "+
 		"server: %s\n    prefix: e\n  personal:\n    server: %s\n    "+
 		"prefix: p\n", server.URL, server.URL), 0o600)
 	for _, command := range []string{"search", "recent"} {
@@ -423,7 +423,7 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 				Messages: []api.Message{message(7), message(8)}},
 		}})
 	})
-	config := writeConfig(t, "workspaces:\n  default:\n    server: "+
+	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
 	got := ws(t, config, "chat", "recent")
 	want := "[e1] Why?\n  ... 6 earlier\n" +
@@ -462,8 +462,8 @@ func sendSinceServer(t *testing.T, sent, newest int64) string {
 		default:
 			refuse(w, http.StatusNotFound, api.CodeRouteNotFound, "no route")
 		}
-	}, "default=e"))
-	return writeConfig(t, "workspaces:\n  default:\n    server: "+
+	}, "general=e"))
+	return writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
 }
 
@@ -523,7 +523,7 @@ func TestSearchShowsMatchingMessages(t *testing.T) {
 			MoreMatchingMessages: 4,
 		}}})
 	})
-	config := writeConfig(t, "workspaces:\n  default:\n    server: "+
+	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
 	got := ws(t, config, "search", "heron")
 	want := "[e1] 05:20: Pond\n" +
@@ -555,7 +555,7 @@ func TestRecentShowsTheNewestMessagesInEachTree(t *testing.T) {
 			EarlierTreeMessages: 2,
 		}}})
 	})
-	config := writeConfig(t, "workspaces:\n  default:\n    server: "+
+	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
 	got := ws(t, config, "recent")
 	want := "[e1] 05:20: Why? (+1 below)\n  ... 2 earlier\n" +
@@ -569,9 +569,9 @@ func TestRecentShowsTheNewestMessagesInEachTree(t *testing.T) {
 // the first server listing its prefix, and that only that server's own
 // workspace's secret travels, and only with the entry request.
 func TestResolutionMovesOnOnlyForAnAbsentPrefix(t *testing.T) {
-	first := newFakeServer(t, hosting(unexpected(t), "default=e"))
+	first := newFakeServer(t, hosting(unexpected(t), "general=e"))
 	second := newFakeServer(t, hosting(answering("p3"), "personal=p"))
-	config := writeConfig(t, fmt.Sprintf("workspaces:\n  default:\n    "+
+	config := writeConfig(t, fmt.Sprintf("workspaces:\n  general:\n    "+
 		"server: %s\n    auth:\n      secret: first-secret\n  personal:\n"+
 		"    server: %s\n    auth:\n      secret: second-secret\n",
 		first.URL, second.URL), 0o600)
@@ -594,11 +594,11 @@ func TestResolutionMovesOnOnlyForAnAbsentPrefix(t *testing.T) {
 }
 
 func TestSecretNeverReachesAnotherServer(t *testing.T) {
-	first := newFakeServer(t, hosting(unexpected(t), "default=e"))
+	first := newFakeServer(t, hosting(unexpected(t), "general=e"))
 	// The second server hosts a workspace of the same name as the one
 	// the config gives a secret on the first server.
-	second := newFakeServer(t, hosting(answering("p3"), "default=p"))
-	config := writeConfig(t, fmt.Sprintf("workspaces:\n  default:\n    "+
+	second := newFakeServer(t, hosting(answering("p3"), "general=p"))
+	config := writeConfig(t, fmt.Sprintf("workspaces:\n  general:\n    "+
 		"server: %s\n    auth:\n      secret: first-secret\n  other:\n"+
 		"    server: %s\n", first.URL, second.URL), 0o600)
 	if got := ws(t, config, "entry", "p3"); !got.ok {
@@ -696,7 +696,7 @@ func TestFailuresAreNeverAnUnknownPrefix(t *testing.T) {
 func TestLinksCannotJoinServers(t *testing.T) {
 	first := newFakeServer(t, unexpected(t))
 	second := newFakeServer(t, unexpected(t))
-	config := writeConfig(t, fmt.Sprintf("workspaces:\n  default:\n    "+
+	config := writeConfig(t, fmt.Sprintf("workspaces:\n  general:\n    "+
 		"server: %s\n    prefix: e\n  remote:\n    server: %s\n    "+
 		"prefix: r\n", first.URL, second.URL), 0o600)
 	got := ws(t, config, "add", "Linked", "--project", "pond",
@@ -714,7 +714,7 @@ func TestUncertainWritesAreReportedNotRepeated(t *testing.T) {
 	answer := func(write func(w http.ResponseWriter)) http.HandlerFunc {
 		return hosting(func(w http.ResponseWriter, r *http.Request) {
 			write(w)
-		}, "default=e")
+		}, "general=e")
 	}
 	uncertain := map[string]http.HandlerFunc{
 		"no version header": answer(func(w http.ResponseWriter) {
@@ -752,7 +752,7 @@ func TestUncertainWritesAreReportedNotRepeated(t *testing.T) {
 	for name, handler := range uncertain {
 		t.Run(name, func(t *testing.T) {
 			server := newFakeServer(t, handler)
-			config := writeConfig(t, "workspaces:\n  default:\n    server: "+
+			config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 				server.URL+"\n", 0o600)
 			got := runBinary(t, wsBinary, []string{"WORKSTREAM_CONFIG=" +
 				config, "WORKSTREAM_TIMEOUT=300ms"}, "add", "Once",
@@ -768,7 +768,7 @@ func TestUncertainWritesAreReportedNotRepeated(t *testing.T) {
 	}
 
 	t.Run("refused connection", func(t *testing.T) {
-		config := writeConfig(t, "workspaces:\n  default:\n    server: "+
+		config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 			closedServer(t)+"\n", 0o600)
 		got := ws(t, config, "add", "Never sent", "--project", "pond")
 		if got.ok || strings.Contains(got.stderr, "may have taken effect") {
@@ -779,7 +779,7 @@ func TestUncertainWritesAreReportedNotRepeated(t *testing.T) {
 		server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 			refuse(w, http.StatusConflict, api.CodeConflict, "link loop")
 		})
-		config := writeConfig(t, "workspaces:\n  default:\n    server: "+
+		config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 			server.URL+"\n", 0o600)
 		got := ws(t, config, "add", "Refused", "--project", "pond")
 		if got.ok || strings.Contains(got.stderr, "may have taken effect") {
@@ -827,7 +827,7 @@ func TestTimesShowDatesOnlyWhenDaysDiffer(t *testing.T) {
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			server := newFakeServer(t, listing(test.times...))
-			config := writeConfig(t, "workspaces:\n  default:\n    server: "+
+			config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 				server.URL+"\n", 0o600)
 			got := runBinary(t, wsBinary, append(utcPlus8,
 				"WORKSTREAM_CONFIG="+config), "recent", "--flat")
@@ -844,8 +844,8 @@ func TestForumNamesItselfAndReadsOnlyItsConfig(t *testing.T) {
 	home := t.TempDir()
 	server := newFakeServer(t, hosting(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(time.Second)
-	}, "default=e"))
-	wsConfig := writeConfig(t, "workspaces:\n  default:\n    server: "+
+	}, "general=e"))
+	wsConfig := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
 	forum := func(env ...string) func(args ...string) result {
 		return func(args ...string) result {
@@ -908,9 +908,9 @@ func TestWaitsExcludeTheirOwnSession(t *testing.T) {
 		}
 		reply(w, http.StatusOK, api.ChangesPage{Changes: []api.Change{},
 			Cursor: 9})
-	}, "default=e"))
+	}, "general=e"))
 	config := func(capture string) string {
-		return writeConfig(t, "workspaces:\n  default:\n    server: "+
+		return writeConfig(t, "workspaces:\n  general:\n    server: "+
 			server.URL+"\n    metadata_capture: "+capture+"\n", 0o600)
 	}
 	tests := []struct {
@@ -922,12 +922,12 @@ func TestWaitsExcludeTheirOwnSession(t *testing.T) {
 		{"wait", "all", []string{"wait", "--since", "3", "--project",
 			"duck pond"}, []string{"lead"},
 			"Cursor: 9 (wait for more: ws wait --since 9 --workspace " +
-				"default --project 'duck pond')"},
+				"general --project 'duck pond')"},
 		{"wait without the session", "none", []string{"wait", "--since",
-			"3"}, []string{""}, "--since 9 --workspace default)"},
+			"3"}, []string{""}, "--since 9 --workspace general)"},
 		{"wait including mine", "all", []string{"wait", "--since", "3",
 			"--include-mine"}, nil,
-			"--since 9 --workspace default --include-mine)"},
+			"--since 9 --workspace general --include-mine)"},
 		{"chat wait", "all", []string{"chat", "wait", "e1", "--since", "3",
 			"--content", "quack"}, []string{"lead"},
 			"Cursor: 7 (wait for more: ws chat wait e1 --since 7 " +

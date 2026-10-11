@@ -11,7 +11,7 @@ import (
 	"github.com/airspacesh/workstream/internal/api"
 )
 
-// linkedWorkspaces holds open entries in default linked every way a
+// linkedWorkspaces holds open entries in general linked every way a
 // link may cross workspaces to protected entries in personal, whose
 // text all holds SECRET. A parent never crosses workspaces, so trees
 // stay in one.
@@ -45,7 +45,7 @@ func newLinkedWorkspaces(t *testing.T) linkedWorkspaces {
 	}
 	open := func(subject string, links ...api.Link) api.Entry {
 		t.Helper()
-		return addTo(t, store, "default", api.AddEntryRequest{
+		return addTo(t, store, "general", api.AddEntryRequest{
 			Subject: subject, Links: links,
 		})
 	}
@@ -62,7 +62,7 @@ func newLinkedWorkspaces(t *testing.T) linkedWorkspaces {
 }
 
 func (w linkedWorkspaces) openAccess(t *testing.T) Access {
-	return accessTo(t, w.store, "default")
+	return accessTo(t, w.store, "general")
 }
 
 func (w linkedWorkspaces) detail(t *testing.T, ref api.Ref) api.EntryDetail {
@@ -165,7 +165,7 @@ func TestLinkingToAnUnreadableEntryIsRefusedAsMissing(t *testing.T) {
 	w := newLinkedWorkspaces(t)
 	add := func(target api.Ref) error {
 		_, err := w.store.Add(ctx, w.openAccess(t),
-			workspaceID(t, w.store, "default"), api.AddEntryRequest{
+			workspaceID(t, w.store, "general"), api.AddEntryRequest{
 				Subject: "probe",
 				Links:   []api.Link{link("see", target)},
 			})

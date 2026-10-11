@@ -29,7 +29,7 @@ func newSearchEntries(t *testing.T) searchEntries {
 		project, subject, body string, metadata map[string]string,
 	) api.Entry {
 		t.Helper()
-		return addTo(t, store, "default", api.AddEntryRequest{
+		return addTo(t, store, "general", api.AddEntryRequest{
 			Project: project, Subject: subject, Body: body,
 			Metadata: metadata,
 		})
@@ -46,7 +46,7 @@ func newSearchEntries(t *testing.T) searchEntries {
 	}
 }
 
-// runSearch searches the default workspace with every workspace
+// runSearch searches the general workspace with every workspace
 // readable.
 func runSearch(t *testing.T, store *Store, filter Filter) api.SearchResult {
 	t.Helper()
@@ -54,7 +54,7 @@ func runSearch(t *testing.T, store *Store, filter Filter) api.SearchResult {
 		filter.Limit = 50
 	}
 	result, err := store.Search(context.Background(), everyAccess(store),
-		workspaceID(t, store, "default"), filter)
+		workspaceID(t, store, "general"), filter)
 	if err != nil {
 		t.Fatalf("searching: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestSearchRejectsInvalidBoundsAndNUL(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := store.Search(context.Background(),
-				everyAccess(store), workspaceID(t, store, "default"),
+				everyAccess(store), workspaceID(t, store, "general"),
 				test.filter)
 			if !errors.Is(err, ErrInvalidFilter) ||
 				!strings.Contains(err.Error(), test.want) {
@@ -253,7 +253,7 @@ func TestSearchRejectsInvalidBoundsAndNUL(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := store.Search(ctx, everyAccess(store),
-		workspaceID(t, store, "default"), Filter{Limit: 1})
+		workspaceID(t, store, "general"), Filter{Limit: 1})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled Search error = %v, want context.Canceled", err)
 	}
@@ -263,7 +263,7 @@ func TestSearchByOrigin(t *testing.T) {
 	store := openTestStore(t)
 	add := func(subject string, origin api.Origin) api.Entry {
 		t.Helper()
-		return addTo(t, store, "default", api.AddEntryRequest{
+		return addTo(t, store, "general", api.AddEntryRequest{
 			Subject: subject, Origin: origin,
 		})
 	}
@@ -303,7 +303,7 @@ func TestSearchByOrigin(t *testing.T) {
 // match only the metadata of the entry in the searched workspace.
 func TestSearchMetadataStaysInItsWorkspace(t *testing.T) {
 	store := openTestStore(t)
-	inDefault := mustAdd(t, store, "in default", "", nil)
+	inGeneral := mustAdd(t, store, "in general", "", nil)
 	addTo(t, store, "personal", api.AddEntryRequest{
 		Subject: "in personal", Project: "secret",
 		Metadata: map[string]string{"jira": "QUACK-9"},
@@ -320,7 +320,7 @@ func TestSearchMetadataStaysInItsWorkspace(t *testing.T) {
 	result := runSearch(t, store, Filter{
 		Meta: []MetaCond{{Negate: true, Key: "jira", Value: "*"}},
 	})
-	assertEntryRefs(t, result.Entries, inDefault.Ref)
+	assertEntryRefs(t, result.Entries, inGeneral.Ref)
 }
 
 func messageBodies(messages []api.Message) []string {
@@ -427,7 +427,7 @@ func TestSearchMatchesMessagesByOrigin(t *testing.T) {
 	store := openTestStore(t)
 	add := func(user, project, subject string) api.Entry {
 		t.Helper()
-		return addTo(t, store, "default", api.AddEntryRequest{
+		return addTo(t, store, "general", api.AddEntryRequest{
 			Project: project, Subject: subject,
 			Origin: api.Origin{User: user},
 		})
@@ -525,7 +525,7 @@ func TestOriginUserIndexKeepsGlobSemantics(t *testing.T) {
 	store := openTestStore(t)
 	add := func(user string) api.Entry {
 		t.Helper()
-		return addTo(t, store, "default", api.AddEntryRequest{
+		return addTo(t, store, "general", api.AddEntryRequest{
 			Project: "pond", Subject: "Duck", Origin: api.Origin{User: user},
 		})
 	}
@@ -733,10 +733,10 @@ func TestSearchKeepsToASpan(t *testing.T) {
 func TestSearchUnderASubtreeInABigWorkspace(t *testing.T) {
 	store := openTestStore(t)
 	root := mustAdd(t, store, "Heron nest", "", nil)
-	child := addTo(t, store, "default", api.AddEntryRequest{
+	child := addTo(t, store, "general", api.AddEntryRequest{
 		Project: "pond", Subject: "Reeds",
 		Links: []api.Link{link(api.ParentLink, root.Ref)}})
-	grandchild := addTo(t, store, "default", api.AddEntryRequest{
+	grandchild := addTo(t, store, "general", api.AddEntryRequest{
 		Project: "pond", Subject: "Heron eggs",
 		Links: []api.Link{link(api.ParentLink, child.Ref)}})
 	postAs(t, store, "ines", child.Ref, "a heron landed")

@@ -30,7 +30,7 @@ func testConfig(t *testing.T) serverConfig {
 		Data:    t.TempDir(),
 		Timeout: 5 * time.Second,
 		Workspaces: map[string]workspaceConfig{
-			"default": {Prefix: "e"},
+			"general": {Prefix: "e"},
 			"personal": {Prefix: "p",
 				Auth: &authConfig{Secret: personalSecret}},
 			"team": {Prefix: "t", Auth: &authConfig{Secret: teamSecret}},
@@ -130,10 +130,10 @@ func TestEachSecretGrantsOnlyItsOwnWorkspace(t *testing.T) {
 		path   string
 		status int
 	}{
-		{"", "/api/workspaces/default/entries", http.StatusOK},
+		{"", "/api/workspaces/general/entries", http.StatusOK},
 		{"", "/api/workspaces/personal/entries", http.StatusUnauthorized},
 		{"", "/api/entries/p1", http.StatusUnauthorized},
-		{personalSecret, "/api/workspaces/default/entries", http.StatusOK},
+		{personalSecret, "/api/workspaces/general/entries", http.StatusOK},
 		{personalSecret, "/api/workspaces/personal/entries", http.StatusOK},
 		{personalSecret, "/api/entries/p1", http.StatusOK},
 		{personalSecret, "/api/workspaces/team/entries",
@@ -149,7 +149,7 @@ func TestEachSecretGrantsOnlyItsOwnWorkspace(t *testing.T) {
 			http.StatusOK},
 		{teamSecret, "/api/entries/t1", http.StatusOK},
 		{teamSecret, "/api/entries/p1", http.StatusUnauthorized},
-		{"wrong", "/api/workspaces/default/entries",
+		{"wrong", "/api/workspaces/general/entries",
 			http.StatusUnauthorized},
 	} {
 		status, text := s.do(t, "GET", test.path, "", test.secret)
@@ -172,7 +172,7 @@ func TestEachSecretGrantsOnlyItsOwnWorkspace(t *testing.T) {
 		teamSecret, http.StatusUnauthorized)
 
 	request, err := http.NewRequest("GET",
-		s.url+"/api/workspaces/default/entries", nil)
+		s.url+"/api/workspaces/general/entries", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestEachSecretGrantsOnlyItsOwnWorkspace(t *testing.T) {
 	}
 
 	workspaces := s.must(t, "GET", "/api/workspaces", "", "", http.StatusOK)
-	want := `{"workspaces":[{"name":"default","prefix":"e"},` +
+	want := `{"workspaces":[{"name":"general","prefix":"e"},` +
 		`{"name":"personal","prefix":"p"},{"name":"team","prefix":"t"}]}`
 	if strings.TrimSpace(workspaces) != want {
 		t.Fatalf("workspaces = %s, want %s", workspaces, want)
@@ -198,7 +198,7 @@ func TestEachSecretGrantsOnlyItsOwnWorkspace(t *testing.T) {
 
 func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 	s := startServer(t, testConfig(t))
-	s.must(t, "POST", "/api/workspaces/default/entries", entryBody("one"),
+	s.must(t, "POST", "/api/workspaces/general/entries", entryBody("one"),
 		"", http.StatusCreated)
 	for _, test := range []struct {
 		method string
@@ -217,14 +217,14 @@ func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 			api.CodeMessageNotFound},
 		{"GET", "/api/workspaces/nowhere/entries", "", 404,
 			api.CodeUnknownWorkspace},
-		{"GET", "/api/workspaces/default/entries?under=x1", "", 404,
+		{"GET", "/api/workspaces/general/entries?under=x1", "", 404,
 			api.CodeUnknownPrefix},
-		{"GET", "/api/workspaces/default/entries?under=e9", "", 404,
+		{"GET", "/api/workspaces/general/entries?under=e9", "", 404,
 			api.CodeEntryNotFound},
-		{"POST", "/api/workspaces/default/entries",
+		{"POST", "/api/workspaces/general/entries",
 			entryBody("probe", `{"name":"see","ref":"x1"}`), 404,
 			api.CodeUnknownPrefix},
-		{"POST", "/api/workspaces/default/entries",
+		{"POST", "/api/workspaces/general/entries",
 			entryBody("probe", `{"name":"see","ref":"e9"}`), 400,
 			api.CodeLinkTargetNotFound},
 		{"GET", "/api/entries/E1", "", 400, api.CodeBadRequest},
@@ -267,7 +267,7 @@ func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
 	s := startServer(t, testConfig(t))
 	addOpen := func(subject string, links ...string) {
-		s.must(t, "POST", "/api/workspaces/default/entries",
+		s.must(t, "POST", "/api/workspaces/general/entries",
 			entryBody(subject, links...), personalSecret, http.StatusCreated)
 	}
 	addSecret := func(links ...string) {
@@ -297,14 +297,14 @@ func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
 		paths = append(paths, "/api/entries/"+entry,
 			"/api/entries/"+entry+"/tree?include-superseded=true",
 			"/api/entries/"+entry+"/messages",
-			"/api/workspaces/default/entries?include-superseded=true&under="+
+			"/api/workspaces/general/entries?include-superseded=true&under="+
 				entry)
 	}
 	paths = append(paths,
-		"/api/workspaces/default/entries?include-superseded=true",
-		"/api/workspaces/default/entries?view=topics&include-superseded=true",
-		"/api/workspaces/default/projects",
-		"/api/workspaces/default/messages")
+		"/api/workspaces/general/entries?include-superseded=true",
+		"/api/workspaces/general/entries?view=topics&include-superseded=true",
+		"/api/workspaces/general/projects",
+		"/api/workspaces/general/messages")
 	for _, path := range paths {
 		text := s.must(t, "GET", path, "", "", http.StatusOK)
 		if strings.Contains(text, "SECRET") {
@@ -322,16 +322,16 @@ func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
 		t.Fatalf("e2 does not show its link as a bare ref: %s", text)
 	}
 
-	_, crossParent := s.do(t, "POST", "/api/workspaces/default/entries",
+	_, crossParent := s.do(t, "POST", "/api/workspaces/general/entries",
 		entryBody("child", `{"name":"parent","ref":"p1"}`), personalSecret)
 	if !strings.Contains(crossParent, "a parent must be in the same "+
 		"workspace") {
 		t.Fatalf("a parent in another workspace gave %s", crossParent)
 	}
 
-	_, unreadable := s.do(t, "POST", "/api/workspaces/default/entries",
+	_, unreadable := s.do(t, "POST", "/api/workspaces/general/entries",
 		entryBody("probe", `{"name":"see","ref":"p1"}`), "")
-	_, missing := s.do(t, "POST", "/api/workspaces/default/entries",
+	_, missing := s.do(t, "POST", "/api/workspaces/general/entries",
 		entryBody("probe", `{"name":"see","ref":"p9"}`), "")
 	if strings.Replace(missing, "p9", "p1", 1) != unreadable {
 		t.Fatalf("linking to an unreadable entry gave %s, but to a "+
@@ -341,7 +341,7 @@ func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
 
 func TestOnlyThePosterCanEditOverHTTP(t *testing.T) {
 	s := startServer(t, testConfig(t))
-	s.must(t, "POST", "/api/workspaces/default/entries", entryBody("mine"),
+	s.must(t, "POST", "/api/workspaces/general/entries", entryBody("mine"),
 		"", http.StatusCreated)
 	s.must(t, "POST", "/api/entries/e1/messages",
 		`{"body":"hi","origin":{"user":"duck"}}`, "", http.StatusCreated)
@@ -377,7 +377,7 @@ func TestOnlyThePosterCanEditOverHTTP(t *testing.T) {
 
 func TestChatReadsOverHTTP(t *testing.T) {
 	s := startServer(t, testConfig(t))
-	s.must(t, "POST", "/api/workspaces/default/entries", entryBody("chat"),
+	s.must(t, "POST", "/api/workspaces/general/entries", entryBody("chat"),
 		"", http.StatusCreated)
 	for _, body := range []string{"one", "two", "three"} {
 		s.must(t, "POST", "/api/entries/e1/messages",
@@ -418,7 +418,7 @@ func TestChatReadsOverHTTP(t *testing.T) {
 // session, not every change by the user.
 func TestExcludedSessionlessKeyOverHTTP(t *testing.T) {
 	s := startServer(t, testConfig(t))
-	s.must(t, "POST", "/api/workspaces/default/entries", entryBody("chat"),
+	s.must(t, "POST", "/api/workspaces/general/entries", entryBody("chat"),
 		"", http.StatusCreated)
 	for _, session := range []string{"", "lead", ""} {
 		s.must(t, "POST", "/api/entries/e1/messages",
@@ -439,7 +439,7 @@ func TestExcludedSessionlessKeyOverHTTP(t *testing.T) {
 	}
 
 	var changes api.ChangesPage
-	text = s.must(t, "GET", "/api/workspaces/default/changes?since=0&"+
+	text = s.must(t, "GET", "/api/workspaces/general/changes?since=0&"+
 		exclude, "", "", http.StatusOK)
 	if err := json.Unmarshal([]byte(text), &changes); err != nil {
 		t.Fatal(err)
@@ -464,7 +464,7 @@ func TestRequestLogKeepsNoClientText(t *testing.T) {
 		secret string
 		status int
 	}{
-		{"POST", "/api/workspaces/default/entries", `{"subject":` +
+		{"POST", "/api/workspaces/general/entries", `{"subject":` +
 			`"SUBJECTMARK","body":"BODYMARK",` +
 			`"project":"PROJECTMARK","origin":{"user":"duck","dir":"/"}}`,
 			personalSecret, http.StatusCreated},
@@ -475,11 +475,11 @@ func TestRequestLogKeepsNoClientText(t *testing.T) {
 			http.StatusCreated},
 		{"PATCH", "/api/entries/e1/messages/1",
 			`{"body":"EDITMARK","user":"duck"}`, "", http.StatusOK},
-		{"POST", "/api/workspaces/default/entries", `{"FIELDMARK":1}`, "",
+		{"POST", "/api/workspaces/general/entries", `{"FIELDMARK":1}`, "",
 			http.StatusBadRequest},
-		{"GET", "/api/workspaces/default/entries?subject=SEARCHMARK&limit=5",
+		{"GET", "/api/workspaces/general/entries?subject=SEARCHMARK&limit=5",
 			"", "", http.StatusOK},
-		{"GET", "/api/workspaces/default/entries?PARAMMARK=1", "", "",
+		{"GET", "/api/workspaces/general/entries?PARAMMARK=1", "", "",
 			http.StatusBadRequest},
 		{"GET", "/api/workspaces/SPACEMARK/entries", "", "",
 			http.StatusNotFound},
@@ -505,9 +505,9 @@ func TestRequestLogKeepsNoClientText(t *testing.T) {
 		"issued e1-m1\n",
 		"PATCH /api/entries/{ref} ref=e1 -> 200",
 		"PATCH /api/entries/{ref}/messages/{n} ref=e1 n=1 -> 200",
-		"GET /api/workspaces/{workspace}/entries workspace=default " +
+		"GET /api/workspaces/{workspace}/entries workspace=general " +
 			"query=limit,subject -> 200",
-		"GET /api/workspaces/{workspace}/entries workspace=default " +
+		"GET /api/workspaces/{workspace}/entries workspace=general " +
 			"unknown-query=1 -> 400",
 		"GET /api/workspaces/{workspace}/entries -> 404",
 		"GET /api/entries/{ref} -> 404",
@@ -529,12 +529,12 @@ func TestMetadataFiltersOnProjectAreRefused(t *testing.T) {
 		"no-key=PROJECT",
 	} {
 		status, body := s.do(t, "GET",
-			"/api/workspaces/default/entries?"+query, "", "")
+			"/api/workspaces/general/entries?"+query, "", "")
 		if status != http.StatusBadRequest ||
 			!strings.Contains(body, "filter on the project field") {
 			t.Errorf("%s: %d %s", query, status, body)
 		}
 	}
-	s.must(t, "GET", "/api/workspaces/default/entries?meta=jira=pond-1",
+	s.must(t, "GET", "/api/workspaces/general/entries?meta=jira=pond-1",
 		"", "", http.StatusOK)
 }

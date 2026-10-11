@@ -223,9 +223,9 @@ func TestOpenSyncsWorkspacesWithTheConfig(t *testing.T) {
 		}
 		return store
 	}
-	first := reopen(api.Workspace{Name: "default", Prefix: "e"},
+	first := reopen(api.Workspace{Name: "general", Prefix: "e"},
 		api.Workspace{Name: "personal", Prefix: "p"})
-	work := addTo(t, first, "default",
+	work := addTo(t, first, "general",
 		api.AddEntryRequest{Subject: "work"})
 	private := addTo(t, first, "personal",
 		api.AddEntryRequest{Subject: "private"})
@@ -235,7 +235,7 @@ func TestOpenSyncsWorkspacesWithTheConfig(t *testing.T) {
 	}
 	first.Close()
 
-	swapped := reopen(api.Workspace{Name: "default", Prefix: "p"},
+	swapped := reopen(api.Workspace{Name: "general", Prefix: "p"},
 		api.Workspace{Name: "personal", Prefix: "e"})
 	for _, workspace := range swapped.Workspaces() {
 		if ids[workspace.Name] != workspace.ID {
@@ -250,7 +250,7 @@ func TestOpenSyncsWorkspacesWithTheConfig(t *testing.T) {
 	}
 	swapped.Close()
 
-	renamed := reopen(api.Workspace{Name: "default", Prefix: "e"},
+	renamed := reopen(api.Workspace{Name: "general", Prefix: "e"},
 		api.Workspace{Name: "private", Prefix: "p"})
 	if got := renamed.Unconfigured(); !reflect.DeepEqual(
 		got, []string{"personal"}) {
@@ -263,7 +263,7 @@ func TestOpenSyncsWorkspacesWithTheConfig(t *testing.T) {
 	}
 	renamed.Close()
 
-	restored := reopen(api.Workspace{Name: "default", Prefix: "e"},
+	restored := reopen(api.Workspace{Name: "general", Prefix: "e"},
 		api.Workspace{Name: "personal", Prefix: "q"})
 	defer restored.Close()
 	if got := restored.Unconfigured(); !reflect.DeepEqual(

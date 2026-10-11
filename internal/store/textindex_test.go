@@ -8,7 +8,7 @@ import (
 	"github.com/airspacesh/workstream/internal/api"
 )
 
-// globMatches lists the entries of the default workspace that a
+// globMatches lists the entries of the general workspace that a
 // condition on an entry e matches, given a pattern as ?2, read without
 // the text indexes.
 func globMatches(
@@ -19,7 +19,7 @@ func globMatches(
 		SELECT e.id FROM entries AS e
 		WHERE e.workspace_id = ?1 AND (`+condition+`)
 		ORDER BY e.id`,
-		workspaceID(t, store, "default"), pattern)
+		workspaceID(t, store, "general"), pattern)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func addFiller(t *testing.T, store *Store) {
 			?3, ?3, ?3, 0, 'pond', '0'
 		FROM n`,
 		changesBeforeIndex+changesPerMatch*100,
-		workspaceID(t, store, "default"), nowUTC()); err != nil {
+		workspaceID(t, store, "general"), nowUTC()); err != nil {
 		t.Fatalf("adding filler: %v", err)
 	}
 }

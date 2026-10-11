@@ -21,7 +21,7 @@ func addChild(
 	t *testing.T, store *Store, subject string, parent api.Ref,
 ) api.Entry {
 	t.Helper()
-	return addTo(t, store, "default", api.AddEntryRequest{
+	return addTo(t, store, "general", api.AddEntryRequest{
 		Subject: subject,
 		Links:   []api.Link{link(api.ParentLink, parent)},
 	})
@@ -282,12 +282,12 @@ func TestTreeFillsLevelByLevelAndSaysWhereItCut(t *testing.T) {
 func TestSearchUnderASubtreeAndFiltersOnRoots(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	root := addTo(t, store, "default", api.AddEntryRequest{
+	root := addTo(t, store, "general", api.AddEntryRequest{
 		Subject: "duck root", Project: "pond"})
-	child := addTo(t, store, "default", api.AddEntryRequest{
+	child := addTo(t, store, "general", api.AddEntryRequest{
 		Subject: "duck child", Project: "lake",
 		Links: []api.Link{link(api.ParentLink, root.Ref)}})
-	other := addTo(t, store, "default", api.AddEntryRequest{
+	other := addTo(t, store, "general", api.AddEntryRequest{
 		Subject: "duck elsewhere", Project: "lake"})
 
 	under := store.mustKey(root.Ref)
@@ -323,7 +323,7 @@ func TestCountsLeaveOutSupersededEntries(t *testing.T) {
 	store := openTestStore(t)
 	question := mustAdd(t, store, "Why?", "", nil)
 	old := addChild(t, store, "old answer", question.Ref)
-	addTo(t, store, "default", api.AddEntryRequest{
+	addTo(t, store, "general", api.AddEntryRequest{
 		Subject: "new answer",
 		Links: []api.Link{link(api.ParentLink, question.Ref),
 			link(api.SupersedesLink, old.Ref)},

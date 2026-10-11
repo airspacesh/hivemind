@@ -42,7 +42,7 @@ func readProject(
 ) api.ProjectsResponse {
 	t.Helper()
 	response, err := store.Project(context.Background(),
-		workspaceID(t, store, "default"), name, now)
+		workspaceID(t, store, "general"), name, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,13 +60,13 @@ func addToProject(
 func TestProjectsCountOneWorkspace(t *testing.T) {
 	store := openTestStore(t)
 	now := time.Now()
-	first := addToProject(t, store, "default", "pond")
-	addToProject(t, store, "default", "pond")
+	first := addToProject(t, store, "general", "pond")
+	addToProject(t, store, "general", "pond")
 	addToProject(t, store, "personal", "pond")
-	addToProject(t, store, "default", "Pond")
-	addToProject(t, store, "default", "nest")
+	addToProject(t, store, "general", "Pond")
+	addToProject(t, store, "general", "nest")
 
-	got := describeProjects(listProjects(t, store, "default", 30, now))
+	got := describeProjects(listProjects(t, store, "general", 30, now))
 	if got != "nest 1, Pond 1, pond 2" {
 		t.Fatalf("projects = %q", got)
 	}
@@ -86,13 +86,13 @@ func TestProjectsCountOneWorkspace(t *testing.T) {
 	// Chat counts as activity, so a message to an old entry brings its
 	// project to the top.
 	mustPost(t, store, first.Ref, "still here")
-	got = describeProjects(listProjects(t, store, "default", 30, now))
+	got = describeProjects(listProjects(t, store, "general", 30, now))
 	if got != "pond 2, nest 1, Pond 1" {
 		t.Fatalf("projects after a message = %q", got)
 	}
 
-	addToProject(t, store, "default", "nest")
-	got = describeProjects(listProjects(t, store, "default", 30, now))
+	addToProject(t, store, "general", "nest")
+	got = describeProjects(listProjects(t, store, "general", 30, now))
 	if got != "nest 2, pond 2, Pond 1" {
 		t.Fatalf("projects after another entry = %q", got)
 	}
@@ -113,15 +113,15 @@ func TestProjectsCountEntriesCreatedInTheWindow(t *testing.T) {
 	store := openTestStore(t)
 	now := time.Now()
 	since := now.Add(-recentWindow)
-	setCreated(t, store, addToProject(t, store, "default", "pond").Ref,
+	setCreated(t, store, addToProject(t, store, "general", "pond").Ref,
 		since)
-	setCreated(t, store, addToProject(t, store, "default", "pond").Ref,
+	setCreated(t, store, addToProject(t, store, "general", "pond").Ref,
 		since.Add(-time.Nanosecond))
-	addToProject(t, store, "default", "pond")
-	setCreated(t, store, addToProject(t, store, "default", "lake").Ref,
+	addToProject(t, store, "general", "pond")
+	setCreated(t, store, addToProject(t, store, "general", "lake").Ref,
 		since.Add(-time.Hour))
 
-	all := listProjects(t, store, "default", 30, now)
+	all := listProjects(t, store, "general", 30, now)
 	if got := describeProjects(all); got != "lake 0, pond 2" {
 		t.Fatalf("projects = %q", got)
 	}
@@ -142,7 +142,7 @@ func TestProjectsCountEntriesCreatedInTheWindow(t *testing.T) {
 		t.Fatalf("project lake = %q", got)
 	}
 
-	limited := listProjects(t, store, "default", 1, now)
+	limited := listProjects(t, store, "general", 1, now)
 	if got := describeProjects(limited); got != "lake 0" ||
 		limited.Count != 2 || limited.RecentEntries != 2 {
 		t.Fatalf("one project = %q of %d with %d recent entries", got,

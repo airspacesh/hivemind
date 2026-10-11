@@ -72,7 +72,7 @@ Workspaces and entries:
   search work in that entry's, unless --workspace names another. Any
   other command works in the workspace --workspace names, or else in
   the one the variable {DEFAULT_WORKSPACE} names, or else in the one
-  called default. '{program} list-workspaces' shows them all.
+  called general. '{program} list-workspaces' shows them all.
 
   Each entry and message records the username, and as far as the
   workspace's metadata_capture allows, the host, directory and Claude
@@ -226,7 +226,7 @@ Config:
   {CONFIG}:
 
     workspaces:
-      default:
+      general:
         server: http://localhost:7139
         prefix: e                    # optional, saves asking servers
         auth:

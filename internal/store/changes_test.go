@@ -17,7 +17,7 @@ func readChanges(
 ) api.ChangesPage {
 	t.Helper()
 	page, err := store.Changes(context.Background(), everyAccess(store),
-		workspaceID(t, store, "default"), since, Filter{}, nil, limit)
+		workspaceID(t, store, "general"), since, Filter{}, nil, limit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func TestChangesStayInTheirWorkspace(t *testing.T) {
 	}
 
 	page, err := store.Changes(context.Background(),
-		accessTo(t, store, "default"), workspaceID(t, store, "default"),
+		accessTo(t, store, "general"), workspaceID(t, store, "general"),
 		0, Filter{}, nil, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -269,7 +269,7 @@ func readAllMatching(
 	ids := []string{}
 	for {
 		page, err := store.changes(context.Background(), everyAccess(store),
-			workspaceID(t, store, "default"), since, filter, exclude, limit,
+			workspaceID(t, store, "general"), since, filter, exclude, limit,
 			span)
 		if err != nil {
 			t.Fatal(err)
@@ -307,15 +307,15 @@ func TestFilteredChangesShowEachMatchOnceAtAnyLimitAndSpan(t *testing.T) {
 	lead := api.Origin{User: testUser, ClaudeSession: "lead"}
 	bare := api.Origin{User: testUser}
 	heron := api.Origin{User: "heron", ClaudeSession: "lead"}
-	pond := addTo(t, store, "default", api.AddEntryRequest{
+	pond := addTo(t, store, "general", api.AddEntryRequest{
 		Project: "pond", Subject: "pond", Origin: lead})
 	addTo(t, store, "personal", api.AddEntryRequest{Subject: "elsewhere"})
-	lake := addTo(t, store, "default", api.AddEntryRequest{
+	lake := addTo(t, store, "general", api.AddEntryRequest{
 		Project: "lake", Subject: "lake", Origin: bare})
 	postFrom(t, store, pond.Ref, "quack", lead)
 	postFrom(t, store, lake.Ref, "quack", heron)
 	postFrom(t, store, pond.Ref, "honk", bare)
-	addTo(t, store, "default", api.AddEntryRequest{
+	addTo(t, store, "general", api.AddEntryRequest{
 		Project: "pond", Subject: "reeds", Origin: heron})
 	// An edit stores no origin, so the entry keeps its creator's key.
 	subject := "pond, edited"
@@ -376,13 +376,13 @@ func TestFilteredChangesShowEachMatchOnceAtAnyLimitAndSpan(t *testing.T) {
 func TestChangesCursorPassesWhatDoesNotMatch(t *testing.T) {
 	store := openTestStore(t)
 	duck := Filter{Project: []FieldCond{{Value: "duck"}}}
-	entry := addTo(t, store, "default", api.AddEntryRequest{
+	entry := addTo(t, store, "general", api.AddEntryRequest{
 		Project: "heron", Subject: "not a duck"})
 	mustPost(t, store, entry.Ref, "still not")
 	latest := latestRevision(t, store)
 
 	page, err := store.Changes(context.Background(), everyAccess(store),
-		workspaceID(t, store, "default"), 0, duck, nil, 10)
+		workspaceID(t, store, "general"), 0, duck, nil, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ func TestChangesCursorPassesWhatDoesNotMatch(t *testing.T) {
 		t.Fatalf("read %+v, want no changes and cursor %d", page, latest)
 	}
 
-	addTo(t, store, "default", api.AddEntryRequest{
+	addTo(t, store, "general", api.AddEntryRequest{
 		Project: "duck", Subject: "a duck"})
 	got, _ := readAllMatching(t, store, page.Cursor, duck, nil, 10,
 		revisionsPerRead)
@@ -402,16 +402,16 @@ func TestChangesCursorPassesWhatDoesNotMatch(t *testing.T) {
 func TestChangesCursorAtAFullPageIsItsLastMatch(t *testing.T) {
 	store := openTestStore(t)
 	duck := Filter{Project: []FieldCond{{Value: "duck"}}}
-	addTo(t, store, "default", api.AddEntryRequest{
+	addTo(t, store, "general", api.AddEntryRequest{
 		Project: "duck", Subject: "first"})
 	first := latestRevision(t, store)
-	addTo(t, store, "default", api.AddEntryRequest{
+	addTo(t, store, "general", api.AddEntryRequest{
 		Project: "heron", Subject: "between"})
-	addTo(t, store, "default", api.AddEntryRequest{
+	addTo(t, store, "general", api.AddEntryRequest{
 		Project: "duck", Subject: "second"})
 
 	page, err := store.Changes(context.Background(), everyAccess(store),
-		workspaceID(t, store, "default"), 0, duck, nil, 1)
+		workspaceID(t, store, "general"), 0, duck, nil, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,7 +431,7 @@ func TestExcludedOriginKeysMatchExactly(t *testing.T) {
 		{User: "Duck", ClaudeSession: "lead"},
 		{User: testUser, ClaudeSession: "Lead"},
 	}
-	entry := addTo(t, store, "default", api.AddEntryRequest{
+	entry := addTo(t, store, "general", api.AddEntryRequest{
 		Subject: "chat", Origin: api.Origin{User: "nobody"}})
 	for i, origin := range origins {
 		postFrom(t, store, entry.Ref, fmt.Sprint(i+1), origin)
@@ -462,9 +462,9 @@ func TestExcludedOriginKeysMatchExactly(t *testing.T) {
 func TestChangesUnderAnEntryKeepToItsSubtree(t *testing.T) {
 	store := openTestStore(t)
 	root := mustAdd(t, store, "root", "", nil)
-	child := addTo(t, store, "default", api.AddEntryRequest{
+	child := addTo(t, store, "general", api.AddEntryRequest{
 		Subject: "child", Links: []api.Link{link("parent", root.Ref)}})
-	grandchild := addTo(t, store, "default", api.AddEntryRequest{
+	grandchild := addTo(t, store, "general", api.AddEntryRequest{
 		Subject: "grandchild", Links: []api.Link{link("parent", child.Ref)}})
 	other := mustAdd(t, store, "other", "", nil)
 	mustPost(t, store, grandchild.Ref, "deep")

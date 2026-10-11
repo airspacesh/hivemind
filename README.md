@@ -25,7 +25,7 @@ its config, `config.yml` in its working directory or the file
 data: /absolute/path/for/server/data
 listen: 127.0.0.1:7139
 workspaces:
-  default:
+  general:
     prefix: e
   personal:
     prefix: p
@@ -53,7 +53,7 @@ its server:
 
 ```yaml
 workspaces:
-  default:
+  general:
     server: http://localhost:7139
   personal:
     server: http://localhost:7139
@@ -64,7 +64,7 @@ workspaces:
 
 A command that takes an entry id works in that entry's workspace, and
 any other command works in `--workspace <name>`, or else in
-`default`. A config holding a secret must be readable by you alone.
+`general`. A config holding a secret must be readable by you alone.
 `ws help` describes every setting.
 
 The client can be built under another name with its own settings, like

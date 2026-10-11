@@ -153,7 +153,7 @@ func TestChatReadsPageAfterTheCursor(t *testing.T) {
 		t.Fatalf("latest 3 = %q", got)
 	}
 	if _, err := store.Messages(context.Background(),
-		Key{Workspace: workspaceID(t, store, "default"), ID: 99},
+		Key{Workspace: workspaceID(t, store, "general"), ID: 99},
 		0, Filter{}, nil, 2); !errors.Is(err, ErrEntryNotFound) {
 		t.Fatalf("reading a missing entry's chat = %v", err)
 	}
@@ -308,7 +308,7 @@ func TestOverviewGroupsTheNewestMessagesByEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	overview, err := store.Overview(ctx, workspaceID(t, store, "default"), 4)
+	overview, err := store.Overview(ctx, workspaceID(t, store, "general"), 4)
 	if err != nil {
 		t.Fatal(err)
 	}

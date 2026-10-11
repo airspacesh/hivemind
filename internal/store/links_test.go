@@ -196,7 +196,7 @@ func TestIndependentSuccessorsAreAllShown(t *testing.T) {
 		t.Fatalf("listing = %v, want both successors and not the old", refs)
 	}
 	result, err := store.Search(ctx, everyAccess(store),
-		workspaceID(t, store, "default"),
+		workspaceID(t, store, "general"),
 		Filter{Limit: 10, IncludeSuperseded: true})
 	if err != nil {
 		t.Fatal(err)

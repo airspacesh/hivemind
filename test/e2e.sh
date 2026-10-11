@@ -78,7 +78,7 @@ start_server() {
     exit 1
 }
 
-start_server main "  default:
+start_server main "  general:
     prefix: e
   personal:
     prefix: p
@@ -94,7 +94,7 @@ remote_url="$server_url"
 ws_config="$test_dir/ws.yml"
 cat >"$ws_config" <<EOF
 workspaces:
-  default:
+  general:
     server: $main_url
   personal:
     server: $main_url
@@ -162,7 +162,7 @@ check "forum names the config its override gives" \
     "$(FORUM_CONFIG="$test_dir/elsewhere.yml" forum recent 2>&1 ||
         true)"
 check_equal "ws reads its config and lists the workspaces in order" \
-    "default (default): prefix e on $main_url
+    "general (default): prefix e on $main_url
 personal: prefix p on $main_url, with a secret
 remote: prefix r on $remote_url" "$(ws list-workspaces)"
 check "status checks every workspace" "remote: prefix r on $remote_url" \
@@ -328,7 +328,7 @@ check "add takes its parent's workspace" "Added entry [p3]." \
 curl -fsS -X POST -H "Workstream-API-Version: $api_version" \
     -H "Authorization: Bearer $test_secret" \
     --data "{\"subject\":\"Open linking protected\",\"project\":\"views\",\"origin\":{},\"links\":[{\"name\":\"see\",\"ref\":\"p1\"}]}" \
-    "$main_url/api/workspaces/default/entries" >/dev/null
+    "$main_url/api/workspaces/general/entries" >/dev/null
 under_protected="$(ws search 'Open linking protected' --id-only)"
 check "a protected link shows as its bare id" "see p1" \
     "$(ws entry "$under_protected")"
@@ -427,7 +427,7 @@ post_as_heron() {
     curl -fsS -X POST -H "Workstream-API-Version: $api_version" \
         --data "$2" "$main_url/api/$1" >/dev/null
 }
-post_as_heron workspaces/default/entries \
+post_as_heron workspaces/general/entries \
     '{"subject":"Heron topic","project":"owners","origin":{"user":"heron"}}'
 heron="$(ws search 'Heron topic' --id-only)"
 check "an edit of another user's entry names its owner and the next step" \
@@ -582,7 +582,7 @@ ws search SEARCHMARK >/dev/null
 check_status "an unknown field is refused" "400" \
     -X POST -H "Workstream-API-Version: $api_version" \
     --data '{"subject":"note","UNKNOWNFIELDMARK":1}' \
-    "$main_url/api/workspaces/default/entries"
+    "$main_url/api/workspaces/general/entries"
 check_equal "the server log holds no client text" "" \
     "$(grep -oE '[A-Z]*MARK' -- "$test_dir/main.log" || true)"
 check "the server log records each issued entry id" "issued $chat" \
@@ -595,7 +595,7 @@ check "the server log records each issued message id" "issued $chat-m4" \
 mkdir -p "$HOME/.config/forum" "$test_dir/private-project"
 cat >"$HOME/.config/forum/config.yml" <<EOF
 workspaces:
-  default:
+  general:
     server: $main_url
     metadata_capture: none
 EOF
@@ -627,7 +627,7 @@ check "forum knows only its own workspaces" \
     "$(forum entry r1 2>&1 || true)"
 cat >"$test_dir/forum-down.yml" <<EOF
 workspaces:
-  default:
+  general:
     server: http://127.0.0.1:1
 EOF
 check "an unreachable server is named" "request to http://127.0.0.1:1 failed" \

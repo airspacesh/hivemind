@@ -12,7 +12,7 @@ func addAs(
 	t *testing.T, store *Store, user, subject string, links ...api.Link,
 ) api.Entry {
 	t.Helper()
-	return addTo(t, store, "default", api.AddEntryRequest{
+	return addTo(t, store, "general", api.AddEntryRequest{
 		Subject: subject, Links: links,
 		Origin: api.Origin{User: user},
 	})
@@ -120,7 +120,7 @@ func TestNobodyCanEditWhatRecordsNoUser(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	entry, err := store.Add(ctx, everyAccess(store),
-		workspaceID(t, store, "default"),
+		workspaceID(t, store, "general"),
 		api.AddEntryRequest{Subject: "anonymous"})
 	if err != nil {
 		t.Fatal(err)

@@ -21,7 +21,7 @@ const testBusyTimeout = time.Second
 const contendedOpenBusyTimeout = 30 * time.Second
 
 var testWorkspaces = []api.Workspace{
-	{Name: "default", Prefix: "e"},
+	{Name: "general", Prefix: "e"},
 	{Name: "personal", Prefix: "p"},
 }
 
@@ -107,7 +107,7 @@ func addTo(
 	return entry
 }
 
-// mustAdd adds an entry to the default workspace.
+// mustAdd adds an entry to the general workspace.
 func mustAdd(
 	t *testing.T,
 	store *Store,
@@ -116,7 +116,7 @@ func mustAdd(
 	metadata map[string]string,
 ) api.Entry {
 	t.Helper()
-	return addTo(t, store, "default", api.AddEntryRequest{
+	return addTo(t, store, "general", api.AddEntryRequest{
 		Subject: subject, Body: body, Metadata: metadata,
 	})
 }
@@ -164,8 +164,8 @@ func refStrings(refs ...api.Ref) []string {
 func TestEntryIDsCountFromOnePerWorkspace(t *testing.T) {
 	store := openTestStore(t)
 	var got []string
-	for _, workspace := range []string{"default", "personal", "default",
-		"default", "personal"} {
+	for _, workspace := range []string{"general", "personal", "general",
+		"general", "personal"} {
 		entry := addTo(t, store, workspace,
 			api.AddEntryRequest{Subject: "s"})
 		got = append(got, entry.Ref.String())
@@ -185,7 +185,7 @@ func TestConcurrentAddsGetUniqueIDsCountingFromOne(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			workspace := []string{"default", "personal"}[i%2]
+			workspace := []string{"general", "personal"}[i%2]
 			entry, err := store.Add(context.Background(),
 				everyAccess(store), workspaceID(t, store, workspace),
 				api.AddEntryRequest{Subject: "s"})
@@ -276,7 +276,7 @@ func TestMutationRollsBackWhenResultCannotBeRead(t *testing.T) {
 		t.Fatalf("creating trigger: %v", err)
 	}
 	_, err = store.Add(ctx, everyAccess(store),
-		workspaceID(t, store, "default"),
+		workspaceID(t, store, "general"),
 		api.AddEntryRequest{Subject: "must roll back"})
 	if err == nil {
 		t.Fatal("add succeeded despite unreadable result")
@@ -352,7 +352,7 @@ func TestCanceledMutationDoesNotWrite(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := store.Add(ctx, everyAccess(store),
-		workspaceID(t, store, "default"),
+		workspaceID(t, store, "general"),
 		api.AddEntryRequest{Subject: "canceled"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("add error = %v, want context.Canceled", err)
@@ -385,7 +385,7 @@ func TestBusyDatabaseIsRecognized(t *testing.T) {
 		t.Fatalf("locking database: %v", err)
 	}
 	_, err = second.Add(ctx, everyAccess(second),
-		workspaceID(t, second, "default"),
+		workspaceID(t, second, "general"),
 		api.AddEntryRequest{Subject: "blocked"})
 	if !IsBusy(err) {
 		t.Fatalf("add error = %v, want SQLite busy/locked", err)
@@ -446,7 +446,7 @@ func TestWritesProceedWhileAReadIsOpen(t *testing.T) {
 	writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if _, err := store.Add(writeCtx, everyAccess(store),
-		workspaceID(t, store, "default"), api.AddEntryRequest{
+		workspaceID(t, store, "general"), api.AddEntryRequest{
 			Subject: "during the read",
 		}); err != nil {
 		t.Fatalf("adding while a read is open: %v", err)

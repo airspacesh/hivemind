@@ -106,7 +106,7 @@ func addRandomForest(
 	var refs []api.Ref
 	inWorkspace := map[string][]api.Ref{}
 	for i := 0; i < 80; i++ {
-		workspace := "default"
+		workspace := "general"
 		if random.Intn(3) == 0 {
 			workspace = "personal"
 		}
@@ -227,12 +227,12 @@ func TestTopicsMatchTheReference(t *testing.T) {
 		store := openTestStore(t)
 		random := rand.New(rand.NewSource(seed))
 		addRandomForest(t, store, random, seed%2 == 0)
-		defaultID := workspaceID(t, store, "default")
+		generalID := workspaceID(t, store, "general")
 
 		for _, project := range []string{"", "a"} {
 			for _, include := range []bool{false, true} {
 				for _, span := range spans {
-					want := referenceTopics(t, store, defaultID, project,
+					want := referenceTopics(t, store, generalID, project,
 						include, span)
 					filter := Filter{View: ViewTopics,
 						IncludeSuperseded: include, Changed: span}
@@ -242,9 +242,9 @@ func TestTopicsMatchTheReference(t *testing.T) {
 					label := fmt.Sprintf("seed %d, project %q, include "+
 						"superseded %v, span %v", seed, project, include,
 						span)
-					checkTopicPages(t, store, defaultID, filter, want,
+					checkTopicPages(t, store, generalID, filter, want,
 						label)
-					checkWalkMatchesRanking(t, store, defaultID, filter,
+					checkWalkMatchesRanking(t, store, generalID, filter,
 						label)
 				}
 			}
@@ -407,7 +407,7 @@ func addBusyTree(
 func TestTopicsWalkPastABusyTree(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	workspace := workspaceID(t, store, "default")
+	workspace := workspaceID(t, store, "general")
 	root := addBusyTree(t, store, workspace, 4000, 30)
 	filter := Filter{View: ViewTopics, Limit: 20}
 
