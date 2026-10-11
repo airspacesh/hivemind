@@ -1,5 +1,5 @@
-// ws is the client of ws-server, which hosts workspaces of entries
-// with metadata, links, and a chat on each entry.
+// ws is the client of ws-server, which hosts workspaces of posts with
+// metadata, links, and a chat on each post.
 package main
 
 import (
@@ -25,7 +25,7 @@ var (
 	defaultConfigPath = "~/.config/workstream/config.yml"
 )
 
-const usage = `{program} - a client for workstream: shared workspaces of entries
+const usage = `{program} - a client for workstream: shared workspaces of posts
 
 Usage:
   {program} add <subject> --project <p> [--body <b>]
@@ -36,11 +36,11 @@ Usage:
          [--supersedes <ref>]... [--link <name>=<ref>]...
          [--unlink <name>[=<ref>]]... [--no-recent]
   {program} delete <ref>
-  {program} entry <ref>
+  {program} post <ref>
   {program} tree <ref> [--limit 30] [--include-superseded]
   {program} recent [--include-chat] [--under <ref>] [search filters]
          [--workspace <name>]
-  {program} search [<text>] [--entries-only] [--under <ref>]
+  {program} search [<text>] [--posts-only] [--under <ref>]
          [search filters] [--workspace <name>]
   {program} list-workspaces
   {program} list-projects [--limit 30] [--workspace <name>]
@@ -62,26 +62,25 @@ Usage:
   {program} help
   {program} --version
 
-Workspaces and entries:
-  A workspace is a named collection of entries, hosted on a server. An
-  entry has a project, a short subject, an optional longer body, and
-  metadata: key=value pairs such as jira. Every entry needs a project.
-  An entry's id is its workspace's prefix and a number, like e12, and
-  is called <ref> above. Keep the subject to a headline and put detail
-  in the body. Listings show only the subject, and '{program} entry'
-  shows the rest.
+Workspaces and posts:
+  A workspace is a named collection of posts, hosted on a server. A post
+  has a project, a short subject, an optional longer body, and metadata:
+  key=value pairs such as jira. Every post needs a project. A post's id
+  is its workspace's prefix and a number, like e12, and is called <ref>
+  above. Keep the subject to a headline and put detail in the body.
+  Listings show only the subject, and '{program} post' shows the rest.
 
-  A command that takes a <ref> works in that entry's workspace. With
+  A command that takes a <ref> works in that post's workspace. With
   --parent, add works in the parent's, and with --under, recent and
-  search work in that entry's, unless --workspace names another. Any
-  other command works in the workspace --workspace names, or else in
-  the one the variable {DEFAULT_WORKSPACE} names, or else in the one
-  called general. '{program} list-workspaces' shows them all.
+  search work in that post's, unless --workspace names another. Any
+  other command works in the workspace --workspace names, or else in the
+  one the variable {DEFAULT_WORKSPACE} names, or else in the one called
+  general. '{program} list-workspaces' shows them all.
 
-  Each entry and message records the username, and as far as the
+  Each post and message records the username, and as far as the
   workspace's metadata_capture allows, the host, directory and Claude
-  Code session it was written from. '{program} entry' shows it, and
-  the origin-* filters search it.
+  Code session it was written from. '{program} post' shows it, and the
+  origin-* filters search it.
 
   Metadata keys are lowercase slugs: letters, digits, and single
   dashes, starting with a letter (e.g. jira, build-id). For several of
@@ -95,52 +94,52 @@ Editing and deleting:
   '{program} edit' changes the project, subject, body, metadata and
   links. --body "" clears the body. Giving a metadata key no value
   removes it, as in --meta jira= or --jira "". The project can change
-  but not be removed. An entry's id, times and origin cannot change.
-  add and edit end by listing the 5 most recently changed other
-  entries in the workspace, so you see what others are doing.
-  --no-recent leaves the listing out.
+  but not be removed. A post's id, times and origin cannot change. add
+  and edit end by listing the 5 most recently changed other posts in the
+  workspace, so you see what others are doing. --no-recent leaves the
+  listing out.
 
-  '{program} delete <ref>' deletes an entry. Its subject, body and
+  '{program} delete <ref>' deletes a post. Its subject, body and
   metadata are removed for good, and it shows as (deleted). Its id,
-  project, links, origin and chat stay, and the entries under it stay
-  in place. '{program} chat delete <ref>-m<n>' deletes a message. Its
-  text is removed for good, and it keeps its number and place. Deleting
-  again changes nothing. A deleted entry or message cannot be edited.
+  project, links, origin and chat stay, and the posts under it stay in
+  place. '{program} chat delete <ref>-m<n>' deletes a message. Its text
+  is removed for good, and it keeps its number and place. Deleting again
+  changes nothing. A deleted post or message cannot be edited.
 
-  Only the user who posted an entry or message can edit or delete it.
-  To suggest a change to someone else's, send a message in its chat.
+  Only the user who wrote a post or message can edit or delete it. To
+  suggest a change to someone else's, send a message in its chat.
 
 Links:
-  A link is a named relationship from one entry to another on the same
+  A link is a named relationship from one post to another on the same
   server, possibly in another workspace, such as --link depends-on=e40.
-  --parent <ref>      the entry this one belongs under, in the same
-                      workspace. An entry has at most one parent.
+  --parent <ref>      the post this one belongs under, in the same
+                      workspace. A post has at most one parent.
                       --parent "" on edit removes it.
-  --supersedes <ref>  this entry replaces that one, which then drops out
+  --supersedes <ref>  this post replaces that one, which then drops out
                       of listings unless they pass --include-superseded.
-                      '{program} entry' still shows it.
+                      '{program} post' still shows it.
   Neither may loop. --unlink depends-on=e40 removes one link, and
   --unlink depends-on every link of that name. Editing only links
   leaves the modified time alone.
 
 Listings:
-  '{program} recent' lists the newest entries that match its filters,
-  at every level, a line each with who wrote it and the path to it,
-  like [e44] 07:45 ines in e1.e34: subject. An entry ranks by the
-  latest change to it or its chat, and shows how many messages its
-  chat gained since the oldest match listed, like (2 new messages).
+  '{program} recent' lists the newest posts that match its filters, at
+  every level, a line each with who wrote it and the path to it, like
+  [e44] 07:45 ines in e1.e34: subject. A post ranks by the latest change
+  to it or its chat, and shows how many messages its chat gained since
+  the oldest match listed, like (2 new messages).
   With --include-chat, recent lists the newest messages as well, like
-  [e44-m3] 07:50 omar in e1.e34: text, and an entry ranks by its own
-  latest change. '{program} search' lists the same way, with chat
-  unless --entries-only. Entries and messages share --limit. A listing
-  says what it ran on stderr. When older matches may remain, the last
-  line gives the command that lists them, which repeats the flags with
-  --before set to the revision of the oldest match shown. --under <ref>
-  keeps recent or search to an entry and what is beneath it.
-  '{program} tree <ref>' shows the path to an entry, then its subtree,
-  at most --limit entries, marking where it was cut.
+  [e44-m3] 07:50 omar in e1.e34: text, and a post ranks by its own
+  latest change. '{program} search' lists the same way, with chat unless
+  --posts-only. Posts and messages share --limit. A listing says what it
+  ran on stderr. When older matches may remain, the last line gives the
+  command that lists them, which repeats the flags with --before set to
+  the revision of the oldest match shown. --under <ref> keeps recent or
+  search to a post and what is beneath it.
+  '{program} tree <ref>' shows the path to a post, then its subtree, at
+  most --limit posts, marking where it was cut.
   '{program} list-projects' lists the --limit most recently active
-  projects, each with the number of its entries created in the last 90
+  projects, each with the number of its posts created in the last 90
   days, and their share of the workspace's. Times show as 13:20 when an
   output's times all fall on one day, or else as 23/07/2025 13:20.
 
@@ -156,45 +155,44 @@ Search filters (recent, search, wait and firehose):
   duck does not match duck-pond. An empty pattern matches only an
   empty value. Prefix a filter with no- to exclude, as in --no-project.
   Filters AND together.
-  In recent and search, --after <bound> keeps to what last changed at
-  or after a time, or after a revision, and --before <bound> to what
-  last changed before it. An entry last changed at the change it ranks
-  by, and a message when it was posted. A bound is a revision like
-  @812345, as a listing's last line gives it, a date like 2026-10-09 or
-  a date and time like 2026-10-09T14:30, both in local time, or a span
-  back from now like 2d, 6h or 90m.
+  In recent and search, --after <bound> keeps to what last changed at or
+  after a time, or after a revision, and --before <bound> to what last
+  changed before it. A post last changed at the change it ranks by, and
+  a message when it was posted. A bound is a revision like @812345, as a
+  listing's last line gives it, a date like 2026-10-09 or a date and
+  time like 2026-10-09T14:30, both in local time, or a span back from
+  now like 2d, 6h or 90m.
   '{program} search', and '{program} recent --include-chat', match each
-  message in an entry's chat as well as the entries. A message matches
-  when it meets the text and origin filters itself, excluding ones
-  included, and its entry meets the others. An entry matches when it
-  meets every filter itself. So 'search hook --origin-user ines
-  --project build' finds the messages ines sent that mention hook in
-  the chats of build entries, and the build entries by ines that
-  mention hook, and 'search --origin-user ines --after 2d' lists what
-  ines posted in the last 2 days, and the entries she created that
-  changed in them.
+  message in a post's chat as well as the posts. A message matches when
+  it meets the text and origin filters itself, excluding ones included,
+  and its post meets the others. A post matches when it meets every
+  filter itself. So 'search hook --origin-user ines --project build'
+  finds the messages ines sent that mention hook in the chats of build
+  posts, and the build posts by ines that mention hook, and 'search
+  --origin-user ines --after 2d' lists what ines posted in the last 2
+  days, and the posts she created that changed in them.
   --limit <n>, -n <n>    matches to show (default 20)
-  --id-only              print one entry or message id per line
-  --include-superseded   include superseded entries
-  --entries-only         leave chats out of a search
+  --id-only              print one post or message id per line
+  --include-superseded   include superseded posts
+  --posts-only           leave chats out of a search
   --include-chat         list messages too in recent
 
 Chat:
-  Every entry has a chat. A message's id is the entry id, -m, and a
-  number counted from 1 in that entry, like e40-m3. Messages stay in
-  the order they were sent, and an edit overwrites one in place. Your
-  cursor is the id of the last message you read, like e40-m3. Pass it
-  as --after to read only later messages, and keep it, since the
-  server keeps no read state. --after e40-m0 starts before the first
-  message. --after also takes a time as in recent, like 2h, for the
-  messages posted at or after it.
+  Every post has a chat. A message's id is the post id, -m, and a number
+  counted from 1 in that post, like e40-m3. Messages stay in the order
+  they were sent, and an edit overwrites one in place. Your cursor is
+  the id of the last message you read, like e40-m3. Pass it as --after
+  to read only later messages, and keep it, since the server keeps no
+  read state. --after e40-m0 starts before the first message. --after
+  also takes a time as in recent, like 2h, for the messages posted at or
+  after it.
   '{program} chat send' sends a message and prints its id. With --after,
   it then shows the messages after --after, yours among them, and the
   cursor. It shows the newest 20 at most, and says how to read any it
   left out.
   '{program} chat recent <ref>' shows the newest messages, oldest first,
-  and the cursor. '{program} chat recent' alone shows the newest messages
-  across the workspace, under their entries.
+  and the cursor. '{program} chat recent' alone shows the newest
+  messages across the workspace, under their posts.
   '{program} chat read' shows the messages after --after, or from the
   start with no --after, a page at a time, and says how to read the
   next page.
@@ -216,23 +214,23 @@ Chat:
   is never retried. Check the chat before sending again.
 
 Changes:
-  A change is an entry added, edited or deleted, or a message sent,
-  edited or deleted. Editing only links is not a change. Each change
-  takes the next revision, a number counted across the whole server. A
-  change cursor is the revision of the last change read, like @812345.
-  Pass it as --after to read only later changes, and keep it, since the
-  server keeps no read state. --after @0 starts before every change, and
-  with no --after a command starts from now. --after takes no time, since
-  changes are read by revision. An entry or message changed again after
+  A change is a post added, edited or deleted, or a message sent, edited
+  or deleted. Editing only links is not a change. Each change takes the
+  next revision, a number counted across the whole server. A change
+  cursor is the revision of the last change read, like @812345. Pass it
+  as --after to read only later changes, and keep it, since the server
+  keeps no read state. --after @0 starts before every change, and with
+  no --after a command starts from now. --after takes no time, since
+  changes are read by revision. A post or message changed again after
   your cursor shows once, at its latest change, with its current text.
   '{program} wait' returns as soon as a change after --after matches its
   filters and is not yours, and prints only the changes that match, then
-  the cursor. The search filters and --under match an entry's change
-  against the entry, and a message's change as in a search, so the text
-  and origin filters match the message itself and the others its entry.
-  A change is yours as in chat wait, by the origin of the entry or
+  the cursor. The search filters and --under match a post's change
+  against the post, and a message's change as in a search, so the text
+  and origin filters match the message itself and the others its post.
+  A change is yours as in chat wait, by the origin of the post or
   message. An edit or delete keeps the origin, so it counts as a change
-  by the session that added the entry or sent the message. The cursor
+  by the session that added the post or sent the message. The cursor
   passes every change the wait checked, matching or not, so wait on from
   it. It polls as chat wait does.
   '{program} firehose' prints every change that matches its filters as
@@ -247,7 +245,7 @@ Config:
     workspaces:
       general:
         server: http://localhost:7139
-        prefix: e                    # optional, saves asking servers
+        prefix: g                    # optional, saves asking servers
         auth:
           secret: <secret>           # optional, when the server needs it
         metadata_capture: all        # all (default), none, or a list of
@@ -440,8 +438,8 @@ func run(args []string) error {
 		return cmdEdit(c, args)
 	case "delete":
 		return cmdDelete(c, args)
-	case "entry":
-		return cmdEntry(c, args)
+	case "post":
+		return cmdPost(c, args)
 	case "tree":
 		return cmdTree(c, args)
 	case "recent", "search":

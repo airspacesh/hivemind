@@ -155,7 +155,7 @@ func hosting(next http.HandlerFunc, workspaces ...string) http.HandlerFunc {
 	}
 }
 
-func entryDetail(ref string) api.PostDetail {
+func postDetail(ref string) api.PostDetail {
 	parsed, _ := api.ParseRef(ref)
 	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
 	return api.PostDetail{ListedPost: api.ListedPost{Post: api.Post{
@@ -167,7 +167,7 @@ func entryDetail(ref string) api.PostDetail {
 func answering(ref string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/posts/"+ref {
-			reply(w, http.StatusOK, entryDetail(ref))
+			reply(w, http.StatusOK, postDetail(ref))
 			return
 		}
 		refuse(w, http.StatusNotFound, api.CodeRouteNotFound, "no route")
@@ -303,7 +303,7 @@ func TestWorkspaceChoiceOrder(t *testing.T) {
 	}
 }
 
-func TestListProjectsShowsSharesOfRecentEntries(t *testing.T) {
+func TestListProjectsShowsSharesOfRecentPosts(t *testing.T) {
 	at := func(text string) time.Time {
 		moment, err := time.Parse("2006-01-02 15:04", text)
 		if err != nil {
@@ -331,11 +331,11 @@ func TestListProjectsShowsSharesOfRecentEntries(t *testing.T) {
 		server.URL+"\n", 0o600)
 
 	got := ws(t, config, "list-projects", "--limit", "4")
-	want := `Projects by latest activity, with entries from the last 90 days:
-duck-pond   10/10/2026 20:41   1,204 entries   38%
-heron       09/10/2026 14:10       4 entries   <1%
-nest        08/10/2026 09:15       1 entry     <1%
-old-lake    01/05/2026 10:00       0 entries    0%
+	want := `Projects by latest activity, with posts from the last 90 days:
+duck-pond   10/10/2026 20:41   1,204 posts   38%
+heron       09/10/2026 14:10       4 posts   <1%
+nest        08/10/2026 09:15       1 post    <1%
+old-lake    01/05/2026 10:00       0 posts    0%
 --- 2 more projects (use --limit 6 to view all) ---
 `
 	if !got.ok || got.stdout != want {
@@ -350,7 +350,7 @@ func TestConfiguredPrefixSkipsAskingServers(t *testing.T) {
 	config := writeConfig(t, fmt.Sprintf("workspaces:\n  general:\n    "+
 		"server: %s\n  remote:\n    server: %s\n    prefix: r\n",
 		first.URL, second.URL), 0o600)
-	if got := ws(t, config, "entry", "r7"); !got.ok {
+	if got := ws(t, config, "post", "r7"); !got.ok {
 		t.Fatal(got)
 	}
 	if got := second.recorded(); len(got) != 1 || got[0].path != "/api/posts/r7" {
@@ -358,14 +358,14 @@ func TestConfiguredPrefixSkipsAskingServers(t *testing.T) {
 	}
 }
 
-// A parent is always in its child's workspace, so add puts a new entry
+// A parent is always in its child's workspace, so add puts a new post
 // in its parent's workspace unless --workspace names one.
 func TestAddTakesItsParentsWorkspace(t *testing.T) {
 	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "POST" &&
 			r.URL.Path == "/api/workspaces/personal/posts":
-			reply(w, http.StatusCreated, entryDetail("p4").Post)
+			reply(w, http.StatusCreated, postDetail("p4").Post)
 		case r.URL.Path == "/api/workspaces/personal/projects":
 			reply(w, http.StatusOK, api.ProjectsResponse{
 				Projects: []api.Project{}})
@@ -378,7 +378,7 @@ func TestAddTakesItsParentsWorkspace(t *testing.T) {
 		"prefix: p\n", server.URL, server.URL), 0o600)
 	got := ws(t, config, "add", "Answer", "--project", "pond",
 		"--parent", "p3", "--no-recent")
-	if !got.ok || !strings.Contains(got.stdout, "Added entry [p4].") {
+	if !got.ok || !strings.Contains(got.stdout, "Added post [p4].") {
 		t.Fatal(got)
 	}
 	if posted := server.recorded()[0]; posted.path !=
@@ -387,9 +387,9 @@ func TestAddTakesItsParentsWorkspace(t *testing.T) {
 	}
 }
 
-// A subtree is always in its root's workspace, so a search under an
-// entry looks in that entry's workspace unless --workspace names one.
-func TestSearchUnderTakesItsEntrysWorkspace(t *testing.T) {
+// A subtree is always in its root's workspace, so a search under a post
+// looks in that post's workspace unless --workspace names one.
+func TestSearchUnderTakesItsPostsWorkspace(t *testing.T) {
 	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/workspaces/personal/posts":
@@ -409,8 +409,8 @@ func TestSearchUnderTakesItsEntrysWorkspace(t *testing.T) {
 	}
 }
 
-// The chat overview marks how many older messages an entry has before
-// the ones it shows.
+// The chat overview marks how many older messages a post has before the
+// ones it shows.
 func TestOverviewMarksEarlierMessages(t *testing.T) {
 	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
 	message := func(number int64) api.Message {
@@ -534,7 +534,7 @@ func listingServer(
 }
 
 // A listing shows a match a line, each with its author and the path to
-// its entry, says on stderr what it ran, and ends with the command that
+// its post, says on stderr what it ran, and ends with the command that
 // lists the older matches.
 func TestListingShowsAMatchALine(t *testing.T) {
 	at := func(minute int) time.Time {
@@ -578,7 +578,7 @@ func TestListingShowsAMatchALine(t *testing.T) {
 	if !got.ok || got.stdout != want {
 		t.Fatalf("recent =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
 	}
-	header := "Newest 4 entries after @12 matching --project ai:\n"
+	header := "Newest 4 posts after @12 matching --project ai:\n"
 	if got.stderr != header {
 		t.Fatalf("recent said %q on stderr, want %q", got.stderr, header)
 	}
@@ -588,7 +588,7 @@ func TestListingShowsAMatchALine(t *testing.T) {
 		t.Fatalf("search --id-only =\n%s\nwant\n%s (%+v)", got.stdout,
 			want, got)
 	}
-	header = "Newest 20 entries and messages matching hook:\n"
+	header = "Newest 20 posts and messages matching hook:\n"
 	if got.stderr != header {
 		t.Fatalf("search said %q on stderr, want %q", got.stderr, header)
 	}
@@ -646,7 +646,7 @@ func TestFooterAsksForTheNextPage(t *testing.T) {
 			Revision: 812345}},
 		More: true,
 	})
-	first := ws(t, config, "search", "duck's pond", "--entries-only",
+	first := ws(t, config, "search", "duck's pond", "--posts-only",
 		"--after", "2026-10-09T04:00:00Z", "--no-project", "x", "-n", "1",
 		"--include-superseded")
 	lines := strings.Split(strings.TrimSpace(first.stdout), "\n")
@@ -677,7 +677,7 @@ func TestFooterAsksForTheNextPage(t *testing.T) {
 
 // TestResolutionMovesOnOnlyForAnAbsentPrefix checks that an id goes to
 // the first server listing its prefix, and that only that server's own
-// workspace's secret travels, and only with the entry request.
+// workspace's secret travels, and only with the post request.
 func TestResolutionMovesOnOnlyForAnAbsentPrefix(t *testing.T) {
 	first := newFakeServer(t, hosting(unexpected(t), "general=e"))
 	second := newFakeServer(t, hosting(answering("p3"), "personal=p"))
@@ -685,7 +685,7 @@ func TestResolutionMovesOnOnlyForAnAbsentPrefix(t *testing.T) {
 		"server: %s\n    auth:\n      secret: first-secret\n  personal:\n"+
 		"    server: %s\n    auth:\n      secret: second-secret\n",
 		first.URL, second.URL), 0o600)
-	if got := ws(t, config, "entry", "p3"); !got.ok ||
+	if got := ws(t, config, "post", "p3"); !got.ok ||
 		!strings.Contains(got.stdout, "[p3]") {
 		t.Fatal(got)
 	}
@@ -711,7 +711,7 @@ func TestSecretNeverReachesAnotherServer(t *testing.T) {
 	config := writeConfig(t, fmt.Sprintf("workspaces:\n  general:\n    "+
 		"server: %s\n    auth:\n      secret: first-secret\n  other:\n"+
 		"    server: %s\n", first.URL, second.URL), 0o600)
-	if got := ws(t, config, "entry", "p3"); !got.ok {
+	if got := ws(t, config, "post", "p3"); !got.ok {
 		t.Fatal(got)
 	}
 	for _, request := range second.recorded() {
@@ -744,7 +744,7 @@ func TestResolutionStopsOnAnyOtherFailure(t *testing.T) {
 			second := newFakeServer(t, hosting(answering("p3"), "personal=p"))
 			got := ws(t, writeConfig(t, fmt.Sprintf("workspaces:\n  a:\n    "+
 				"server: %s\n  b:\n    server: %s\n", first.URL, second.URL),
-				0o600), "entry", "p3")
+				0o600), "post", "p3")
 			if got.ok || !strings.Contains(got.stderr, first.URL) {
 				t.Errorf("want an error naming %s: %+v", first.URL, got)
 			}
@@ -759,7 +759,7 @@ func TestResolutionStopsOnAnyOtherFailure(t *testing.T) {
 		second := newFakeServer(t, hosting(answering("p3"), "personal=p"))
 		got := ws(t, writeConfig(t, fmt.Sprintf("workspaces:\n  a:\n    "+
 			"server: %s\n  b:\n    server: %s\n", down, second.URL), 0o600),
-			"entry", "p3")
+			"post", "p3")
 		if got.ok || !strings.Contains(got.stderr, down) {
 			t.Errorf("want an error naming %s: %+v", down, got)
 		}
@@ -769,17 +769,17 @@ func TestResolutionStopsOnAnyOtherFailure(t *testing.T) {
 	})
 }
 
-// TestFailuresAreNeverAnUnknownPrefix checks that a resolved entry's
-// own failures are reported as what they are, from its server alone.
+// TestFailuresAreNeverAnUnknownPrefix checks that a resolved post's own
+// failures are reported as what they are, from its server alone.
 func TestFailuresAreNeverAnUnknownPrefix(t *testing.T) {
 	failures := map[string]struct {
 		handler http.HandlerFunc
 		want    string
 	}{
-		"missing entry": {func(w http.ResponseWriter, r *http.Request) {
+		"missing post": {func(w http.ResponseWriter, r *http.Request) {
 			refuse(w, http.StatusNotFound, api.CodePostNotFound,
-				"entry not found: p3")
-		}, "entry not found: p3"},
+				"post not found: p3")
+		}, "post not found: p3"},
 		"auth failure": {func(w http.ResponseWriter, r *http.Request) {
 			refuse(w, http.StatusUnauthorized, api.CodeUnauthorized,
 				"workspace personal needs its secret")
@@ -791,7 +791,7 @@ func TestFailuresAreNeverAnUnknownPrefix(t *testing.T) {
 			second := newFakeServer(t, hosting(answering("p3"), "other=p"))
 			got := ws(t, writeConfig(t, fmt.Sprintf("workspaces:\n  a:\n    "+
 				"server: %s\n  b:\n    server: %s\n", first.URL, second.URL),
-				0o600), "entry", "p3")
+				0o600), "post", "p3")
 			if got.ok || !strings.Contains(got.stderr, failure.want) ||
 				strings.Contains(got.stderr, "prefix") {
 				t.Errorf("want %q and no prefix error: %+v", failure.want, got)
@@ -811,7 +811,7 @@ func TestLinksCannotJoinServers(t *testing.T) {
 		"prefix: r\n", first.URL, second.URL), 0o600)
 	got := ws(t, config, "add", "Linked", "--project", "pond",
 		"--link", "see=r4")
-	if got.ok || !strings.Contains(got.stderr, "cannot join entries on "+
+	if got.ok || !strings.Contains(got.stderr, "cannot join posts on "+
 		"different servers") {
 		t.Fatalf("a link to another server: %+v", got)
 	}
@@ -898,7 +898,7 @@ func TestUncertainWritesAreReportedNotRepeated(t *testing.T) {
 	})
 }
 
-// listing answers a search with entries changed at the given times.
+// listing answers a search with posts changed at the given times.
 func listing(times ...time.Time) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var page api.MatchPage
@@ -981,8 +981,8 @@ func TestForumNamesItselfAndReadsOnlyItsConfig(t *testing.T) {
 		!strings.Contains(got.stderr, "forum did not retry") {
 		t.Errorf("forum's retry advice: %+v", got)
 	}
-	got = withConfig("entry")
-	if !strings.Contains(got.stderr, "usage: forum entry <ref>") {
+	got = withConfig("post")
+	if !strings.Contains(got.stderr, "usage: forum post <ref>") {
 		t.Errorf("forum's usage error: %+v", got)
 	}
 	help := withConfig("help").stdout
@@ -1107,20 +1107,20 @@ func TestBoundFlagsReadLocalDatesSpansAndRevisions(t *testing.T) {
 // rather than read as a number in this one.
 func TestChatAfterKeepsToItsOwnChat(t *testing.T) {
 	now := time.Date(2026, 10, 11, 9, 30, 0, 0, time.UTC)
-	entry := api.Ref{Prefix: "e", ID: 40}
+	post := api.Ref{Prefix: "e", ID: 40}
 	for value, want := range map[string]api.ChatBound{
 		"e40-m3": {Number: 3},
 		"e40-m0": {},
 		"2h":     {Time: now.Add(-2 * time.Hour)},
 	} {
-		got, err := parseChatAfter(entry, value, now)
+		got, err := parseChatAfter(post, value, now)
 		if err != nil || !got.Time.Equal(want.Time) ||
 			got.Number != want.Number {
 			t.Errorf("%q = %v, %v, want %v", value, got, err, want)
 		}
 	}
 	for _, value := range []string{"e41-m3", "e4-m0", "f40-m3", "@3"} {
-		if got, err := parseChatAfter(entry, value, now); err == nil {
+		if got, err := parseChatAfter(post, value, now); err == nil {
 			t.Errorf("%q was accepted as %v", value, got)
 		}
 	}

@@ -311,7 +311,7 @@ func (c clientConfig) servers() []string {
 	return servers
 }
 
-// resolve finds the workspace an entry id belongs to, and so the server
+// resolve finds the workspace a post id belongs to, and so the server
 // its requests go to. A prefix the config sets picks its workspace.
 // Otherwise each configured server is asked in turn which prefixes it
 // hosts, and only a server that answers without the prefix passes the
@@ -337,6 +337,6 @@ func (c *client) resolve(ref api.Ref) (target, error) {
 		}
 	}
 	return target{}, fmt.Errorf("no configured server has a workspace with "+
-		"prefix %s, so %s names no entry %s can reach (asked %s)",
+		"prefix %s, so %s names no post %s can reach (asked %s)",
 		ref.Prefix, ref, programName, strings.Join(servers, ", "))
 }

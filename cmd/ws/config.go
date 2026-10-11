@@ -15,7 +15,7 @@ import (
 	"github.com/airspacesh/workstream/internal/api"
 )
 
-// metadataCapture is what a workspace records about where an entry or
+// metadataCapture is what a workspace records about where a post or
 // message was written, beyond the username, which is always recorded.
 type metadataCapture struct {
 	hostname  bool
@@ -67,7 +67,7 @@ func (m *metadataCapture) UnmarshalYAML(node *yaml.Node) error {
 }
 
 // configFile is the YAML config. Every key it does not name is an
-// error, since a typo could send entries somewhere unintended.
+// error, since a typo could send posts somewhere unintended.
 type configFile struct {
 	Workspaces map[string]workspaceFile `yaml:"workspaces"`
 }
@@ -313,8 +313,8 @@ func defaultWorkspace() string {
 	return "general"
 }
 
-// chooseWorkspace finds the workspace for a command that takes no
-// entry id: the one --workspace names, or else the default.
+// chooseWorkspace finds the workspace for a command that takes no post
+// id: the one --workspace names, or else the default.
 func (c clientConfig) chooseWorkspace(flag string) (workspaceConfig, error) {
 	name := flag
 	source := "--workspace"
@@ -345,7 +345,7 @@ workspaces:
   general:
     server: http://<host>:<port>
 
-A workspace can also set prefix (the letters of its entry ids, like e),
+A workspace can also set prefix (the letters of its post ids, like e),
 auth.secret (when its server needs one), and metadata_capture (all, the
 default, none, or a list of hostname, directory and session). Run
 '%s help' for more.`, path, programName, programName)

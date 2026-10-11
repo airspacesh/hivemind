@@ -45,8 +45,8 @@ func oneLine(text string) string {
 	return strings.ReplaceAll(text, "\n", "\\n")
 }
 
-// subjectLine shows an entry's subject on one line, or (deleted) for a
-// deleted entry, which has none.
+// subjectLine shows a post's subject on one line, or (deleted) for a
+// deleted post, which has none.
 func subjectLine(subject string, deleted bool) string {
 	if deleted {
 		return "(deleted)"
@@ -62,7 +62,7 @@ func joinRefs(refs []api.Ref) string {
 	return strings.Join(names, ", ")
 }
 
-// supersededLabel marks an entry that other entries supersede. Every
+// supersededLabel marks a post that other posts supersede. Every
 // successor is named, since none of them is more current than another.
 func supersededLabel(supersededBy []api.Ref) string {
 	if len(supersededBy) == 0 {
@@ -75,32 +75,32 @@ func supersededLabel(supersededBy []api.Ref) string {
 // request cannot read shows as its bare id.
 func formatPath(path []api.PostRef) string {
 	parts := make([]string, len(path))
-	for i, entry := range path {
-		parts[i] = entry.Ref.String()
-		subject := subjectLine(entry.Subject, entry.Deleted)
+	for i, post := range path {
+		parts[i] = post.Ref.String()
+		subject := subjectLine(post.Subject, post.Deleted)
 		if subject != "" {
-			parts[i] += " " + subject + supersededLabel(entry.SupersededBy)
+			parts[i] += " " + subject + supersededLabel(post.SupersededBy)
 		}
 	}
 	return strings.Join(parts, " > ")
 }
 
-// placeLabel shows where a listed entry sits, as the ids of its
+// placeLabel shows where a listed post sits, as the ids of its
 // ancestors from the top down joined by dots, like " in e1.e34", or
-// nothing for a top-level entry.
+// nothing for a top-level post.
 func placeLabel(ancestors []api.PostRef) string {
 	if len(ancestors) == 0 {
 		return ""
 	}
 	ids := make([]string, len(ancestors))
-	for i, entry := range ancestors {
-		ids[i] = entry.Ref.String()
+	for i, post := range ancestors {
+		ids[i] = post.Ref.String()
 	}
 	return " in " + strings.Join(ids, ".")
 }
 
-// lineHead starts the line of an entry or message with its ref, a time,
-// who wrote it, and the path to the entry, like [e44] 07:45 ines in
+// lineHead starts the line of a post or message with its ref, a time,
+// who wrote it, and the path to the post, like [e44] 07:45 ines in
 // e1.e34.
 func lineHead(
 	ref fmt.Stringer, at time.Time, layout, user string,
@@ -113,9 +113,9 @@ func lineHead(
 	return head + placeLabel(ancestors)
 }
 
-// printEntryLine prints an entry on one line, with a time, its author,
-// the path to it, and a suffix such as a count.
-func printEntryLine(
+// printPostLine prints a post on one line, with a time, its author, the
+// path to it, and a suffix such as a count.
+func printPostLine(
 	e api.Post, ancestors []api.PostRef, at time.Time, layout string,
 	suffix string,
 ) {
@@ -147,7 +147,7 @@ func printMatchRefs(page api.MatchPage) {
 }
 
 // printMatches prints the matches of a listing a line each, with the
-// path to each one's entry.
+// path to each one's post.
 func printMatches(matches []api.Match) {
 	times := make([]time.Time, len(matches))
 	for i, m := range matches {
@@ -158,7 +158,7 @@ func printMatches(matches []api.Match) {
 		if m.Message != nil {
 			printMessage(*m.Message, m.Ancestors, "", layout)
 		} else {
-			printEntryLine(m.Post, m.Ancestors, m.At, layout,
+			printPostLine(m.Post, m.Ancestors, m.At, layout,
 				newMessagesLabel(m.NewMessages))
 		}
 	}
@@ -190,7 +190,7 @@ func printOrigin(o api.Origin) {
 	}
 }
 
-// printBacklinks shows the links other entries hold to this one, apart
+// printBacklinks shows the links other posts hold to this one, apart
 // from children, which the child count covers.
 func printBacklinks(backlinks []api.Link) {
 	var lines []string
@@ -201,7 +201,7 @@ func printBacklinks(backlinks []api.Link) {
 			lines = append(lines, "superseded by "+link.Ref.String())
 		default:
 			lines = append(lines,
-				fmt.Sprintf("%s %s this entry", link.Ref, link.Name))
+				fmt.Sprintf("%s %s this post", link.Ref, link.Name))
 		}
 	}
 	if len(lines) == 0 {
@@ -213,7 +213,7 @@ func printBacklinks(backlinks []api.Link) {
 	}
 }
 
-func printEntryDetail(d api.PostDetail) {
+func printPostDetail(d api.PostDetail) {
 	e := d.Post
 	fmt.Printf("[%s] %s\n", e.Ref, subjectLine(e.Subject, e.Deleted))
 	if len(e.SupersededBy) > 0 {
@@ -262,9 +262,9 @@ func printEntryDetail(d api.PostDetail) {
 	}
 }
 
-// printTree prints an entry's subtree, each entry indented under its
-// parent, with the path to the entry above it and a marker wherever
-// the tree was cut.
+// printTree prints a post's subtree, each post indented under its
+// parent, with the path to the post above it and a marker wherever the
+// tree was cut.
 func printTree(tree api.TreeResponse, root api.Ref) {
 	if len(tree.Ancestors) > 0 {
 		fmt.Println("Path: " + formatPath(tree.Ancestors))
@@ -316,7 +316,7 @@ func messageTimes(messages []api.Message) []time.Time {
 
 // printMessage prints a message on one line, with any further lines of
 // its text indented beneath. The path, when given, is to the message's
-// entry. A deleted message shows no text.
+// post. A deleted message shows no text.
 func printMessage(
 	m api.Message, ancestors []api.PostRef, indent, layout string,
 ) {
@@ -340,25 +340,25 @@ func printMessage(
 
 // printCursorLine ends a chat output with the cursor to read on from,
 // as the command that uses it. A suggested wait repeats filterArgs.
-func printCursorLine(entry api.Ref, page api.ChatPage, filterArgs string) {
-	cursor := api.MessageRef{Post: entry, Number: page.Cursor}
+func printCursorLine(post api.Ref, page api.ChatPage, filterArgs string) {
+	cursor := api.MessageRef{Post: post, Number: page.Cursor}
 	if page.Remaining > 0 {
 		noun := "messages"
 		if page.Remaining == 1 {
 			noun = "message"
 		}
 		fmt.Printf("Next: %s chat read %s --after %s (%d more %s)\n",
-			programName, entry, cursor, page.Remaining, noun)
+			programName, post, cursor, page.Remaining, noun)
 		return
 	}
 	fmt.Printf("Cursor: %s (wait for more: %s chat wait %s --after %s%s)\n",
-		cursor, programName, entry, cursor, filterArgs)
+		cursor, programName, post, cursor, filterArgs)
 }
 
 // printChatPage prints one chat's messages oldest first, then the
 // cursor line.
 func printChatPage(
-	entry api.Ref, page api.ChatPage, empty string, filterArgs string,
+	post api.Ref, page api.ChatPage, empty string, filterArgs string,
 ) {
 	if len(page.Messages) == 0 {
 		fmt.Println(empty)
@@ -367,14 +367,14 @@ func printChatPage(
 	for _, m := range page.Messages {
 		printMessage(m, nil, "", layout)
 	}
-	printCursorLine(entry, page, filterArgs)
+	printCursorLine(post, page, filterArgs)
 }
 
-// printChatHeader names the entry a run of chat messages belongs to.
-func printChatHeader(entry api.PostRef) {
-	fmt.Printf("[%s] %s%s\n", entry.Ref,
-		subjectLine(entry.Subject, entry.Deleted),
-		supersededLabel(entry.SupersededBy))
+// printChatHeader names the post a run of chat messages belongs to.
+func printChatHeader(post api.PostRef) {
+	fmt.Printf("[%s] %s%s\n", post.Ref,
+		subjectLine(post.Subject, post.Deleted),
+		supersededLabel(post.SupersededBy))
 }
 
 func printOverview(overview api.ChatOverview, workspace string) {
@@ -389,8 +389,8 @@ func printOverview(overview api.ChatOverview, workspace string) {
 	layout := timeLayout(times)
 	for _, chat := range overview.Chats {
 		printChatHeader(chat.Post)
-		// Message numbers count from 1 in each entry, and the overview
-		// shows each entry's newest messages, so the first number shown
+		// Message numbers count from 1 in each post, and the overview
+		// shows each post's newest messages, so the first number shown
 		// says how many come before it.
 		if earlier := chat.Messages[0].Number - 1; earlier > 0 {
 			fmt.Printf("  ... %d earlier\n", earlier)
@@ -425,7 +425,7 @@ func shareOf(part, total int) string {
 }
 
 // printProjects prints one project a line, in columns, with its share
-// of the workspace's recent entries.
+// of the workspace's recent posts.
 func printProjects(result api.ProjectsResponse) {
 	var times []time.Time
 	nameWidth, countWidth := 0, 0
@@ -438,14 +438,14 @@ func printProjects(result api.ProjectsResponse) {
 	layout := timeLayout(times)
 	days := int(time.Since(result.RecentSince).Round(24*time.Hour) /
 		(24 * time.Hour))
-	fmt.Printf("Projects by latest activity, with entries from the last "+
+	fmt.Printf("Projects by latest activity, with posts from the last "+
 		"%d days:\n", days)
 	for _, project := range result.Projects {
-		noun := "entries"
+		noun := "posts"
 		if project.RecentPosts == 1 {
-			noun = "entry"
+			noun = "post"
 		}
-		fmt.Printf("%-*s   %s   %*s %-7s  %4s\n", nameWidth, project.Name,
+		fmt.Printf("%-*s   %s   %*s %-5s  %4s\n", nameWidth, project.Name,
 			project.Latest.Local().Format(layout), countWidth,
 			withThousands(project.RecentPosts), noun,
 			shareOf(project.RecentPosts, result.RecentPosts))
@@ -478,7 +478,7 @@ func printChanges(changes []api.Change) {
 		if change.Message != nil {
 			printMessage(*change.Message, e.Ancestors, "", layout)
 		} else {
-			printEntryLine(e.Post, e.Ancestors, e.Modified, layout, "")
+			printPostLine(e.Post, e.Ancestors, e.Modified, layout, "")
 		}
 	}
 }

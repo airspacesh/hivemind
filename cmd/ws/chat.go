@@ -113,25 +113,25 @@ func waitFor[T any](
 }
 
 func (c *client) chatPage(
-	t target, entry api.Ref, query url.Values,
+	t target, post api.Ref, query url.Values,
 ) (api.ChatPage, error) {
 	var page api.ChatPage
-	path := entryPath(entry, "/messages?"+query.Encode())
+	path := postPath(post, "/messages?"+query.Encode())
 	err := c.do(t, "GET", path, nil, &page)
 	return page, err
 }
 
-// parseChatAfter reads the --after of a command on an entry's chat,
-// which is a message of that chat like e40-m3, e40-m0 for its start, or
-// a time as a listing's --after reads it.
+// parseChatAfter reads the --after of a command on a post's chat, which
+// is a message of that chat like e40-m3, e40-m0 for its start, or a
+// time as a listing's --after reads it.
 func parseChatAfter(
-	entry api.Ref, value string, now time.Time,
+	post api.Ref, value string, now time.Time,
 ) (api.ChatBound, error) {
 	if cursor, err := api.ParseMessageCursor(value); err == nil {
-		if cursor.Post != entry {
+		if cursor.Post != post {
 			return api.ChatBound{}, fmt.Errorf("--after %s is a message "+
 				"of %s, but this is the chat of %s. Pass a message of %s, "+
-				"like %s-m3", value, cursor.Post, entry, entry, entry)
+				"like %s-m3", value, cursor.Post, post, post, post)
 		}
 		return api.ChatBound{Number: cursor.Number}, nil
 	}
@@ -142,30 +142,30 @@ func parseChatAfter(
 	return api.ChatBound{}, fmt.Errorf("--after must be a message of the "+
 		"chat like %s-m3, %s-m0 for its start, a span back from now like "+
 		"2d, 6h or 90m, a date like 2026-10-09, or a date and time like "+
-		"2026-10-09T14:30, not %q", entry, entry, value)
+		"2026-10-09T14:30, not %q", post, post, value)
 }
 
 // describeChatAfter says where a chat read started, for a reply that
 // found nothing.
-func describeChatAfter(entry api.Ref, after api.ChatBound) string {
+func describeChatAfter(post api.Ref, after api.ChatBound) string {
 	if !after.Time.IsZero() {
 		return "at or after " + after.Time.Local().Format(dateClockLayout)
 	}
-	return "after " + api.MessageRef{Post: entry, Number: after.Number}.
+	return "after " + api.MessageRef{Post: post, Number: after.Number}.
 		String()
 }
 
-// numberBefore is the number of the message a read of an entry's chat
+// numberBefore is the number of the message a read of a post's chat
 // from after starts after. That is after's own number, or for a time,
 // the number of the last message posted before it.
 func (c *client) numberBefore(
-	t target, entry api.Ref, after api.ChatBound,
+	t target, post api.Ref, after api.ChatBound,
 ) (int64, error) {
 	if after.Time.IsZero() {
 		return after.Number, nil
 	}
 	query := url.Values{"after": {after.String()}, "limit": {"1"}}
-	page, err := c.chatPage(t, entry, query)
+	page, err := c.chatPage(t, post, query)
 	if err != nil {
 		return 0, err
 	}
@@ -218,7 +218,7 @@ func cmdChatSend(c *client, args []string) error {
 	}
 
 	var message api.Message
-	err = c.do(t, "POST", entryPath(ref, "/messages"), request, &message)
+	err = c.do(t, "POST", postPath(ref, "/messages"), request, &message)
 	if err != nil {
 		return uncertainWrite(err, "The message",
 			programName+" chat recent "+ref.String())
@@ -239,7 +239,7 @@ func cmdChatSend(c *client, args []string) error {
 	if err != nil {
 		return fmt.Errorf("reading the chat after the send: %w", err)
 	}
-	// Message numbers count from 1 in each entry and none are removed,
+	// Message numbers count from 1 in each post and none are removed,
 	// so the first number shown says how many after since are left out.
 	cursor := api.MessageRef{Post: ref, Number: since}
 	earlier := page.Messages[0].Number - 1 - since
@@ -273,7 +273,7 @@ func cmdChatEdit(c *client, args []string) error {
 	}
 
 	var message api.Message
-	path := entryPath(ref.Post, fmt.Sprintf("/messages/%d", ref.Number))
+	path := postPath(ref.Post, fmt.Sprintf("/messages/%d", ref.Number))
 	if err := c.do(t, "PATCH", path, request, &message); err != nil {
 		return uncertainWrite(explainNotOwner(err, ref.Post), "The edit",
 			programName+" chat recent "+ref.Post.String())
@@ -300,7 +300,7 @@ func cmdChatDelete(c *client, args []string) error {
 	}
 
 	var message api.Message
-	path := entryPath(ref.Post, fmt.Sprintf("/messages/%d", ref.Number))
+	path := postPath(ref.Post, fmt.Sprintf("/messages/%d", ref.Number))
 	if err := c.do(t, "DELETE", path, request, &message); err != nil {
 		return uncertainWrite(explainNotOwner(err, ref.Post), "The delete",
 			programName+" chat recent "+ref.Post.String())

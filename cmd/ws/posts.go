@@ -76,17 +76,17 @@ func uncertainWrite(err error, outcome, check string) error {
 
 // explainNotOwner adds the next step to an edit or delete refused
 // because another user posted what it changes.
-func explainNotOwner(err error, entry api.Ref) error {
+func explainNotOwner(err error, post api.Ref) error {
 	var refused *serverError
 	if !errors.As(err, &refused) || refused.code != api.CodeNotOwner {
 		return err
 	}
 	return fmt.Errorf("%w. To suggest a change, send a message in its "+
 		"chat with '%s chat send %s \"<message>\"'", err, programName,
-		entry)
+		post)
 }
 
-func entryPath(ref api.Ref, rest string) string {
+func postPath(ref api.Ref, rest string) string {
 	return "/api/posts/" + ref.String() + rest
 }
 
@@ -103,10 +103,10 @@ func (c *client) search(t target, query url.Values) (api.MatchPage, error) {
 
 const recentAfterChangeCount = 5
 
-// printRecentAfterChange lists the most recently changed entries in a
-// workspace other than the one just changed. That entry is dropped
-// after the fetch rather than skipped in the query, because another
-// agent's write can land in between and take the top slot.
+// printRecentAfterChange lists the most recently changed posts in a
+// workspace other than the one just changed. That post is dropped after
+// the fetch rather than skipped in the query, because another agent's
+// write can land in between and take the top slot.
 func (c *client) printRecentAfterChange(t target, changed api.Ref) error {
 	query := url.Values{}
 	query.Set("limit", fmt.Sprint(recentAfterChangeCount+1))
@@ -125,7 +125,7 @@ func (c *client) printRecentAfterChange(t target, changed api.Ref) error {
 		return nil
 	}
 	fmt.Println()
-	fmt.Println("Other recent entries:")
+	fmt.Println("Other recent posts:")
 	printMatches(others)
 	return nil
 }
@@ -184,8 +184,8 @@ func parseLink(flag, value string) (api.Link, error) {
 }
 
 // collectLinks gathers the links given by --parent, --supersedes and
-// --link, which add and edit accept alike, and checks each target is
-// on the entry's server. An empty --parent is left to edit, where it
+// --link, which add and edit accept alike, and checks each target is on
+// the post's server. An empty --parent is left to edit, where it
 // removes the parent.
 func (c *client) collectLinks(t target, p *parsedArgs) ([]api.Link, error) {
 	var links []api.Link
@@ -217,8 +217,8 @@ func (c *client) collectLinks(t target, p *parsedArgs) ([]api.Link, error) {
 			return nil, err
 		}
 		if home.server != t.server {
-			return nil, fmt.Errorf("%s is on %s, but the entry is on %s, "+
-				"and a link cannot join entries on different servers",
+			return nil, fmt.Errorf("%s is on %s, but the post is on %s, "+
+				"and a link cannot join posts on different servers",
 				link.Ref, home.server, t.server)
 		}
 	}
@@ -236,7 +236,7 @@ func (c *client) projects(
 }
 
 // project reads one project of a workspace, with its count of every
-// entry, which costs the server time in proportion to that project, not
+// post, which costs the server time in proportion to that project, not
 // to the workspace.
 func (c *client) project(
 	t target, name string,
@@ -247,8 +247,8 @@ func (c *client) project(
 	return projects, err
 }
 
-// noticeNewProject says when an entry is the first in its project,
-// which catches a mistyped project without refusing a new one.
+// noticeNewProject says when a post is the first in its project, which
+// catches a mistyped project without refusing a new one.
 func (c *client) noticeNewProject(t target, project string) error {
 	result, err := c.project(t, project)
 	if err != nil {
@@ -256,7 +256,7 @@ func (c *client) noticeNewProject(t target, project string) error {
 	}
 	for _, existing := range result.Projects {
 		if existing.Name == project && *existing.Posts == 1 {
-			fmt.Printf("This is the first entry in project %q. Run '%s "+
+			fmt.Printf("This is the first post in project %q. Run '%s "+
 				"list-projects' if you meant an existing one.\n", project,
 				programName)
 		}
@@ -264,10 +264,10 @@ func (c *client) noticeNewProject(t target, project string) error {
 	return nil
 }
 
-// targetBeside is where a command works on the tree of the entry
-// refFlag names: in the workspace --workspace names, or else in that
-// entry's, since a tree never leaves its workspace, or else in the
-// default workspace.
+// targetBeside is where a command works on the tree of the post refFlag
+// names: in the workspace --workspace names, or else in that post's,
+// since a tree never leaves its workspace, or else in the default
+// workspace.
 func (c *client) targetBeside(p *parsedArgs, refFlag string) (target, error) {
 	if p.strs["--workspace"] == "" && p.has(refFlag) {
 		ref, err := api.ParseRef(p.strs[refFlag])
@@ -309,7 +309,7 @@ func cmdAdd(c *client, args []string) error {
 			programName)
 	}
 	if p.has("--parent") && p.strs["--parent"] == "" {
-		return fmt.Errorf("--parent needs an entry id")
+		return fmt.Errorf("--parent needs a post id")
 	}
 	t, err := c.targetBeside(p, "--parent")
 	if err != nil {
@@ -335,23 +335,23 @@ func cmdAdd(c *client, args []string) error {
 		return err
 	}
 
-	var entry api.Post
-	err = c.do(t, "POST", workspacePath(t, "/posts"), request, &entry)
+	var post api.Post
+	err = c.do(t, "POST", workspacePath(t, "/posts"), request, &post)
 	if err != nil {
-		return uncertainWrite(err, "The entry",
+		return uncertainWrite(err, "The post",
 			programName+" recent --flat --workspace "+t.workspace)
 	}
-	fmt.Printf("Added entry [%s].\n", entry.Ref)
+	fmt.Printf("Added post [%s].\n", post.Ref)
 	if err := c.noticeNewProject(t, request.Project); err != nil {
-		return fmt.Errorf("the entry was added, but listing projects "+
+		return fmt.Errorf("the post was added, but listing projects "+
 			"failed: %w", err)
 	}
 	if p.bools["--no-recent"] {
 		return nil
 	}
-	if err := c.printRecentAfterChange(t, entry.Ref); err != nil {
-		return fmt.Errorf("the entry was added, but listing recent "+
-			"entries failed: %w", err)
+	if err := c.printRecentAfterChange(t, post.Ref); err != nil {
+		return fmt.Errorf("the post was added, but listing recent "+
+			"posts failed: %w", err)
 	}
 	return nil
 }
@@ -432,18 +432,18 @@ func cmdEdit(c *client, args []string) error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
-	var entry api.Post
-	if err := c.do(t, "PATCH", entryPath(ref, ""), request, &entry); err != nil {
+	var post api.Post
+	if err := c.do(t, "PATCH", postPath(ref, ""), request, &post); err != nil {
 		return uncertainWrite(explainNotOwner(err, ref), "The edit",
-			programName+" entry "+ref.String())
+			programName+" post "+ref.String())
 	}
-	fmt.Printf("Edited entry [%s].\n", entry.Ref)
+	fmt.Printf("Edited post [%s].\n", post.Ref)
 	if p.bools["--no-recent"] {
 		return nil
 	}
-	if err := c.printRecentAfterChange(t, entry.Ref); err != nil {
-		return fmt.Errorf("the entry was edited, but listing recent "+
-			"entries failed: %w", err)
+	if err := c.printRecentAfterChange(t, post.Ref); err != nil {
+		return fmt.Errorf("the post was edited, but listing recent "+
+			"posts failed: %w", err)
 	}
 	return nil
 }
@@ -465,19 +465,19 @@ func cmdDelete(c *client, args []string) error {
 		return err
 	}
 
-	var entry api.Post
-	if err := c.do(t, "DELETE", entryPath(ref, ""), request,
-		&entry); err != nil {
+	var post api.Post
+	if err := c.do(t, "DELETE", postPath(ref, ""), request,
+		&post); err != nil {
 		return uncertainWrite(explainNotOwner(err, ref), "The delete",
-			programName+" entry "+ref.String())
+			programName+" post "+ref.String())
 	}
-	fmt.Printf("Deleted entry [%s].\n", entry.Ref)
+	fmt.Printf("Deleted post [%s].\n", post.Ref)
 	return nil
 }
 
-func cmdEntry(c *client, args []string) error {
+func cmdPost(c *client, args []string) error {
 	if len(args) != 1 {
-		return usageError("entry <ref>")
+		return usageError("post <ref>")
 	}
 	ref, err := api.ParseRef(args[0])
 	if err != nil {
@@ -488,10 +488,10 @@ func cmdEntry(c *client, args []string) error {
 		return err
 	}
 	var detail api.PostDetail
-	if err := c.do(t, "GET", entryPath(ref, ""), nil, &detail); err != nil {
+	if err := c.do(t, "GET", postPath(ref, ""), nil, &detail); err != nil {
 		return err
 	}
-	printEntryDetail(detail)
+	printPostDetail(detail)
 	return nil
 }
 
@@ -527,7 +527,7 @@ func cmdTree(c *client, args []string) error {
 		return err
 	}
 	var tree api.TreeResponse
-	path := entryPath(ref, "/tree?"+query.Encode())
+	path := postPath(ref, "/tree?"+query.Encode())
 	if err := c.do(t, "GET", path, nil, &tree); err != nil {
 		return err
 	}
@@ -536,7 +536,7 @@ func cmdTree(c *client, args []string) error {
 }
 
 // addUnder adds the --under a command was given to its query, which
-// must name an entry on the target's server.
+// must name a post on the target's server.
 func (c *client) addUnder(t target, p *parsedArgs, query url.Values) error {
 	if !p.has("--under") {
 		return nil
@@ -585,10 +585,10 @@ func searchQuery(p *parsedArgs) (url.Values, error) {
 	return query, nil
 }
 
-// listingHeader says what a listing ran, like Newest 20 entries
-// matching --project launcher:
+// listingHeader says what a listing ran, like Newest 20 posts matching
+// --project launcher:
 func listingHeader(p *parsedArgs, limit int, includeChat bool) string {
-	text := fmt.Sprintf("Newest %d entries", limit)
+	text := fmt.Sprintf("Newest %d posts", limit)
 	if includeChat {
 		text += " and messages"
 	}
@@ -632,7 +632,7 @@ func olderCommand(
 		text += " --limit " + shellQuote(p.strs["--limit"])
 	}
 	for _, flag := range []string{"--include-chat", "--include-superseded",
-		"--entries-only"} {
+		"--posts-only"} {
 		if p.bools[flag] {
 			text += " " + flag
 		}
@@ -641,7 +641,7 @@ func olderCommand(
 }
 
 // cmdListing lists the newest matches, for recent or search. Search
-// takes a <text> and includes chat unless --entries-only. Recent leaves
+// takes a <text> and includes chat unless --posts-only. Recent leaves
 // chat out unless --include-chat.
 func cmdListing(c *client, command string, args []string) error {
 	p, err := parseArgs(args, searchFlagSpec())
@@ -657,17 +657,17 @@ func cmdListing(c *client, command string, args []string) error {
 		}
 		if p.has("--include-chat") {
 			return fmt.Errorf("search includes chat unless " +
-				"--entries-only. --include-chat is for recent")
+				"--posts-only. --include-chat is for recent")
 		}
-		includeChat = !p.bools["--entries-only"]
+		includeChat = !p.bools["--posts-only"]
 	case "recent":
 		if len(p.pos) != 0 {
 			return fmt.Errorf("recent takes no <text>. Use '%s search "+
 				"<text>'", programName)
 		}
-		if p.has("--entries-only") {
+		if p.has("--posts-only") {
 			return fmt.Errorf("recent leaves chat out unless " +
-				"--include-chat. --entries-only is for search")
+				"--include-chat. --posts-only is for search")
 		}
 		includeChat = p.bools["--include-chat"]
 	}
