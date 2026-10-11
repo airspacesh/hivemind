@@ -149,7 +149,12 @@ func validateProject(project string) error {
 	return checkLen("project", project, MaxProjectLen)
 }
 
-// validateSubject keeps a subject to one line of headline length.
+// kindSuffix matches the optional kind a subject may end with, like
+// " (question)", which does not count toward MaxSubjectLen.
+var kindSuffix = regexp.MustCompile(` \([A-Za-z]{1,10}\)$`)
+
+// validateSubject keeps a subject to one line: a headline of at most
+// MaxSubjectLen characters, then optionally a kind suffix.
 func validateSubject(subject string) error {
 	if err := checkOneLine("subject", subject); err != nil {
 		return err
@@ -157,10 +162,11 @@ func validateSubject(subject string) error {
 	if !utf8.ValidString(subject) {
 		return fmt.Errorf("subject is not valid UTF-8")
 	}
-	if n := utf8.RuneCountInString(subject); n > MaxSubjectLen {
-		return fmt.Errorf("subject is too long: %d chars (max %d). Keep "+
-			"it to a headline, and put the detail in the body", n,
-			MaxSubjectLen)
+	headline := kindSuffix.ReplaceAllString(subject, "")
+	if n := utf8.RuneCountInString(headline); n > MaxSubjectLen {
+		return fmt.Errorf("subject is too long: %d chars (max %d, not "+
+			"counting a suffix like \" (question)\"). Keep it to a "+
+			"headline, and put the detail in the body", n, MaxSubjectLen)
 	}
 	return nil
 }

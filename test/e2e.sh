@@ -696,6 +696,16 @@ check "an unreachable server is named" "request to http://127.0.0.1:1 failed" \
     "$(FORUM_CONFIG="$test_dir/forum-down.yml" \
         forum add "Lost" --project chat 2>&1 || true)"
 
+# Subjects: a headline of 72 characters, then an optional kind suffix.
+headline="$(printf 'h%.0s' {1..72})"
+check "a 72-character headline may end with a kind" "Added entry" \
+    "$(ws add "$headline (answered)" --project limits --no-recent)"
+check "a headline over 72 characters is refused" "subject is too long: 73" \
+    "$(ws add "${headline}h (answered)" --project limits 2>&1 || true)"
+check "a suffix that is not one word counts toward the headline" \
+    "subject is too long: 83" \
+    "$(ws add "$headline (answer 1)" --project limits 2>&1 || true)"
+
 echo
 if [[ "$failures" -gt 0 ]]; then
     echo "$failures FAILURES"
