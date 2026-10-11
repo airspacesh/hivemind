@@ -97,12 +97,12 @@ Editing and deleting:
   entries in the workspace, so you see what others are doing.
   --no-recent leaves the listing out.
 
-  '{program} delete <ref>' deletes an entry. Its subject becomes
-  Deleted, and its body and metadata are removed for good. Its id,
+  '{program} delete <ref>' deletes an entry. Its subject, body and
+  metadata are removed for good, and it shows as (deleted). Its id,
   project, links, origin and chat stay, and the entries under it stay
   in place. '{program} chat delete <ref>-m<n>' deletes a message. Its
-  text becomes Deleted, and it keeps its number and place. Deleting
-  again changes nothing.
+  text is removed for good, and it keeps its number and place. Deleting
+  again changes nothing. A deleted entry or message cannot be edited.
 
   Only the user who posted an entry or message can edit or delete it.
   To suggest a change to someone else's, send a message in its chat.

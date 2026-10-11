@@ -14,8 +14,8 @@ import (
 var ErrMessageNotFound = errors.New("message not found")
 
 const messageColumns = `m.workspace_id, m.entry_id, m.id, m.created_utc,
-	m.modified_utc, m.body, m.origin_user, m.origin_host, m.origin_dir,
-	m.origin_claude_session`
+	m.modified_utc, m.body, m.deleted, m.origin_user, m.origin_host,
+	m.origin_dir, m.origin_claude_session`
 
 // scanMessage reads the messageColumns, and any extra columns into
 // extra.
@@ -27,8 +27,9 @@ func (s *Store) scanMessage(
 	var created, modified string
 	err := row.Scan(append([]any{
 		&key.Workspace, &key.ID, &message.Number, &created, &modified,
-		&message.Body, &message.Origin.User, &message.Origin.Host,
-		&message.Origin.Dir, &message.Origin.ClaudeSession,
+		&message.Body, &message.Deleted, &message.Origin.User,
+		&message.Origin.Host, &message.Origin.Dir,
+		&message.Origin.ClaudeSession,
 	}, extra...)...)
 	if err != nil {
 		return api.Message{}, err
@@ -129,11 +130,33 @@ func (s *Store) Post(
 	return message, nil
 }
 
+// overwriteMessage writes a message's text and whether it is deleted,
+// as one change.
+func overwriteMessage(
+	ctx context.Context, tx *sql.Tx, entry Key, number int64, body string,
+	deleted bool,
+) error {
+	revision, err := nextRevision(ctx, tx)
+	if err != nil {
+		return err
+	}
+	now := nowUTC()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE entry_messages
+		SET body = ?, deleted = ?, modified_utc = ?, revision = ?
+		WHERE workspace_id = ? AND entry_id = ? AND id = ?`,
+		body, deleted, now, revision, entry.Workspace, entry.ID, number,
+	); err != nil {
+		return fmt.Errorf("overwriting message: %w", err)
+	}
+	return recordChatActivity(ctx, tx, entry, now)
+}
+
 // EditMessage overwrites a message's text, and reports whether it
 // changed. The message keeps its number and its place in the chat, and
 // no earlier text is kept. Text that equals the current text changes
 // nothing, so repeating an edit is harmless. Only the user who posted
-// the message can edit it.
+// the message can edit it, and nobody can edit a deleted message.
 func (s *Store) EditMessage(
 	ctx context.Context, entry Key, number int64, req api.EditMessageRequest,
 ) (api.Message, bool, error) {
@@ -150,23 +173,16 @@ func (s *Store) EditMessage(
 		req.User); err != nil {
 		return api.Message{}, false, err
 	}
+	if message.Deleted {
+		return api.Message{}, false,
+			&DeletedError{deleted: message.Ref().String()}
+	}
 	if message.Body == req.Body {
 		return message, false, nil
 	}
 
-	revision, err := nextRevision(ctx, tx)
-	if err != nil {
-		return api.Message{}, false, err
-	}
-	now := nowUTC()
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE entry_messages SET body = ?, modified_utc = ?, revision = ?
-		WHERE workspace_id = ? AND entry_id = ? AND id = ?`,
-		req.Body, now, revision, entry.Workspace, entry.ID, number,
-	); err != nil {
-		return api.Message{}, false, fmt.Errorf("editing message: %w", err)
-	}
-	if err := recordChatActivity(ctx, tx, entry, now); err != nil {
+	if err := overwriteMessage(ctx, tx, entry, number, req.Body,
+		false); err != nil {
 		return api.Message{}, false, err
 	}
 	message, err = s.getMessage(ctx, tx, entry, number)
@@ -180,15 +196,43 @@ func (s *Store) EditMessage(
 	return message, true, nil
 }
 
-// DeleteMessage overwrites a message's text with api.DeletedText, as
-// an edit would. Deleting a deleted message changes nothing. Only the
-// user who posted the message can delete it.
+// DeleteMessage clears a message's text and marks it deleted, and no
+// earlier text is kept. The message keeps its number and its place in
+// the chat. Deleting a deleted message changes nothing. Only the user
+// who posted the message can delete it.
 func (s *Store) DeleteMessage(
 	ctx context.Context, entry Key, number int64, req api.DeleteRequest,
 ) (api.Message, error) {
-	message, _, err := s.EditMessage(ctx, entry, number,
-		api.EditMessageRequest{Body: api.DeletedText, User: req.User})
-	return message, err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return api.Message{}, fmt.Errorf("deleting message: %w", err)
+	}
+	defer tx.Rollback()
+	message, err := s.getMessage(ctx, tx, entry, number)
+	if err != nil {
+		return api.Message{}, err
+	}
+	if err := checkEditor(message.Ref(), message.Origin.User,
+		req.User); err != nil {
+		return api.Message{}, err
+	}
+	if message.Deleted {
+		return message, nil
+	}
+
+	if err := overwriteMessage(ctx, tx, entry, number, "",
+		true); err != nil {
+		return api.Message{}, err
+	}
+	message, err = s.getMessage(ctx, tx, entry, number)
+	if err != nil {
+		return api.Message{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return api.Message{}, fmt.Errorf("committing message delete: %w",
+			err)
+	}
+	return message, nil
 }
 
 // readChatPage reads the messages a query selects into a page, oldest

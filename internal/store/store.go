@@ -62,7 +62,8 @@ INSERT INTO revision_counter (only_row, revision) VALUES (1, 0)`
 // without regard to ASCII case. activity_utc is the latest change to
 // the entry or its chat. Every write to either sets it, so listings
 // read it rather than the chat. revision is the revision of the
-// entry's own latest change, which also set modified_utc.
+// entry's own latest change, which also set modified_utc. deleted is 1
+// once a delete has cleared the subject and body, and 0 before.
 const createEntries = `
 CREATE TABLE entries (
 	workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
@@ -80,6 +81,7 @@ CREATE TABLE entries (
 	body TEXT NOT NULL DEFAULT '',
 	body_lower TEXT COLLATE BINARY
 		GENERATED ALWAYS AS (lower(body)) STORED,
+	deleted INTEGER NOT NULL DEFAULT 0,
 	origin_user TEXT NOT NULL DEFAULT '',
 	origin_user_lower TEXT COLLATE BINARY
 		GENERATED ALWAYS AS (lower(origin_user)) STORED,
@@ -180,7 +182,8 @@ ON entry_links(source_workspace_id, source_id) WHERE name = 'parent'`
 // the server in the order it was posted, so the chat overview orders
 // by it rather than by a clock. An edit overwrites the body, so no
 // earlier text is kept. revision is the revision of the post or of the
-// latest edit. origin_user has a lowered twin for
+// latest edit. deleted is 1 once a delete has cleared the body, and 0
+// before. origin_user has a lowered twin for
 // createMessageOriginUserIndex to hold.
 const createMessages = `
 CREATE TABLE entry_messages (
@@ -192,6 +195,7 @@ CREATE TABLE entry_messages (
 	modified_utc TEXT NOT NULL,
 	revision INTEGER NOT NULL,
 	body TEXT NOT NULL,
+	deleted INTEGER NOT NULL DEFAULT 0,
 	origin_user TEXT NOT NULL DEFAULT '',
 	origin_user_lower TEXT COLLATE BINARY
 		GENERATED ALWAYS AS (lower(origin_user)) STORED,

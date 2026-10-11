@@ -18,10 +18,6 @@ const (
 	SupersedesLink = "supersedes"
 )
 
-// DeletedText is the subject of a deleted entry and the body of a
-// deleted message.
-const DeletedText = "Deleted"
-
 // Workspace is a named collection of entries on a server, picked in an
 // entry id by its prefix.
 type Workspace struct {
@@ -52,6 +48,8 @@ type Origin struct {
 	ClaudeSession string `json:"claude_session,omitempty"`
 }
 
+// Entry is an entry with its own fields. A deleted entry has no
+// subject, body or metadata, and cannot be edited.
 type Entry struct {
 	Ref      Ref               `json:"ref"`
 	Created  time.Time         `json:"created"`
@@ -62,6 +60,7 @@ type Entry struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 	Origin   Origin            `json:"origin"`
 	Links    []Link            `json:"links,omitempty"`
+	Deleted  bool              `json:"deleted,omitempty"`
 	// SupersededBy lists the entries that supersede this one.
 	SupersededBy []Ref `json:"superseded_by,omitempty"`
 }
@@ -71,6 +70,7 @@ type Entry struct {
 type EntryRef struct {
 	Ref          Ref    `json:"ref"`
 	Subject      string `json:"subject,omitempty"`
+	Deleted      bool   `json:"deleted,omitempty"`
 	SupersededBy []Ref  `json:"superseded_by,omitempty"`
 }
 
@@ -119,8 +119,9 @@ type TreeResponse struct {
 }
 
 // Message is one message in an entry's chat, numbered from 1 within
-// it in the order they were posted. An edit or delete overwrites Body,
-// keeps the message's place, and no earlier text is kept.
+// it in the order they were posted. An edit overwrites Body, keeps the
+// message's place, and no earlier text is kept. A deleted message has
+// no body, and cannot be edited.
 type Message struct {
 	Entry    Ref       `json:"entry"`
 	Number   int64     `json:"number"`
@@ -128,6 +129,7 @@ type Message struct {
 	Modified time.Time `json:"modified"`
 	Body     string    `json:"body"`
 	Origin   Origin    `json:"origin"`
+	Deleted  bool      `json:"deleted,omitempty"`
 }
 
 func (m Message) Ref() MessageRef {
@@ -277,6 +279,7 @@ const (
 	CodeLinkTargetNotFound ErrorCode = "link_target_not_found"
 	CodeConflict           ErrorCode = "conflict"
 	CodeNotOwner           ErrorCode = "not_owner"
+	CodeDeleted            ErrorCode = "deleted"
 	CodeTooLarge           ErrorCode = "too_large"
 	CodeRouteNotFound      ErrorCode = "route_not_found"
 	CodeUnavailable        ErrorCode = "unavailable"

@@ -33,8 +33,8 @@ func (s *Store) begin(
 }
 
 const entryColumns = `e.workspace_id, e.id, e.created_utc,
-	e.modified_utc, e.project, e.subject, e.body, e.origin_user,
-	e.origin_host, e.origin_dir, e.origin_claude_session`
+	e.modified_utc, e.project, e.subject, e.body, e.deleted,
+	e.origin_user, e.origin_host, e.origin_dir, e.origin_claude_session`
 
 type rowScanner interface {
 	Scan(...any) error
@@ -47,7 +47,7 @@ func (v view) scanEntry(row rowScanner, extra ...any) (api.Entry, error) {
 	var created, modified string
 	err := row.Scan(append([]any{
 		&key.Workspace, &key.ID, &created, &modified,
-		&entry.Project, &entry.Subject, &entry.Body,
+		&entry.Project, &entry.Subject, &entry.Body, &entry.Deleted,
 		&entry.Origin.User, &entry.Origin.Host,
 		&entry.Origin.Dir, &entry.Origin.ClaudeSession,
 	}, extra...)...)
@@ -280,25 +280,38 @@ func checkEditor(posted fmt.Stringer, owner, editor string) error {
 	return nil
 }
 
-// entryOwner reads the user who posted an entry.
-func (v view) entryOwner(ctx context.Context, key Key) (string, error) {
-	var owner string
-	err := v.tx.QueryRowContext(ctx, `
-		SELECT origin_user FROM entries WHERE workspace_id = ? AND id = ?`,
-		key.Workspace, key.ID,
-	).Scan(&owner)
+// DeletedError refuses an edit of a deleted entry or message, which
+// would bring back what the delete removed.
+type DeletedError struct {
+	deleted string
+}
+
+func (e *DeletedError) Error() string {
+	return e.deleted + " was deleted, so it cannot be edited"
+}
+
+// editState reads what decides whether an entry can be changed: the
+// user who posted it, and whether it is deleted.
+func (v view) editState(
+	ctx context.Context, key Key,
+) (owner string, deleted bool, err error) {
+	err = v.tx.QueryRowContext(ctx, `
+		SELECT origin_user, deleted FROM entries
+		WHERE workspace_id = ? AND id = ?`, key.Workspace, key.ID,
+	).Scan(&owner, &deleted)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("%w: %s", ErrEntryNotFound, v.store.mustRef(key))
+		return "", false, fmt.Errorf("%w: %s", ErrEntryNotFound,
+			v.store.mustRef(key))
 	}
 	if err != nil {
-		return "", fmt.Errorf("reading entry owner: %w", err)
+		return "", false, fmt.Errorf("reading entry state: %w", err)
 	}
-	return owner, nil
+	return owner, deleted, nil
 }
 
 // Edit overwrites an entry's fields and changes its metadata and
 // links. No earlier text is kept. Only the user who posted the entry
-// can edit it.
+// can edit it, and nobody can edit a deleted entry.
 func (s *Store) Edit(
 	ctx context.Context,
 	access Access,
@@ -315,13 +328,16 @@ func (s *Store) Edit(
 	}
 	defer v.tx.Rollback()
 
-	owner, err := v.entryOwner(ctx, key)
+	owner, deleted, err := v.editState(ctx, key)
 	if err != nil {
 		return api.Entry{}, err
 	}
-	if err := checkEditor(v.store.mustRef(key), owner,
-		req.User); err != nil {
+	ref := v.store.mustRef(key)
+	if err := checkEditor(ref, owner, req.User); err != nil {
 		return api.Entry{}, err
+	}
+	if deleted {
+		return api.Entry{}, &DeletedError{deleted: ref.String()}
 	}
 	if req.ChangesContent() {
 		if err := v.editContent(ctx, key, req); err != nil {
@@ -348,11 +364,11 @@ func (s *Store) Edit(
 	return entry, nil
 }
 
-// Delete overwrites an entry's subject with api.DeletedText, clears its
-// body and removes its metadata, and no earlier text is kept. Its id,
-// project, origin, creation time, links and chat stay, so the entries
-// under it stay in place. Deleting a deleted entry changes nothing.
-// Only the user who posted the entry can delete it.
+// Delete clears an entry's subject and body, removes its metadata, and
+// marks it deleted, and no earlier text is kept. Its id, project,
+// origin, creation time, links and chat stay, so the entries under it
+// stay in place. Deleting a deleted entry changes nothing. Only the
+// user who posted the entry can delete it.
 func (s *Store) Delete(
 	ctx context.Context, access Access, key Key, req api.DeleteRequest,
 ) (api.Entry, error) {
@@ -362,7 +378,7 @@ func (s *Store) Delete(
 	}
 	defer v.tx.Rollback()
 
-	owner, err := v.entryOwner(ctx, key)
+	owner, deleted, err := v.editState(ctx, key)
 	if err != nil {
 		return api.Entry{}, err
 	}
@@ -370,20 +386,21 @@ func (s *Store) Delete(
 		req.User); err != nil {
 		return api.Entry{}, err
 	}
-	entry, err := v.getEntry(ctx, key)
-	if err != nil {
-		return api.Entry{}, err
-	}
-	if entry.Subject == api.DeletedText && entry.Body == "" &&
-		len(entry.Metadata) == 0 {
-		return entry, nil
+	if deleted {
+		return v.getEntry(ctx, key)
 	}
 
-	subject, body := api.DeletedText, ""
+	empty := ""
 	if err := v.editContent(ctx, key, api.EditEntryRequest{
-		Subject: &subject, Body: &body,
+		Subject: &empty, Body: &empty,
 	}); err != nil {
 		return api.Entry{}, err
+	}
+	if _, err := v.tx.ExecContext(ctx, `
+		UPDATE entries SET deleted = 1 WHERE workspace_id = ? AND id = ?`,
+		key.Workspace, key.ID,
+	); err != nil {
+		return api.Entry{}, fmt.Errorf("marking entry deleted: %w", err)
 	}
 	if _, err := v.tx.ExecContext(ctx, `
 		DELETE FROM entry_metadata WHERE workspace_id = ? AND entry_id = ?`,
@@ -391,7 +408,7 @@ func (s *Store) Delete(
 	); err != nil {
 		return api.Entry{}, fmt.Errorf("removing metadata: %w", err)
 	}
-	entry, err = v.getEntry(ctx, key)
+	entry, err := v.getEntry(ctx, key)
 	if err != nil {
 		return api.Entry{}, fmt.Errorf("reading deleted entry: %w", err)
 	}

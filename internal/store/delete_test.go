@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -48,7 +49,7 @@ func TestDeleteClearsAnEntryButKeepsItsPlace(t *testing.T) {
 	cursor := readChanges(t, store, 0, 100).Cursor
 
 	deleted := mustDelete(t, store, entry.Ref)
-	if deleted.Subject != api.DeletedText || deleted.Body != "" ||
+	if !deleted.Deleted || deleted.Subject != "" || deleted.Body != "" ||
 		len(deleted.Metadata) != 0 {
 		t.Fatalf("deleted entry keeps its text: %+v", deleted)
 	}
@@ -67,7 +68,7 @@ func TestDeleteClearsAnEntryButKeepsItsPlace(t *testing.T) {
 			"and 1", detail.Children, detail.Messages)
 	}
 	if got := readTree(t, store, child.Ref, false, 10).Ancestors; len(got) !=
-		2 || got[1].Ref != entry.Ref || got[1].Subject != api.DeletedText {
+		2 || got[1].Ref != entry.Ref || !got[1].Deleted {
 		t.Fatalf("child's path is %+v, want it under the deleted entry",
 			got)
 	}
@@ -110,7 +111,10 @@ func TestDeleteMessageKeepsItsPlace(t *testing.T) {
 		t.Fatalf("delete changed more than the text:\n%+v\nwas\n%+v",
 			deleted, message)
 	}
-	want := "e1-m1:first e1-m2:Deleted e1-m3:third cursor=3 remaining=0"
+	if !deleted.Deleted {
+		t.Fatalf("deleted message is not marked deleted: %+v", deleted)
+	}
+	want := "e1-m1:first e1-m2: e1-m3:third cursor=3 remaining=0"
 	if got := chatText(readChat(t, store, entry.Ref, 0, 10)); got != want {
 		t.Fatalf("chat is %s, want %s", got, want)
 	}
@@ -124,5 +128,49 @@ func TestDeleteMessageKeepsItsPlace(t *testing.T) {
 	if got := changeIDs(readChanges(t, store, page.Cursor, 100)); len(got) !=
 		0 {
 		t.Fatalf("deleting again made changes %v", got)
+	}
+}
+
+// An edit of a deleted entry or message would bring back what the
+// delete removed, so even the poster cannot make one.
+func TestNobodyCanEditWhatIsDeleted(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	other := mustAdd(t, store, "other", "", nil)
+	entry := mustAdd(t, store, "topic", "", nil)
+	message := mustPost(t, store, entry.Ref, "hi")
+	deleted := mustDelete(t, store, entry.Ref)
+	mustDeleteMessage(t, store, message.Ref())
+	key := store.mustKey(entry.Ref)
+
+	subject := "back"
+	for _, req := range []api.EditEntryRequest{
+		{Subject: &subject, User: testUser},
+		{AddLinks: []api.Link{link("see", other.Ref)}, User: testUser},
+	} {
+		_, err := store.Edit(ctx, everyAccess(store), key, req)
+		var refused *DeletedError
+		if !errors.As(err, &refused) {
+			t.Fatalf("editing a deleted entry = %v, want a refusal", err)
+		}
+	}
+	if got := mustGet(t, store, entry.Ref); !got.Deleted ||
+		got.Subject != "" || len(got.Links) != 0 ||
+		!got.Modified.Equal(deleted.Modified) {
+		t.Fatalf("a refused edit changed the deleted entry: %+v", got)
+	}
+
+	for _, body := range []string{"back", ""} {
+		_, _, err := store.EditMessage(ctx, key, message.Number,
+			api.EditMessageRequest{Body: body, User: testUser})
+		var refused *DeletedError
+		if !errors.As(err, &refused) {
+			t.Fatalf("editing a deleted message to %q = %v, want a "+
+				"refusal", body, err)
+		}
+	}
+	if got := readChat(t, store, entry.Ref, 0, 10).Messages[0]; !got.Deleted ||
+		got.Body != "" {
+		t.Fatalf("a refused edit changed the deleted message: %+v", got)
 	}
 }

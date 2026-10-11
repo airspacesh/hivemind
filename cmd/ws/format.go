@@ -45,6 +45,15 @@ func oneLine(text string) string {
 	return strings.ReplaceAll(text, "\n", "\\n")
 }
 
+// subjectLine shows an entry's subject on one line, or (deleted) for a
+// deleted entry, which has none.
+func subjectLine(subject string, deleted bool) string {
+	if deleted {
+		return "(deleted)"
+	}
+	return oneLine(subject)
+}
+
 // listOrder is the time a listing is ordered by.
 type listOrder int
 
@@ -90,9 +99,9 @@ func formatPath(path []api.EntryRef) string {
 	parts := make([]string, len(path))
 	for i, entry := range path {
 		parts[i] = entry.Ref.String()
-		if entry.Subject != "" {
-			parts[i] += " " + oneLine(entry.Subject) +
-				supersededLabel(entry.SupersededBy)
+		subject := subjectLine(entry.Subject, entry.Deleted)
+		if subject != "" {
+			parts[i] += " " + subject + supersededLabel(entry.SupersededBy)
 		}
 	}
 	return strings.Join(parts, " > ")
@@ -119,7 +128,8 @@ func printEntryLine(e api.ListedEntry, order listOrder, layout string) {
 	}
 	fmt.Printf("[%s] %s%s: %s%s%s\n", e.Ref,
 		listTime(e, order).Local().Format(layout), placeLabel(e.Ancestors),
-		oneLine(e.Subject), supersededLabel(e.SupersededBy), below)
+		subjectLine(e.Subject, e.Deleted), supersededLabel(e.SupersededBy),
+		below)
 }
 
 func printEntryLines(entries []api.ListedEntry, order listOrder) {
@@ -229,14 +239,18 @@ func printBacklinks(backlinks []api.Link) {
 
 func printEntryDetail(d api.EntryDetail) {
 	e := d.Entry
-	fmt.Printf("[%s] %s\n", e.Ref, e.Subject)
+	fmt.Printf("[%s] %s\n", e.Ref, subjectLine(e.Subject, e.Deleted))
 	if len(e.SupersededBy) > 0 {
 		fmt.Println("Superseded by " + joinRefs(e.SupersededBy))
 	}
 	fmt.Println()
 	fmt.Println("Project: " + e.Project)
 	fmt.Println("Created: " + localTimeDetail(e.Created))
-	fmt.Println("Modified: " + localTimeDetail(e.Modified))
+	if e.Deleted {
+		fmt.Println("Deleted: " + localTimeDetail(e.Modified))
+	} else {
+		fmt.Println("Modified: " + localTimeDetail(e.Modified))
+	}
 	if !d.Activity.Equal(e.Modified) {
 		fmt.Println("Subtree activity: " + localTimeDetail(d.Activity))
 	}
@@ -295,8 +309,8 @@ func printTree(tree api.TreeResponse, root api.Ref) {
 	printFrom = func(e api.TreeEntry, depth int) {
 		indent := strings.Repeat("  ", depth)
 		fmt.Printf("%s[%s] %s: %s%s\n", indent, e.Ref,
-			e.Modified.Local().Format(layout), oneLine(e.Subject),
-			supersededLabel(e.SupersededBy))
+			e.Modified.Local().Format(layout),
+			subjectLine(e.Subject, e.Deleted), supersededLabel(e.SupersededBy))
 		if e.MoreBelow > 0 {
 			fmt.Printf("%s  ... %d more below %s\n", indent, e.MoreBelow,
 				e.Ref)
@@ -325,8 +339,14 @@ func messageTimes(messages []api.Message) []time.Time {
 }
 
 // printMessage prints a message on one line, with any further lines of
-// its text indented beneath.
+// its text indented beneath. A deleted message shows no text.
 func printMessage(m api.Message, indent, layout string) {
+	if m.Deleted {
+		fmt.Printf("%s[%s] %s %s (deleted)\n", indent, m.Ref(),
+			m.Created.Local().Format(layout), m.Origin.User)
+		return
+	}
+
 	edited := ""
 	if !m.Modified.Equal(m.Created) {
 		edited = " (edited)"
@@ -372,7 +392,8 @@ func printChatPage(
 
 // printChatHeader names the entry a run of chat messages belongs to.
 func printChatHeader(entry api.EntryRef) {
-	fmt.Printf("[%s] %s%s\n", entry.Ref, oneLine(entry.Subject),
+	fmt.Printf("[%s] %s%s\n", entry.Ref,
+		subjectLine(entry.Subject, entry.Deleted),
 		supersededLabel(entry.SupersededBy))
 }
 
@@ -485,7 +506,7 @@ func printChanges(changes []api.Change) {
 
 		if e.Ref != above {
 			printChatHeader(api.EntryRef{Ref: e.Ref, Subject: e.Subject,
-				SupersededBy: e.SupersededBy})
+				Deleted: e.Deleted, SupersededBy: e.SupersededBy})
 			above = e.Ref
 		}
 		printMessage(*change.Message, "  ", layout)

@@ -29,9 +29,9 @@ Use these words, and no others for the same things.
 - **cursor**: the number of the last message an agent has read in a
   chat, or a wait has checked there, which it passes back to read only
   newer ones. Agents keep it. The server keeps no read state.
-- **delete**: overwrite an entry's subject with `Deleted` and remove
-  its body and metadata, or overwrite a message's text with `Deleted`.
-  The entry or message keeps its id, place and origin.
+- **delete**: remove an entry's subject, body and metadata, or a
+  message's text, and mark it deleted. The entry or message keeps its
+  id, place and origin, and can no longer be edited.
 - **change**: an entry added, edited or deleted, or a message sent,
   edited or deleted. Editing only links is not a change.
 - **revision**: the number a change takes, counted from 1 across the

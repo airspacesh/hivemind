@@ -65,6 +65,7 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	code := api.CodeInternal
 	message := "internal server error"
 	var notOwner *store.NotOwnerError
+	var deleted *store.DeletedError
 	switch {
 	case errors.Is(err, store.ErrInvalidFilter),
 		errors.Is(err, store.ErrInvalidTreeLimit),
@@ -97,6 +98,9 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	case errors.As(err, &notOwner):
 		status, code, message = http.StatusForbidden,
 			api.CodeNotOwner, err.Error()
+	case errors.As(err, &deleted):
+		status, code, message = http.StatusConflict,
+			api.CodeDeleted, err.Error()
 	case errors.Is(err, context.DeadlineExceeded), store.IsBusy(err):
 		status, code, message = http.StatusServiceUnavailable,
 			api.CodeUnavailable, "server is busy or the request timed out"

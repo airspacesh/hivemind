@@ -343,7 +343,7 @@ func TestUnreadableEntriesShowNoTextOverHTTP(t *testing.T) {
 	}
 }
 
-func TestOnlyThePosterCanEditOrDeleteOverHTTP(t *testing.T) {
+func TestRefusedEditsAndDeletesOverHTTP(t *testing.T) {
 	s := startServer(t, testConfig(t))
 	s.must(t, "POST", "/api/workspaces/general/entries", entryBody("mine"),
 		"", http.StatusCreated)
@@ -376,6 +376,18 @@ func TestOnlyThePosterCanEditOrDeleteOverHTTP(t *testing.T) {
 			200, ""},
 		{"PATCH", "/api/entries/e1/messages/1",
 			`{"body":"kept","user":"duck"}`, 200, ""},
+		{"DELETE", "/api/entries/e1", `{"user":"duck"}`, 200, ""},
+		{"DELETE", "/api/entries/e1/messages/1", `{"user":"duck"}`, 200,
+			""},
+		{"PATCH", "/api/entries/e1", `{"subject":"back","user":"duck"}`,
+			409, api.CodeDeleted},
+		{"PATCH", "/api/entries/e1",
+			`{"remove_link_names":["see"],"user":"duck"}`, 409,
+			api.CodeDeleted},
+		{"PATCH", "/api/entries/e1/messages/1",
+			`{"body":"back","user":"duck"}`, 409, api.CodeDeleted},
+		{"PATCH", "/api/entries/e1", `{"subject":"back","user":"heron"}`,
+			403, api.CodeNotOwner},
 		{"DELETE", "/api/entries/e1", `{"user":"duck"}`, 200, ""},
 		{"DELETE", "/api/entries/e1/messages/1", `{"user":"duck"}`, 200,
 			""},

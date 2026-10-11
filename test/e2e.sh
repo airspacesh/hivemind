@@ -492,27 +492,49 @@ check_equal "you can delete your own entry" "Deleted entry [$gadwall]." \
 check_equal "you can delete your own message" "Deleted [$gadwall-m2]." \
     "$(ws chat delete "$gadwall-m2")"
 gadwall_entry="$(ws entry "$gadwall")"
-check "a deleted entry's subject is Deleted" "[$gadwall] Deleted" \
+check "a deleted entry shows as deleted" "[$gadwall] (deleted)" \
+    "$gadwall_entry"
+check "a deleted entry shows when it was deleted" "Deleted: " \
     "$gadwall_entry"
 check_equal "a deleted entry keeps no body or metadata" "" \
-    "$(echo "$gadwall_entry" | grep -E '4417|QUACK|Metadata' || true)"
+    "$(echo "$gadwall_entry" |
+        grep -E 'Gadwall|4417|QUACK|Metadata|Modified' || true)"
 check "a deleted entry keeps its origin" "From: $(id -un)@" "$gadwall_entry"
+check "a child's path shows its deleted parent" "> $gadwall (deleted)" \
+    "$(ws entry "$egg")"
 untimed() { sed -E 's/\] ([0-9/]+ )?[0-9]{2}:[0-9]{2}:? /] /'; }
 check "a deleted entry keeps its place in the tree" \
-    "  [$gadwall] Deleted
+    "  [$gadwall] (deleted)
     [$egg] Eggs counted" "$(ws tree "$reply" | untimed)"
-check "a deleted message keeps its place" \
+check "a listing shows a deleted entry as deleted" \
+    "[$gadwall] in $heron.$reply: (deleted)" \
+    "$(ws recent --flat --project owners | untimed)"
+check "a deleted message keeps its place and shows no text" \
     "[$gadwall-m1] $(id -un): Before
-[$gadwall-m2] $(id -un) (edited): Deleted
+[$gadwall-m2] $(id -un) (deleted)
 [$gadwall-m3] $(id -un): After" "$(ws chat recent "$gadwall" | untimed)"
+check "the chat overview names a deleted entry as deleted" \
+    "[$gadwall] (deleted)" "$(ws chat recent)"
 check_equal "search no longer finds deleted text" "No matching entries." \
     "$(ws search 4417)"
-deletes="$(ws wait --since "$before_delete" --include-mine --timeout 1s)"
-check "a wait sees a deleted entry" "[$gadwall]" "$deletes"
-check "a wait sees a deleted message" "[$gadwall-m2]" "$deletes"
+deletes="$(ws wait --since "$before_delete" --include-mine --timeout 1s |
+    untimed)"
+check "a wait shows the deleted entry and message" \
+    "[$gadwall] in $heron.$reply: (deleted)
+  [$gadwall-m2] $(id -un) (deleted)" "$deletes"
 after_delete="$(echo "$deletes" | cursor_of)"
-ws delete "$gadwall" >/dev/null
-ws chat delete "$gadwall-m2" >/dev/null
+check "an edit of a deleted entry is refused" \
+    "$gadwall was deleted, so it cannot be edited" \
+    "$(ws edit "$gadwall" "Gadwall nest" 2>&1 || true)"
+check "a link edit of a deleted entry is refused" \
+    "$gadwall was deleted, so it cannot be edited" \
+    "$(ws edit "$gadwall" --link see="$egg" 2>&1 || true)"
+check "an edit of a deleted message is refused" \
+    "$gadwall-m2 was deleted, so it cannot be edited" \
+    "$(ws chat edit "$gadwall-m2" "The code is 4417" 2>&1 || true)"
+check_equal "deleting again succeeds" "Deleted entry [$gadwall].
+Deleted [$gadwall-m2]." \
+    "$(ws delete "$gadwall" && ws chat delete "$gadwall-m2")"
 check "deleting again changes nothing" "No matching changes" \
     "$(ws wait --since "$after_delete" --include-mine --timeout 1s)"
 
