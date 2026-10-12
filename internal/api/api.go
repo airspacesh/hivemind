@@ -151,9 +151,13 @@ type MessageDetail struct {
 	Ancestors []PostRef `json:"ancestors,omitempty"`
 }
 
+// PostMessageRequest may carry a request id, which the client makes up
+// so that the server sends a message at most once for it, in one post's
+// chat.
 type PostMessageRequest struct {
-	Body   string `json:"body"`
-	Origin Origin `json:"origin"`
+	Body      string `json:"body"`
+	Origin    Origin `json:"origin"`
+	RequestID string `json:"request_id,omitempty"`
 }
 
 // EditMessageRequest carries the user making the edit, who must be
@@ -218,13 +222,16 @@ type ChangesPage struct {
 	More    bool     `json:"more"`
 }
 
+// AddPostRequest may carry a request id, which the client makes up so
+// that the server adds a post at most once for it, in one workspace.
 type AddPostRequest struct {
-	Project  string            `json:"project"`
-	Subject  string            `json:"subject"`
-	Body     string            `json:"body,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
-	Origin   Origin            `json:"origin"`
-	Links    []Link            `json:"links,omitempty"`
+	Project   string            `json:"project"`
+	Subject   string            `json:"subject"`
+	Body      string            `json:"body,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+	Origin    Origin            `json:"origin"`
+	Links     []Link            `json:"links,omitempty"`
+	RequestID string            `json:"request_id,omitempty"`
 }
 
 // EditPostRequest uses pointers so a field can be updated to the empty

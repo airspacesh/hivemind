@@ -116,7 +116,7 @@ func TestOnlyThePosterCanEditOrDeleteAMessage(t *testing.T) {
 func TestNobodyCanEditOrDeleteWhatRecordsNoUser(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	post, err := store.Add(ctx, everyAccess(store),
+	post, _, err := store.Add(ctx, everyAccess(store),
 		workspaceID(t, store, "general"),
 		api.AddPostRequest{Subject: "anonymous"})
 	if err != nil {

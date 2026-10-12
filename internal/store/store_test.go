@@ -100,7 +100,7 @@ func addTo(
 	if req.Origin.User == "" {
 		req.Origin.User = testUser
 	}
-	post, err := store.Add(context.Background(), everyAccess(store),
+	post, _, err := store.Add(context.Background(), everyAccess(store),
 		workspaceID(t, store, workspace), req)
 	if err != nil {
 		t.Fatalf("adding post: %v", err)
@@ -193,7 +193,7 @@ func TestConcurrentAddsGetUniqueIDsCountingFromOne(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			workspace := []string{"general", "personal"}[i%2]
-			post, err := store.Add(context.Background(),
+			post, _, err := store.Add(context.Background(),
 				everyAccess(store), workspaceID(t, store, workspace),
 				api.AddPostRequest{Subject: "s"})
 			if err != nil {
@@ -282,7 +282,7 @@ func TestMutationRollsBackWhenResultCannotBeRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating trigger: %v", err)
 	}
-	_, err = store.Add(ctx, everyAccess(store),
+	_, _, err = store.Add(ctx, everyAccess(store),
 		workspaceID(t, store, "general"),
 		api.AddPostRequest{Subject: "must roll back"})
 	if err == nil {
@@ -358,7 +358,7 @@ func TestCanceledMutationDoesNotWrite(t *testing.T) {
 	store := openTestStore(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := store.Add(ctx, everyAccess(store),
+	_, _, err := store.Add(ctx, everyAccess(store),
 		workspaceID(t, store, "general"),
 		api.AddPostRequest{Subject: "canceled"})
 	if !errors.Is(err, context.Canceled) {
@@ -391,7 +391,7 @@ func TestBusyDatabaseIsRecognized(t *testing.T) {
 		`UPDATE posts SET subject = subject`); err != nil {
 		t.Fatalf("locking database: %v", err)
 	}
-	_, err = second.Add(ctx, everyAccess(second),
+	_, _, err = second.Add(ctx, everyAccess(second),
 		workspaceID(t, second, "general"),
 		api.AddPostRequest{Subject: "blocked"})
 	if !IsBusy(err) {
@@ -452,7 +452,7 @@ func TestWritesProceedWhileAReadIsOpen(t *testing.T) {
 
 	writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if _, err := store.Add(writeCtx, everyAccess(store),
+	if _, _, err := store.Add(writeCtx, everyAccess(store),
 		workspaceID(t, store, "general"), api.AddPostRequest{
 			Subject: "during the read",
 		}); err != nil {
@@ -557,7 +557,7 @@ func TestWriteAbandonedWhileWaitingNeverCommits(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(),
 		100*time.Millisecond)
 	defer cancel()
-	_, err := store.PostMessage(ctx, key,
+	_, _, err := store.PostMessage(ctx, key,
 		api.PostMessageRequest{Body: "abandoned"})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("post error = %v, want context.DeadlineExceeded", err)

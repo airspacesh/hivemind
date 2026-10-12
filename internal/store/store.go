@@ -64,7 +64,9 @@ INSERT INTO revision_counter (only_row, revision) VALUES (1, 0)`
 // rather than the chat. revision is the revision of the post's own
 // latest change, which also set modified_utc, and activity_revision the
 // revision of the change that set activity_utc. deleted is 1 once a
-// delete has cleared the subject and body, and 0 before.
+// delete has cleared the subject and body, and 0 before. request_id is
+// the id the client gave the request that added the post, or empty, and
+// request_digest the requestDigest of what that request asked for.
 const createPosts = `
 CREATE TABLE posts (
 	workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
@@ -96,6 +98,8 @@ CREATE TABLE posts (
 	origin_claude_session TEXT NOT NULL DEFAULT '',
 	origin_claude_session_lower TEXT COLLATE BINARY
 		GENERATED ALWAYS AS (lower(origin_claude_session)) STORED,
+	request_id TEXT NOT NULL DEFAULT '',
+	request_digest INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (workspace_id, id)
 )`
 
@@ -151,6 +155,13 @@ const createOriginUserIndex = `
 CREATE INDEX posts_origin_user
 ON posts(workspace_id, origin_user_lower, id)`
 
+// createPostRequestIndex finds the post a request id added, so a
+// repeated request adds no second post. A lookup must repeat the
+// index's WHERE term for SQLite to read it.
+const createPostRequestIndex = `
+CREATE UNIQUE INDEX posts_request
+ON posts(workspace_id, request_id) WHERE request_id <> ''`
+
 // createProjectCreatedIndex counts a project's posts created since a
 // time by reading only those posts' part of the index. It holds deleted
 // so the count can leave deleted posts out without reading the posts.
@@ -193,7 +204,8 @@ ON post_links(source_workspace_id, source_id) WHERE name = 'parent'`
 // latest edit, and posted_revision the revision of the posting, which
 // edits leave alone. deleted is 1 once a delete has cleared the body,
 // and 0 before. origin_user has a lowered twin for
-// createMessageOriginUserIndex to hold.
+// createMessageOriginUserIndex to hold. request_id and request_digest
+// are as in posts.
 const createMessages = `
 CREATE TABLE post_messages (
 	post_order INTEGER PRIMARY KEY,
@@ -212,6 +224,8 @@ CREATE TABLE post_messages (
 	origin_host TEXT NOT NULL DEFAULT '',
 	origin_dir TEXT NOT NULL DEFAULT '',
 	origin_claude_session TEXT NOT NULL DEFAULT '',
+	request_id TEXT NOT NULL DEFAULT '',
+	request_digest INTEGER NOT NULL DEFAULT 0,
 	UNIQUE (workspace_id, post_id, id),
 	FOREIGN KEY (workspace_id, post_id) REFERENCES posts(workspace_id, id)
 )`
@@ -234,6 +248,12 @@ ON post_messages(workspace_id, revision)`
 const createMessageOriginUserIndex = `
 CREATE INDEX post_messages_origin_user
 ON post_messages(workspace_id, origin_user_lower)`
+
+// createMessageRequestIndex finds the message a request id sent in a
+// post's chat, as createPostRequestIndex finds a post.
+const createMessageRequestIndex = `
+CREATE UNIQUE INDEX post_messages_request
+ON post_messages(workspace_id, post_id, request_id) WHERE request_id <> ''`
 
 // The text indexes hold the trigrams of the lowered text a search
 // matches, so a search finds the posts and messages that hold a
@@ -339,9 +359,11 @@ var schemaSteps = []schemaStep{
 			startRevisionCounter, createPosts, createMetadata,
 			createMetadataKeyIndex, createActivityIndex,
 			createRevisionIndex, createProjectIndex,
-			createProjectCreatedIndex, createOriginUserIndex, createLinks,
+			createProjectCreatedIndex, createOriginUserIndex,
+			createPostRequestIndex, createLinks,
 			createLinkTargetIndex, createOneParentIndex, createMessages,
 			createMessagePostedIndex, createMessageRevisionIndex, createMessageOriginUserIndex,
+			createMessageRequestIndex,
 			createPostText, securePostText, createPostTextInsert,
 			createPostTextUpdate, createMessageText, secureMessageText,
 			createMessageTextInsert, createMessageTextUpdate,
@@ -351,6 +373,8 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createActivityIndex)},
 			{"index", "posts_origin_user", "posts",
 				normalizeSchemaSQL(createOriginUserIndex)},
+			{"index", "posts_request", "posts",
+				normalizeSchemaSQL(createPostRequestIndex)},
 			{"index", "posts_revision", "posts",
 				normalizeSchemaSQL(createRevisionIndex)},
 			{"index", "posts_project_activity", "posts",
@@ -365,6 +389,8 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createMessagePostedIndex)},
 			{"index", "post_messages_origin_user", "post_messages",
 				normalizeSchemaSQL(createMessageOriginUserIndex)},
+			{"index", "post_messages_request", "post_messages",
+				normalizeSchemaSQL(createMessageRequestIndex)},
 			{"index", "post_messages_revision", "post_messages",
 				normalizeSchemaSQL(createMessageRevisionIndex)},
 			{"index", "post_metadata_key", "post_metadata",

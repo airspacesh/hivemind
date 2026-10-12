@@ -75,7 +75,7 @@ func TestParentsStayInTheirWorkspace(t *testing.T) {
 		Subject: "private",
 	})
 
-	_, err := store.Add(context.Background(), everyAccess(store),
+	_, _, err := store.Add(context.Background(), everyAccess(store),
 		workspaceID(t, store, "personal"), api.AddPostRequest{
 			Subject: "child",
 			Links:   []api.Link{link(api.ParentLink, work.Ref)},
@@ -130,7 +130,7 @@ func TestNewPostCannotLinkToItsOwnID(t *testing.T) {
 	next := api.Ref{Prefix: "e", ID: 1}
 	for _, name := range []string{"see", api.ParentLink,
 		api.SupersedesLink} {
-		_, err := store.Add(context.Background(), everyAccess(store),
+		_, _, err := store.Add(context.Background(), everyAccess(store),
 			workspaceID(t, store, "general"), api.AddPostRequest{
 				Subject: "self",
 				Links:   []api.Link{link(name, next)},

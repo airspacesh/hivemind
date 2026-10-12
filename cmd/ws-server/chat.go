@@ -30,9 +30,15 @@ func (h *handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	message, err := h.store.PostMessage(r.Context(), post, request)
+	message, created, err := h.store.PostMessage(r.Context(), post, request)
 	if err != nil {
 		writeStoreError(w, err)
+		return
+	}
+	if !created {
+		log.Printf("repeated %s for request %q", message.Ref(),
+			request.RequestID)
+		writeJSON(w, http.StatusOK, message)
 		return
 	}
 	log.Printf("issued %s", message.Ref())

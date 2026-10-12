@@ -19,6 +19,7 @@ const (
 	MaxValueLen   = 256
 	MaxMetadata   = 16
 	MaxLinks      = 32
+	MaxRequestID  = 128
 
 	MaxOriginUserLen          = 256
 	MaxOriginHostLen          = 256
@@ -188,8 +189,18 @@ func validateMessageBody(body string) error {
 	return nil
 }
 
+func validateRequestID(id string) error {
+	if err := checkOneLine("request id", id); err != nil {
+		return err
+	}
+	return checkLen("request id", id, MaxRequestID)
+}
+
 func (r PostMessageRequest) Validate() error {
 	if err := validateMessageBody(r.Body); err != nil {
+		return err
+	}
+	if err := validateRequestID(r.RequestID); err != nil {
 		return err
 	}
 	return r.Origin.Validate()
@@ -287,6 +298,9 @@ func (r AddPostRequest) Validate() error {
 			len(r.Links), MaxLinks)
 	}
 	if err := validateLinks(r.Links); err != nil {
+		return err
+	}
+	if err := validateRequestID(r.RequestID); err != nil {
 		return err
 	}
 	return r.Origin.Validate()

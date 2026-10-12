@@ -95,7 +95,7 @@ func TestDeleteMessageKeepsItsPlace(t *testing.T) {
 	store := openTestStore(t)
 	post := mustAdd(t, store, "topic", "", nil)
 	mustPostMessage(t, store, post.Ref, "first")
-	message, err := store.PostMessage(context.Background(),
+	message, _, err := store.PostMessage(context.Background(),
 		store.mustKey(post.Ref), api.PostMessageRequest{Body: "secret",
 			Origin: api.Origin{User: testUser, Host: "nest", Dir: "/pond",
 				ClaudeSession: "s1"}})

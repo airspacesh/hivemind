@@ -642,3 +642,36 @@ func TestMetadataFiltersOnProjectAreRefused(t *testing.T) {
 	s.must(t, "GET", "/api/workspaces/general/posts?meta=jira=pond-1",
 		"", "", http.StatusOK)
 }
+
+// A request repeated under its request id answers 200 with what the
+// first request made, and one that asks for something else is refused.
+func TestRepeatedRequestsOverHTTP(t *testing.T) {
+	s := startServer(t, testConfig(t))
+	for _, test := range []struct {
+		path, request, repeat, reuse string
+	}{
+		{"/api/workspaces/general/posts",
+			`{"subject":"once","project":"p","request_id":"r1"}`,
+			`{"subject":"once","project":"p","request_id":"r1",` +
+				`"origin":{"dir":"/elsewhere"}}`,
+			`{"subject":"twice","project":"p","request_id":"r1"}`},
+		{"/api/posts/e1/messages",
+			`{"body":"once","request_id":"r1"}`,
+			`{"body":"once","request_id":"r1",` +
+				`"origin":{"dir":"/elsewhere"}}`,
+			`{"body":"twice","request_id":"r1"}`},
+	} {
+		first := s.must(t, "POST", test.path, test.request, "",
+			http.StatusCreated)
+		if repeat := s.must(t, "POST", test.path, test.repeat, "",
+			http.StatusOK); repeat != first {
+			t.Fatalf("POST %s repeated gave %s, want %s", test.path,
+				repeat, first)
+		}
+		reused := s.must(t, "POST", test.path, test.reuse, "",
+			http.StatusConflict)
+		if errorCode(t, reused) != api.CodeConflict {
+			t.Fatalf("POST %s with a reused id gave %s", test.path, reused)
+		}
+	}
+}

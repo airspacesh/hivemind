@@ -104,19 +104,62 @@ func recordChatActivity(
 	return nil
 }
 
+// requestedMessage finds the number of the message a request with the
+// same id sent in a post's chat, if any, and refuses an id whose
+// message has another digest.
+func (v view) requestedMessage(
+	ctx context.Context, post Key, requestID string, digest int64,
+) (int64, bool, error) {
+	var number, stored int64
+	err := v.tx.QueryRowContext(ctx, `
+		SELECT id, request_digest FROM post_messages
+		WHERE workspace_id = ? AND post_id = ? AND request_id = ?
+			AND request_id <> ''`,
+		post.Workspace, post.ID, requestID,
+	).Scan(&number, &stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("finding the message of request "+
+			"%q: %w", requestID, err)
+	}
+	if stored != digest {
+		ref := api.MessageRef{Post: v.store.mustRef(post), Number: number}
+		return 0, false, fmt.Errorf("%w: request id %q sent %s, with "+
+			"other text", ErrRequestReused, requestID, ref)
+	}
+	return number, true, nil
+}
+
 // PostMessage adds a message to a post's chat, numbered one past the
-// post's highest message. Writes are serialised through the store's one
-// connection, so no other message can take the same number.
+// post's highest message, and reports whether it did. A request whose
+// id already sent a message in the chat sends nothing, and returns that
+// message. Writes are serialised through the store's one connection, so
+// no other message can take the same number or request id.
 func (s *Store) PostMessage(
 	ctx context.Context, post Key, req api.PostMessageRequest,
-) (api.Message, error) {
+) (api.Message, bool, error) {
 	v, err := s.begin(ctx, NewAccess(post.Workspace), false)
 	if err != nil {
-		return api.Message{}, fmt.Errorf("posting message: %w", err)
+		return api.Message{}, false, fmt.Errorf("posting message: %w", err)
 	}
 	defer v.tx.Rollback()
 	if err := v.checkPostExists(ctx, post); err != nil {
-		return api.Message{}, err
+		return api.Message{}, false, err
+	}
+
+	digest := messageDigest(req)
+	if req.RequestID != "" {
+		number, found, err := v.requestedMessage(ctx, post, req.RequestID,
+			digest)
+		if err != nil {
+			return api.Message{}, false, err
+		}
+		if found {
+			message, err := s.getMessage(ctx, v.tx, post, number)
+			return message, false, err
+		}
 	}
 
 	var number int64
@@ -125,38 +168,39 @@ func (s *Store) PostMessage(
 		WHERE workspace_id = ? AND post_id = ?`,
 		post.Workspace, post.ID,
 	).Scan(&number); err != nil {
-		return api.Message{}, fmt.Errorf("numbering message: %w", err)
+		return api.Message{}, false, fmt.Errorf("numbering message: %w", err)
 	}
 	revision, err := nextRevision(ctx, v.tx)
 	if err != nil {
-		return api.Message{}, err
+		return api.Message{}, false, err
 	}
 	now := nowUTC()
 	if _, err := v.tx.ExecContext(ctx, `
 		INSERT INTO post_messages (
 			workspace_id, post_id, id, created_utc, modified_utc,
 			revision, posted_revision, body, origin_user, origin_host,
-			origin_dir, origin_claude_session
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			origin_dir, origin_claude_session, request_id, request_digest
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		post.Workspace, post.ID, number, now, now, revision, revision,
 		req.Body,
 		req.Origin.User, req.Origin.Host, req.Origin.Dir,
-		req.Origin.ClaudeSession,
+		req.Origin.ClaudeSession, req.RequestID, digest,
 	); err != nil {
-		return api.Message{}, fmt.Errorf("posting message: %w", err)
+		return api.Message{}, false, fmt.Errorf("posting message: %w", err)
 	}
 	if err := recordChatActivity(ctx, v.tx, post, now,
 		revision); err != nil {
-		return api.Message{}, err
+		return api.Message{}, false, err
 	}
 	message, err := s.getMessage(ctx, v.tx, post, number)
 	if err != nil {
-		return api.Message{}, err
+		return api.Message{}, false, err
 	}
 	if err := v.tx.Commit(); err != nil {
-		return api.Message{}, fmt.Errorf("committing message: %w", err)
+		return api.Message{}, false, fmt.Errorf("committing message: %w",
+			err)
 	}
-	return message, nil
+	return message, true, nil
 }
 
 // overwriteMessage writes a message's text and whether it is deleted,

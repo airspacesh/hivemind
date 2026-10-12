@@ -162,7 +162,7 @@ func TestLinkingToAnUnreadablePostIsRefusedAsMissing(t *testing.T) {
 	ctx := context.Background()
 	w := newLinkedWorkspaces(t)
 	add := func(target api.Ref) error {
-		_, err := w.store.Add(ctx, w.openAccess(t),
+		_, _, err := w.store.Add(ctx, w.openAccess(t),
 			workspaceID(t, w.store, "general"), api.AddPostRequest{
 				Subject: "probe",
 				Links:   []api.Link{link("see", target)},

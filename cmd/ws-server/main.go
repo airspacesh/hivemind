@@ -301,9 +301,15 @@ func (h *handler) addPost(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	post, err := h.store.Add(r.Context(), access, workspace.ID, request)
+	post, created, err := h.store.Add(r.Context(), access, workspace.ID,
+		request)
 	if err != nil {
 		writeStoreError(w, err)
+		return
+	}
+	if !created {
+		log.Printf("repeated %s for request %q", post.Ref, request.RequestID)
+		writeJSON(w, http.StatusOK, post)
 		return
 	}
 	log.Printf("issued %s", post.Ref)

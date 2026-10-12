@@ -181,7 +181,7 @@ func TestChangesReadDuringWritesMissNone(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := store.PostMessage(ctx, store.mustKey(post.Ref),
+			if _, _, err := store.PostMessage(ctx, store.mustKey(post.Ref),
 				api.PostMessageRequest{Body: "hi"}); err != nil {
 				t.Errorf("posting: %v", err)
 			}
@@ -495,7 +495,7 @@ func TestFilteredChangesReadDuringWritesMissNone(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := store.PostMessage(ctx, store.mustKey(post.Ref),
+			if _, _, err := store.PostMessage(ctx, store.mustKey(post.Ref),
 				api.PostMessageRequest{Body: "hi", Origin: origin}); err != nil {
 				t.Errorf("posting: %v", err)
 			}

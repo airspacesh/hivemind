@@ -21,7 +21,7 @@ func postFrom(
 	t *testing.T, store *Store, post api.Ref, body string, origin api.Origin,
 ) api.Message {
 	t.Helper()
-	message, err := store.PostMessage(context.Background(),
+	message, _, err := store.PostMessage(context.Background(),
 		store.mustKey(post), api.PostMessageRequest{Body: body, Origin: origin})
 	if err != nil {
 		t.Fatalf("posting to %s as %s: %v", post, origin.User, err)
@@ -103,7 +103,7 @@ func TestConcurrentPostsGetUniqueNumbersCountingFromOne(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			post := []api.Ref{first.Ref, second.Ref}[i%2]
-			message, err := store.PostMessage(context.Background(),
+			message, _, err := store.PostMessage(context.Background(),
 				store.mustKey(post), api.PostMessageRequest{Body: "hi"})
 			if err != nil {
 				t.Errorf("posting: %v", err)

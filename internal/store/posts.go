@@ -164,66 +164,109 @@ func (v view) writeMetadata(
 	return nil
 }
 
+// requestedPost finds the post a request with the same id added to a
+// workspace, if any, and refuses an id whose post has another digest.
+func (v view) requestedPost(
+	ctx context.Context, workspace int64, requestID string, digest int64,
+) (Key, bool, error) {
+	key := Key{Workspace: workspace}
+	var stored int64
+	err := v.tx.QueryRowContext(ctx, `
+		SELECT id, request_digest FROM posts
+		WHERE workspace_id = ? AND request_id = ? AND request_id <> ''`,
+		workspace, requestID,
+	).Scan(&key.ID, &stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Key{}, false, nil
+	}
+	if err != nil {
+		return Key{}, false, fmt.Errorf("finding the post of request "+
+			"%q: %w", requestID, err)
+	}
+	if stored != digest {
+		return Key{}, false, fmt.Errorf("%w: request id %q added %s, "+
+			"with other content", ErrRequestReused, requestID,
+			v.store.mustRef(key))
+	}
+	return key, true, nil
+}
+
 // Add adds a post to a workspace, numbered one past the workspace's
-// highest post. Writes are serialised through the store's one
-// connection, so no other write can take the same number.
+// highest post, and reports whether it did. A request whose id already
+// added a post adds nothing, and returns that post. Writes are
+// serialised through the store's one connection, so no other write can
+// take the same number or request id.
 func (s *Store) Add(
 	ctx context.Context,
 	access Access,
 	workspace int64,
 	req api.AddPostRequest,
-) (api.Post, error) {
+) (api.Post, bool, error) {
 	v, err := s.begin(ctx, access, false)
 	if err != nil {
-		return api.Post{}, fmt.Errorf("adding post: %w", err)
+		return api.Post{}, false, fmt.Errorf("adding post: %w", err)
 	}
 	defer v.tx.Rollback()
+
+	digest := postDigest(req)
+	if req.RequestID != "" {
+		key, found, err := v.requestedPost(ctx, workspace, req.RequestID,
+			digest)
+		if err != nil {
+			return api.Post{}, false, err
+		}
+		if found {
+			post, err := v.getPost(ctx, key)
+			return post, false, err
+		}
+	}
 
 	key := Key{Workspace: workspace}
 	if err := v.tx.QueryRowContext(ctx, `
 		SELECT coalesce(max(id), 0) + 1 FROM posts
 		WHERE workspace_id = ?`, workspace,
 	).Scan(&key.ID); err != nil {
-		return api.Post{}, fmt.Errorf("numbering post: %w", err)
+		return api.Post{}, false, fmt.Errorf("numbering post: %w", err)
 	}
 	// The new post's own id names no post until the insert, so its
 	// links' targets are checked before it.
 	for _, link := range req.Links {
 		if _, err := v.linkTarget(ctx, key, link); err != nil {
-			return api.Post{}, err
+			return api.Post{}, false, err
 		}
 	}
 	revision, err := nextRevision(ctx, v.tx)
 	if err != nil {
-		return api.Post{}, err
+		return api.Post{}, false, err
 	}
 	now := nowUTC()
 	if _, err := v.tx.ExecContext(ctx, `
 		INSERT INTO posts (
 			workspace_id, id, created_utc, modified_utc, activity_utc,
 			revision, activity_revision, project, subject, body,
-			origin_user, origin_host, origin_dir, origin_claude_session
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			origin_user, origin_host, origin_dir, origin_claude_session,
+			request_id, request_digest
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		key.Workspace, key.ID, now, now, now, revision, revision, req.Project,
 		req.Subject, req.Body, req.Origin.User, req.Origin.Host,
-		req.Origin.Dir, req.Origin.ClaudeSession,
+		req.Origin.Dir, req.Origin.ClaudeSession, req.RequestID, digest,
 	); err != nil {
-		return api.Post{}, fmt.Errorf("adding post: %w", err)
+		return api.Post{}, false, fmt.Errorf("adding post: %w", err)
 	}
 	if err := v.writeMetadata(ctx, key, req.Metadata); err != nil {
-		return api.Post{}, err
+		return api.Post{}, false, err
 	}
 	if err := v.writeLinks(ctx, key, nil, nil, req.Links); err != nil {
-		return api.Post{}, err
+		return api.Post{}, false, err
 	}
 	post, err := v.getPost(ctx, key)
 	if err != nil {
-		return api.Post{}, fmt.Errorf("reading new post: %w", err)
+		return api.Post{}, false, fmt.Errorf("reading new post: %w", err)
 	}
 	if err := v.tx.Commit(); err != nil {
-		return api.Post{}, fmt.Errorf("committing new post: %w", err)
+		return api.Post{}, false, fmt.Errorf("committing new post: %w", err)
 	}
-	return post, nil
+	return post, true, nil
 }
 
 // editContent updates a post's own fields, its modified and activity

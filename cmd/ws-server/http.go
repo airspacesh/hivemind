@@ -93,7 +93,8 @@ func writeStoreError(w http.ResponseWriter, err error) {
 			api.CodeLinkTargetNotFound, err.Error()
 	case errors.Is(err, store.ErrMetadataLimit),
 		errors.Is(err, store.ErrLinkLoop),
-		errors.Is(err, store.ErrLinkLimit):
+		errors.Is(err, store.ErrLinkLimit),
+		errors.Is(err, store.ErrRequestReused):
 		status, code, message = http.StatusConflict,
 			api.CodeConflict, err.Error()
 	case errors.As(err, &notOwner):

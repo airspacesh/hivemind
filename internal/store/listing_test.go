@@ -144,7 +144,7 @@ func (w *forestWriter) write() {
 			w.t.Fatal(err)
 		}
 	default:
-		message, err := w.store.PostMessage(ctx, key, api.PostMessageRequest{
+		message, _, err := w.store.PostMessage(ctx, key, api.PostMessageRequest{
 			Body:   w.word(),
 			Origin: api.Origin{User: []string{"ines", "omar"}[w.random.Intn(2)]},
 		})
