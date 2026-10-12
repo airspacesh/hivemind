@@ -9,7 +9,6 @@ import (
 	"math"
 	"slices"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/airspacesh/workstream/internal/api"
@@ -45,9 +44,9 @@ type Filter struct {
 	OriginHost          []FieldCond
 	OriginDir           []FieldCond
 	OriginClaudeSession []FieldCond
-	// Changed and Revisions keep a listing to the matches whose time and
-	// revision fall in spans, those of the change each ranks by.
-	Changed   Span
+	// Revisions keeps a listing to the matches whose revision, that of
+	// the change each ranks by, falls in a span. LastRevisionBefore
+	// turns a time into such a revision.
 	Revisions RevisionSpan
 
 	// Items says whether a listing or the changes feed holds posts, the
@@ -63,13 +62,6 @@ type Filter struct {
 	Limit          int
 }
 
-// Span is the times from After, inclusive, to Before, exclusive. A
-// zero bound leaves that side open.
-type Span struct {
-	After  time.Time
-	Before time.Time
-}
-
 // RevisionSpan is the revisions after After and before Before, both
 // exclusive. A zero bound leaves that side open.
 type RevisionSpan struct {
@@ -80,18 +72,6 @@ type RevisionSpan struct {
 type whereBuilder struct {
 	clauses []string
 	args    []any
-}
-
-// addSpan keeps a time column within a span.
-func (builder *whereBuilder) addSpan(column string, span Span) {
-	if !span.After.IsZero() {
-		builder.clauses = append(builder.clauses, column+` >= ?`)
-		builder.args = append(builder.args, formatTime(span.After))
-	}
-	if !span.Before.IsZero() {
-		builder.clauses = append(builder.clauses, column+` < ?`)
-		builder.args = append(builder.args, formatTime(span.Before))
-	}
 }
 
 func conditionCount(filter Filter) int {
@@ -734,11 +714,9 @@ func (v view) readMatches(
 	return matches, rows.Err()
 }
 
-// addRanks keeps the matches whose revision and time, in the given
-// columns, fall within a filter's spans.
-func (builder *whereBuilder) addRanks(
-	revisionColumn, timeColumn string, filter Filter,
-) {
+// addRanks keeps the matches whose revision, in the given column, falls
+// within a filter's span.
+func (builder *whereBuilder) addRanks(revisionColumn string, filter Filter) {
 	if filter.Revisions.After != 0 {
 		builder.clauses = append(builder.clauses, revisionColumn+` > ?`)
 		builder.args = append(builder.args, filter.Revisions.After)
@@ -747,7 +725,6 @@ func (builder *whereBuilder) addRanks(
 		builder.clauses = append(builder.clauses, revisionColumn+` < ?`)
 		builder.args = append(builder.args, filter.Revisions.Before)
 	}
-	builder.addSpan(timeColumn, filter.Changed)
 }
 
 // addVisible keeps a listing to the posts e the reader can read, and
@@ -776,7 +753,7 @@ func (v view) newestPosts(
 	if filter.Items.HasChat() {
 		revision, at = `e.revision`, `e.modified_utc`
 	}
-	where.addRanks(revision, at, filter)
+	where.addRanks(revision, filter)
 	where.clauses = append(where.clauses, `e.workspace_id = ?`)
 	where.args = append(where.args, workspace)
 	v.addVisible(&where, filter)
@@ -808,7 +785,7 @@ func (v view) newestMessages(
 	candidates *candidateSet,
 	count int,
 ) ([]match, error) {
-	where.addRanks(`m.posted_revision`, `m.created_utc`, filter)
+	where.addRanks(`m.posted_revision`, filter)
 	where.clauses = append(where.clauses, `m.workspace_id = ?`)
 	where.args = append(where.args, workspace)
 	v.addVisible(&where, filter)

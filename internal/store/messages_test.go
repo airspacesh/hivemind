@@ -232,16 +232,13 @@ func TestChatReadFromATime(t *testing.T) {
 	hour := func(n int) time.Time {
 		return time.Date(2026, 10, 9, n, 0, 0, 0, time.UTC)
 	}
-	for n, body := range []string{"one", "two", "three"} {
-		message := mustPostMessage(t, store, post.Ref, body)
-		if _, err := store.db.Exec(`UPDATE post_messages
-			SET created_utc = ?1, modified_utc = ?1
-			WHERE workspace_id = ?2 AND post_id = ?3 AND id = ?4`,
-			formatTime(hour(n)), key.Workspace, key.ID, message.Number,
-		); err != nil {
-			t.Fatal(err)
-		}
+	for _, body := range []string{"one", "two", "three"} {
+		mustPostMessage(t, store, post.Ref, body)
 	}
+	// The post took revision 1, and the messages 2 to 4.
+	retime(t, store, func(revision int64) time.Time {
+		return hour(int(revision) - 2)
+	})
 
 	for _, test := range []struct {
 		after time.Time
@@ -252,9 +249,10 @@ func TestChatReadFromATime(t *testing.T) {
 		{hour(1), 1, "e1-m2:two cursor=2 remaining=1"},
 		{hour(3), 10, " cursor=3 remaining=0"},
 	} {
+		after := timeSpan{After: test.after}.revisions(t, store,
+			key.Workspace, RevisionSpan{})
 		page, err := store.Messages(context.Background(), everyAccess(store),
-			key,
-			0, Filter{Changed: Span{After: test.after}}, nil, test.limit)
+			key, 0, Filter{Revisions: after}, nil, test.limit)
 		if err != nil {
 			t.Fatal(err)
 		}

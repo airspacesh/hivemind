@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -493,10 +494,17 @@ func TestChatReadsOverHTTP(t *testing.T) {
 	s := startServer(t, testConfig(t))
 	s.must(t, "POST", "/api/workspaces/general/posts", postBody("chat"),
 		"", http.StatusCreated)
+	var posted []string
 	for _, body := range []string{"one", "two", "three"} {
-		s.must(t, "POST", "/api/posts/e1/messages",
+		text := s.must(t, "POST", "/api/posts/e1/messages",
 			`{"body":"`+body+`","origin":{"user":"duck"}}`, "",
 			http.StatusCreated)
+		var message api.Message
+		if err := json.Unmarshal([]byte(text), &message); err != nil {
+			t.Fatal(err)
+		}
+		posted = append(posted,
+			url.QueryEscape(message.Created.Format(time.RFC3339Nano)))
 	}
 	s.must(t, "PATCH", "/api/posts/e1/messages/1",
 		`{"body":"one!","user":"duck"}`, "", http.StatusOK)
@@ -525,6 +533,8 @@ func TestChatReadsOverHTTP(t *testing.T) {
 		"?after=2000-01-01T00:00:00Z&limit=1": "e1-m1:one! cursor=1 " +
 			"remaining=2",
 		"?after=@2":              "e1-m2:two e1-m3:three cursor=3 remaining=0",
+		"?after=" + posted[1]:    "e1-m2:two e1-m3:three cursor=3 remaining=0",
+		"?before=" + posted[1]:   "e1-m1:one! cursor=1 remaining=0",
 		"?before=e1-m3":          "e1-m1:one! e1-m2:two cursor=2 remaining=0",
 		"?after=e1-m1&before=@4": "e1-m2:two cursor=2 remaining=0",
 		"?before=e1-m3&limit=1":  "e1-m1:one! cursor=1 remaining=1",

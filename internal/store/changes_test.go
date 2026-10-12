@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -296,6 +297,68 @@ func latestRevision(t *testing.T, store *Store) int64 {
 		t.Fatal(err)
 	}
 	return latest
+}
+
+// retime sets the time of every change to at of its revision, in every
+// column that holds one, so a test places changes in time while the
+// times follow the revisions, as the clock gives them.
+func retime(t *testing.T, store *Store, at func(revision int64) time.Time) {
+	t.Helper()
+	times := make([]string, latestRevision(t, store)+1)
+	for revision := range times {
+		times[revision] = formatTime(at(int64(revision)))
+	}
+	encoded, err := json.Marshal(times)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{`
+		UPDATE posts SET
+			created_utc = json_extract(?1, '$[' || posted_revision || ']'),
+			modified_utc = json_extract(?1, '$[' || revision || ']'),
+			activity_utc = json_extract(?1, '$[' || activity_revision || ']')`,
+		`
+		UPDATE post_messages SET
+			created_utc = json_extract(?1, '$[' || posted_revision || ']'),
+			modified_utc = json_extract(?1, '$[' || revision || ']')`,
+	} {
+		if _, err := store.db.Exec(statement, string(encoded)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// timeSpan is the times from After, inclusive, to Before, exclusive. A
+// zero time leaves that side open.
+type timeSpan struct {
+	After  time.Time
+	Before time.Time
+}
+
+// revisions narrows a span of revisions to what a read of a workspace
+// ranks within a span of times, as the server resolves a time bound.
+func (s timeSpan) revisions(
+	t *testing.T, store *Store, workspace int64, span RevisionSpan,
+) RevisionSpan {
+	t.Helper()
+	lastBefore := func(at time.Time) int64 {
+		revision, err := store.LastRevisionBefore(context.Background(),
+			everyAccess(store), workspace, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return revision
+	}
+	if !s.After.IsZero() {
+		span.After = max(span.After, lastBefore(s.After))
+	}
+	if !s.Before.IsZero() {
+		before := lastBefore(s.Before) + 1
+		if span.Before == 0 || before < span.Before {
+			span.Before = before
+		}
+	}
+	return span
 }
 
 func TestFilteredChangesShowEachMatchOnceAtAnyLimitAndSpan(t *testing.T) {
@@ -685,11 +748,14 @@ func TestPostedRevisionOfAMissingMessageIsNotFound(t *testing.T) {
 	}
 }
 
-// The revision a read of changes after a time starts after is the last
-// change in the workspace made before that time, as the feed holds the
-// changes, whatever the other workspace changed between them, and when
-// several changes share a time.
-func TestLastRevisionBeforeIsTheLastChangeBeforeATime(t *testing.T) {
+// The last revision before a time is the last in the workspace that a
+// read ranks by made before that time, whatever the other workspace
+// changed between them, and when several changes share a time. A read
+// ranks by the changes to posts and messages, the latest activity in a
+// post, or the posting of a message.
+func TestLastRevisionBeforeIsTheLastRankedRevisionBeforeATime(
+	t *testing.T,
+) {
 	store := openTestStore(t)
 	writer := newForestWriter(t, store, rand.New(rand.NewSource(1)))
 	for range 300 {
@@ -701,36 +767,18 @@ func TestLastRevisionBeforeIsTheLastChangeBeforeATime(t *testing.T) {
 	at := func(revision int64) time.Time {
 		return start.Add(time.Duration(revision/3) * time.Minute)
 	}
-	for _, table := range []string{"posts", "post_messages"} {
-		rows, err := store.db.Query(`SELECT rowid, revision FROM ` + table)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var rowids, revisions []int64
-		for rows.Next() {
-			var rowid, revision int64
-			if err := rows.Scan(&rowid, &revision); err != nil {
-				t.Fatal(err)
-			}
-			rowids = append(rowids, rowid)
-			revisions = append(revisions, revision)
-		}
-		rows.Close()
-		for i, rowid := range rowids {
-			if _, err := store.db.Exec(`UPDATE `+table+
-				` SET modified_utc = ? WHERE rowid = ?`,
-				formatTime(at(revisions[i])), rowid); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
+	retime(t, store, at)
 
 	general := workspaceID(t, store, "general")
 	var changed []int64
 	rows, err := store.db.Query(`
 		SELECT revision FROM posts WHERE workspace_id = ?1
 		UNION ALL
-		SELECT revision FROM post_messages WHERE workspace_id = ?1`,
+		SELECT activity_revision FROM posts WHERE workspace_id = ?1
+		UNION ALL
+		SELECT revision FROM post_messages WHERE workspace_id = ?1
+		UNION ALL
+		SELECT posted_revision FROM post_messages WHERE workspace_id = ?1`,
 		general)
 	if err != nil {
 		t.Fatal(err)

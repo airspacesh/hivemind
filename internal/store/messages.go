@@ -326,10 +326,10 @@ func (s *Store) DeleteMessage(
 }
 
 // addChat keeps to the messages of a post's chat after the message
-// numbered since that were posted within a filter's spans, leaving out
+// numbered since that were posted within a filter's span, leaving out
 // deleted ones unless the filter includes them.
 func (builder *whereBuilder) addChat(post Key, since int64, filter Filter) {
-	builder.addRanks(`m.posted_revision`, `m.created_utc`, filter)
+	builder.addRanks(`m.posted_revision`, filter)
 	builder.clauses = append(builder.clauses, `m.workspace_id = ?`,
 		`m.post_id = ?`, `m.id > ?`)
 	builder.args = append(builder.args, post.Workspace, post.ID, since)
@@ -338,11 +338,10 @@ func (builder *whereBuilder) addChat(post Key, since int64, filter Filter) {
 	}
 }
 
-// before keeps a filter's spans to their ends, so a read with it keeps
-// to what was posted before them, from the start of a chat.
+// before keeps a filter's span to its end, so a read with it keeps to
+// what was posted before it, from the start of a chat.
 func (f Filter) before() Filter {
 	return Filter{
-		Changed:        Span{Before: f.Changed.Before},
 		Revisions:      RevisionSpan{Before: f.Revisions.Before},
 		IncludeDeleted: true,
 	}
@@ -379,7 +378,7 @@ func countMessages(
 }
 
 // lastMessageNumber reads the number of the newest message of a post's
-// chat posted before the ends of a filter's spans, deleted or not, or 0
+// chat posted before the end of a filter's span, deleted or not, or 0
 // when there is none.
 func lastMessageNumber(
 	ctx context.Context, tx *sql.Tx, post Key, filter Filter,
@@ -431,7 +430,7 @@ func (s *Store) readChatPage(
 // message numbered since that match a filter, oldest first, leaving out
 // those whose origin has the key exclude, when there is one, and deleted
 // ones unless the filter includes them. A message matches as
-// buildMessageWhere has it, and was posted within the filter's spans.
+// buildMessageWhere has it, and was posted within the filter's span.
 //
 // The page's cursor is the highest message number the read checked.
 // Every message up to it is in the page or did not match, so a read
@@ -473,7 +472,7 @@ func (s *Store) Messages(
 
 	// The query reads at most limit messages, so a full page ends at its
 	// last message, and a page short of it has checked every message
-	// after since and before the spans end, so its cursor passes them
+	// after since and before the span ends, so its cursor passes them
 	// all.
 	if len(page.Messages) < limit {
 		last, err := lastMessageNumber(ctx, tx, post, filter)
@@ -486,7 +485,7 @@ func (s *Store) Messages(
 	page.Cursor = page.Messages[len(page.Messages)-1].Number
 	page.Remaining, err = countMessages(ctx, tx, post, page.Cursor,
 		math.MaxInt64, Filter{IncludeDeleted: filter.IncludeDeleted,
-			Changed: filter.Changed, Revisions: filter.Revisions})
+			Revisions: filter.Revisions})
 	if err != nil {
 		return api.ChatPage{}, err
 	}
@@ -497,7 +496,7 @@ func (s *Store) Messages(
 // after the message numbered since that match a filter, oldest first,
 // as Messages has it. Earlier counts those it leaves out before the
 // first it returns. Reading the newest first checks every message after
-// the oldest it returns and before the spans end, so the cursor passes
+// the oldest it returns and before the span ends, so the cursor passes
 // them all.
 func (s *Store) LatestMessages(
 	ctx context.Context,
@@ -563,7 +562,7 @@ func (s *Store) Overview(
 	if err != nil {
 		return api.ChatOverview{}, err
 	}
-	where.addRanks(`m.posted_revision`, `m.created_utc`, filter)
+	where.addRanks(`m.posted_revision`, filter)
 	where.clauses = append(where.clauses, `m.workspace_id = ?`,
 		visibleClause("e"))
 	where.args = append(where.args, workspace, access.user)

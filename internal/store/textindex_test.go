@@ -257,16 +257,18 @@ func TestSearchPagesBackThroughTheIndex(t *testing.T) {
 
 	want := []string{messageRef(newest.Ref, 1), older.Ref.String(),
 		oldest.Ref.String()}
-	before := Span{}
+	general := workspaceID(t, store, "general")
+	before := RevisionSpan{}
 	for i, ref := range want {
 		page := runSearch(t, store, Filter{
 			Content: []FieldCond{{Value: "heron"}}, Items: api.PostsAndChat,
-			Limit: 1, Changed: before,
+			Limit: 1, Revisions: before,
 		})
 		assertMatches(t, page, ref)
 		if page.More != (i < len(want)-1) {
 			t.Fatalf("more after %s = %v", ref, page.More)
 		}
-		before.Before = page.Matches[0].At
+		before = timeSpan{Before: page.Matches[0].At}.revisions(t, store,
+			general, RevisionSpan{})
 	}
 }

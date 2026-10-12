@@ -183,7 +183,8 @@ func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	since, ok := h.readBounds(w, r, access, query, ref, &filter)
+	since, ok := h.readBounds(w, r, access, post.Workspace, query, ref,
+		&filter)
 	if !ok {
 		return
 	}
@@ -236,8 +237,8 @@ func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter.IncludeDeleted = includeDeleted
-	if _, ok := h.readBounds(w, r, access, query, api.Ref{},
-		&filter); !ok {
+	if _, ok := h.readBounds(w, r, access, workspace.ID, query,
+		api.Ref{}, &filter); !ok {
 		return
 	}
 	overview, err := h.store.Overview(r.Context(), access, workspace.ID,

@@ -158,59 +158,26 @@ func (w *forestWriter) write() {
 	}
 }
 
-// scrambleTimes spreads the times of every post and message over a year
-// at random, and sets each post's activity time to match, so times no
-// longer follow revisions. When onDays is set, every time falls on
-// midnight, so many share it.
-func scrambleTimes(
+// spreadTimes spreads the times of the changes over a year at random,
+// in the order of their revisions, as the clock gives them. When onDays
+// is set, every time falls on midnight, so many share it.
+func spreadTimes(
 	t *testing.T, store *Store, random *rand.Rand, onDays bool,
 ) {
 	t.Helper()
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	year := int64(365 * 24 * time.Hour)
-	at := func() string {
-		moment := start.Add(time.Duration(random.Int63n(year)))
+	times := make([]time.Time, latestRevision(t, store)+1)
+	for i := range times {
+		times[i] = start.Add(time.Duration(random.Int63n(year)))
 		if onDays {
-			moment = moment.Truncate(24 * time.Hour)
-		}
-		return moment.Format(timeLayout)
-	}
-	readKeys := func(query string) [][2]int64 {
-		rows, err := store.db.Query(query)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer rows.Close()
-		var keys [][2]int64
-		for rows.Next() {
-			var key [2]int64
-			if err := rows.Scan(&key[0], &key[1]); err != nil {
-				t.Fatal(err)
-			}
-			keys = append(keys, key)
-		}
-		return keys
-	}
-	for _, key := range readKeys(`SELECT workspace_id, id FROM posts`) {
-		if _, err := store.db.Exec(`
-			UPDATE posts SET created_utc = ?, modified_utc = ?
-			WHERE workspace_id = ? AND id = ?`,
-			at(), at(), key[0], key[1]); err != nil {
-			t.Fatal(err)
+			times[i] = times[i].Truncate(24 * time.Hour)
 		}
 	}
-	for _, key := range readKeys(
-		`SELECT post_order, 0 FROM post_messages`) {
-		if _, err := store.db.Exec(`
-			UPDATE post_messages SET created_utc = ?, modified_utc = ?
-			WHERE post_order = ?`, at(), at(), key[0]); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := store.db.Exec(`
-		UPDATE posts AS e SET activity_utc = ` + activityExpr); err != nil {
-		t.Fatal(err)
-	}
+	slices.SortFunc(times, time.Time.Compare)
+	retime(t, store, func(revision int64) time.Time {
+		return times[revision]
+	})
 }
 
 // forestPost and forestMessage hold what the reference reads of the
@@ -315,7 +282,7 @@ type listingCase struct {
 	project, user, content string
 	key, noKey             string
 	metaKey, metaValue     string
-	span                   Span
+	span                   timeSpan
 	revisions              RevisionSpan
 	under                  int64
 	includeSuperseded      bool
@@ -323,8 +290,12 @@ type listingCase struct {
 	items                  api.Items
 }
 
-func (c listingCase) filter(workspace int64) Filter {
-	filter := Filter{Changed: c.span, Revisions: c.revisions,
+func (c listingCase) filter(
+	t *testing.T, store *Store, workspace int64,
+) Filter {
+	t.Helper()
+	revisions := c.span.revisions(t, store, workspace, c.revisions)
+	filter := Filter{Revisions: revisions,
 		IncludeSuperseded: c.includeSuperseded,
 		IncludeDeleted:    c.includeDeleted, Items: c.items}
 	if c.project != "" {
@@ -458,7 +429,7 @@ func checkListingPage(
 	limit int,
 ) ([]referenceMatch, bool) {
 	t.Helper()
-	filter := c.filter(workspace)
+	filter := c.filter(t, store, workspace)
 	filter.Limit = limit
 	page, err := store.Search(context.Background(), everyAccess(store),
 		workspace, filter)
@@ -547,7 +518,7 @@ func TestListingMatchesTheReference(t *testing.T) {
 	day := func(month time.Month, day int) time.Time {
 		return time.Date(2026, month, day, 0, 0, 0, 0, time.UTC)
 	}
-	spans := []Span{
+	spans := []timeSpan{
 		{},
 		{After: day(7, 1)},
 		{Before: day(4, 1)},
@@ -560,7 +531,7 @@ func TestListingMatchesTheReference(t *testing.T) {
 		for range 200 {
 			writer.write()
 		}
-		scrambleTimes(t, store, random, seed%2 == 0)
+		spreadTimes(t, store, random, seed%2 == 0)
 		workspace := workspaceID(t, store, "general")
 		posts, messages := readForest(t, store, workspace)
 		// A listing under a top-level post, and under a deleted post
@@ -635,7 +606,8 @@ func TestPagingBackListsEachMatchOnceWhileWritesLand(t *testing.T) {
 				writer.write()
 			}
 			workspace := workspaceID(t, store, "general")
-			first := listingCase{items: items, span: Span{Before: before}}
+			first := listingCase{items: items,
+				span: timeSpan{Before: before}}
 			if seed%2 == 0 {
 				first.project = "a"
 			}

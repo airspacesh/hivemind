@@ -65,18 +65,9 @@ func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 
 	var since int64
 	if after != nil {
-		resolved, ok := h.postedBound(w, r, access, *after)
-		if !ok {
+		if since, ok = h.revisionAfter(w, r, access, workspace.ID,
+			*after); !ok {
 			return
-		}
-		since = resolved.Revision
-		if !resolved.Time.IsZero() {
-			since, err = h.store.LastRevisionBefore(r.Context(), access,
-				workspace.ID, resolved.Time)
-			if err != nil {
-				writeStoreError(w, err)
-				return
-			}
 		}
 	}
 

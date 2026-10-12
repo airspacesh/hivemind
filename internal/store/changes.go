@@ -290,27 +290,44 @@ func (s *Store) LatestRevision(ctx context.Context) (int64, error) {
 	return revision, nil
 }
 
-// firstChangeFrom reads the revision and time of the first change in a
-// workspace at or after the revision from and before the revision to,
-// to a post or to a message, as the changes feed has them. It reports
-// false when there is none.
-func firstChangeFrom(
+// firstRankFrom reads the first revision in a workspace at or after the
+// revision from and before the revision to that a read ranks by, and
+// the time of its change. A read ranks by the changes to posts and
+// messages, as the changes feed does, by the latest activity in a post
+// or its chat, as a listing without chat does, or by the posting of a
+// message, as a read of chat does. Each of these columns sits in an
+// index after workspace_id. It reports false when there is none.
+func firstRankFrom(
 	ctx context.Context, tx *sql.Tx, workspace int64, from, to int64,
 ) (int64, string, bool, error) {
 	var revision int64
 	var at string
 	err := tx.QueryRowContext(ctx, `
-		SELECT revision, modified_utc FROM (
+		SELECT revision, at FROM (
 			SELECT * FROM (
-				SELECT revision, modified_utc FROM posts
+				SELECT revision, modified_utc AS at FROM posts
 				WHERE workspace_id = ?1 AND revision >= ?2 AND revision < ?3
 				ORDER BY revision LIMIT 1
+			)
+			UNION ALL
+			SELECT * FROM (
+				SELECT activity_revision, activity_utc FROM posts
+				WHERE workspace_id = ?1 AND activity_revision >= ?2
+					AND activity_revision < ?3
+				ORDER BY activity_revision LIMIT 1
 			)
 			UNION ALL
 			SELECT * FROM (
 				SELECT revision, modified_utc FROM post_messages
 				WHERE workspace_id = ?1 AND revision >= ?2 AND revision < ?3
 				ORDER BY revision LIMIT 1
+			)
+			UNION ALL
+			SELECT * FROM (
+				SELECT posted_revision, created_utc FROM post_messages
+				WHERE workspace_id = ?1 AND posted_revision >= ?2
+					AND posted_revision < ?3
+				ORDER BY posted_revision LIMIT 1
 			)
 		)
 		ORDER BY revision LIMIT 1`, workspace, from, to,
@@ -324,10 +341,12 @@ func firstChangeFrom(
 	return revision, at, true, nil
 }
 
-// LastRevisionBefore returns the revision of the last change in a
-// workspace made before a time, as the changes feed holds them, or 0
-// when there is none, so a read of the changes after it starts at the
-// first change at or after the time.
+// LastRevisionBefore returns the last revision in a workspace, of those
+// firstRankFrom reads, whose change was made before a time, or 0 when
+// there is none. Every read ranks by one of those revisions, so what a
+// read ranks after it changed or was posted at or after the time, and
+// what it ranks up to it came before the time. A read bounded by a time
+// thus reads a range of the index it ranks by.
 //
 // No index orders changes by time, so it searches by revision. A change
 // takes its revision and its time in its write transaction, and those
@@ -357,7 +376,7 @@ func (s *Store) LastRevisionBefore(
 	limit := formatTime(at)
 	for high-low > 1 {
 		middle := low + (high-low)/2
-		revision, changed, found, err := firstChangeFrom(ctx, v.tx,
+		revision, changed, found, err := firstRankFrom(ctx, v.tx,
 			workspace, middle, high)
 		if err != nil {
 			return 0, err

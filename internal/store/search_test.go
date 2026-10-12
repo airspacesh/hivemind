@@ -174,8 +174,10 @@ func TestSearchContentPagingAndMetadata(t *testing.T) {
 	if !first.More {
 		t.Fatal("no more after the first 2 of 3 matches")
 	}
+	before := timeSpan{Before: first.Matches[1].At}.revisions(t,
+		posts.store, workspaceID(t, posts.store, "general"), RevisionSpan{})
 	result := runSearch(t, posts.store, Filter{Content: ducklings,
-		Limit: 2, Changed: Span{Before: first.Matches[1].At}})
+		Limit: 2, Revisions: before})
 	if result.More {
 		t.Fatal("more after the last of 3 matches")
 	}
@@ -350,15 +352,17 @@ func TestSearchMatchesChatMessages(t *testing.T) {
 	result := runSearch(t, store, Filter{Content: heron,
 		Items: api.PostsAndChat})
 	assertMatches(t, result, chatMatches...)
-	before := Span{}
+	general := workspaceID(t, store, "general")
+	before := RevisionSpan{}
 	for i, want := range chatMatches {
 		page := runSearch(t, store, Filter{Content: heron,
-			Items: api.PostsAndChat, Limit: 1, Changed: before})
+			Items: api.PostsAndChat, Limit: 1, Revisions: before})
 		assertMatches(t, page, want)
 		if page.More != (i < len(chatMatches)-1) {
 			t.Fatalf("more after %s = %v", want, page.More)
 		}
-		before.Before = page.Matches[0].At
+		before = timeSpan{Before: page.Matches[0].At}.revisions(t, store,
+			general, RevisionSpan{})
 	}
 
 	postsOnly := runSearch(t, store, Filter{Content: heron})
@@ -568,63 +572,47 @@ func TestSearchKeepsToASpan(t *testing.T) {
 	day := func(month time.Month, day int) time.Time {
 		return time.Date(2026, month, day, 0, 0, 0, 0, time.UTC)
 	}
-	setChanged := func(ref api.Ref, message int64, at time.Time) {
-		t.Helper()
-		key := store.mustKey(ref)
-		query := `UPDATE posts SET created_utc = ?1, modified_utc = ?1
-			WHERE workspace_id = ?2 AND id = ?3`
-		if message != 0 {
-			query = `UPDATE post_messages SET created_utc = ?1,
-				modified_utc = ?1 WHERE workspace_id = ?2 AND post_id = ?3
-				AND id = ?4`
-		}
-		if _, err := store.db.Exec(query, formatTime(at), key.Workspace,
-			key.ID, message); err != nil {
-			t.Fatal(err)
-		}
-	}
 	old := mustAdd(t, store, "Old", "", nil)
-	setChanged(old.Ref, 0, day(1, 1))
 	mid := mustAdd(t, store, "Mid", "", nil)
-	setChanged(mid.Ref, 0, day(2, 1))
-	setChanged(mid.Ref, postAs(t, store, "ines", mid.Ref, "late").Number,
-		day(3, 1))
-	setChanged(mid.Ref, postAs(t, store, "ken", mid.Ref, "early").Number,
-		day(1, 15))
+	postAs(t, store, "ken", mid.Ref, "early")
+	postAs(t, store, "ines", mid.Ref, "late")
 	recent := mustAdd(t, store, "Recent", "", nil)
-	setChanged(recent.Ref, 0, day(4, 1))
-	if _, err := store.db.Exec(`
-		UPDATE posts AS e SET activity_utc = ` + activityExpr); err != nil {
-		t.Fatal(err)
-	}
-	late, early := messageRef(mid.Ref, 1), messageRef(mid.Ref, 2)
+	// The changes above, by revision from 1.
+	times := []time.Time{day(1, 1), day(2, 1), day(2, 10), day(3, 1),
+		day(4, 1)}
+	retime(t, store, func(revision int64) time.Time {
+		return times[max(revision, 1)-1]
+	})
+	early, late := messageRef(mid.Ref, 1), messageRef(mid.Ref, 2)
 
 	tests := []struct {
 		name   string
+		span   timeSpan
 		filter Filter
 		want   []string
 	}{
-		{"after",
-			Filter{Changed: Span{After: day(2, 15)}, Items: api.PostsAndChat},
+		{"after", timeSpan{After: day(2, 15)},
+			Filter{Items: api.PostsAndChat},
 			[]string{recent.Ref.String(), late}},
-		{"before leaves out its own instant",
-			Filter{Changed: Span{Before: day(3, 1)}, Items: api.PostsAndChat},
+		{"before leaves out its own instant", timeSpan{Before: day(3, 1)},
+			Filter{Items: api.PostsAndChat},
 			[]string{early, mid.Ref.String(), old.Ref.String()}},
 		{"after takes in its own instant",
-			Filter{Changed: Span{After: day(3, 1), Before: day(3, 2)},
-				Items: api.PostsAndChat},
+			timeSpan{After: day(3, 1), Before: day(3, 2)},
+			Filter{Items: api.PostsAndChat},
 			[]string{late}},
-		{"with an origin",
-			Filter{Changed: Span{After: day(1, 10)},
-				OriginUser: []FieldCond{{Value: "ken"}},
-				Items:      api.PostsAndChat},
+		{"with an origin", timeSpan{After: day(1, 10)},
+			Filter{OriginUser: []FieldCond{{Value: "ken"}},
+				Items: api.PostsAndChat},
 			[]string{early}},
-		{"posts only",
-			Filter{Changed: Span{After: day(2, 15)}},
+		{"posts only", timeSpan{After: day(2, 15)}, Filter{},
 			[]string{recent.Ref.String(), mid.Ref.String()}},
 	}
+	general := workspaceID(t, store, "general")
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			test.filter.Revisions = test.span.revisions(t, store, general,
+				RevisionSpan{})
 			assertMatches(t, runSearch(t, store, test.filter), test.want...)
 		})
 	}

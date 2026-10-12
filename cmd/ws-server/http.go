@@ -536,14 +536,46 @@ func (h *handler) postedBound(
 	return api.Bound{Revision: revision}, true
 }
 
-// readBounds keeps a filter's spans to what was posted or changed after
-// the query's after and before its before, each a time, a revision, or
-// a post or message for the revision that posted it. In a read of the
-// chat of the post chat, an after that names a message of that chat
-// gives its number as since, for the read to start after.
+// lastRevisionBefore resolves a time to the last revision of a
+// workspace before it, as store.LastRevisionBefore has it.
+func (h *handler) lastRevisionBefore(
+	w http.ResponseWriter, r *http.Request, access store.Access,
+	workspace int64, at time.Time,
+) (int64, bool) {
+	revision, err := h.store.LastRevisionBefore(r.Context(), access,
+		workspace, at)
+	if err != nil {
+		writeStoreError(w, err)
+		return 0, false
+	}
+	return revision, true
+}
+
+// revisionAfter resolves a bound to the revision a read of a workspace
+// after it reads after: the revision itself, the one that posted a post
+// or message, or the last one before a time.
+func (h *handler) revisionAfter(
+	w http.ResponseWriter, r *http.Request, access store.Access,
+	workspace int64, bound api.Bound,
+) (int64, bool) {
+	resolved, ok := h.postedBound(w, r, access, bound)
+	if !ok {
+		return 0, false
+	}
+	if resolved.Time.IsZero() {
+		return resolved.Revision, true
+	}
+	return h.lastRevisionBefore(w, r, access, workspace, resolved.Time)
+}
+
+// readBounds keeps a filter's span to what a read of a workspace ranks
+// after the query's after and before its before, each a time, a
+// revision, or a post or message for the revision that posted it. In a
+// read of the chat of the post chat, an after that names a message of
+// that chat gives its number as since, for the read to start after.
 func (h *handler) readBounds(
 	w http.ResponseWriter, r *http.Request, access store.Access,
-	query url.Values, chat api.Ref, filter *store.Filter,
+	workspace int64, query url.Values, chat api.Ref, filter *store.Filter,
 ) (int64, bool) {
 	after, err := queryBound(query, "after")
 	if err != nil {
@@ -562,12 +594,11 @@ func (h *handler) readBounds(
 		after = nil
 	}
 	if after != nil {
-		resolved, ok := h.postedBound(w, r, access, *after)
+		revision, ok := h.revisionAfter(w, r, access, workspace, *after)
 		if !ok {
 			return 0, false
 		}
-		filter.Changed.After = resolved.Time
-		filter.Revisions.After = resolved.Revision
+		filter.Revisions.After = revision
 	}
 	if before != nil {
 		resolved, ok := h.postedBound(w, r, access, *before)
@@ -578,8 +609,15 @@ func (h *handler) readBounds(
 			writeBadRequest(w, "before: nothing comes before @0")
 			return 0, false
 		}
-		filter.Changed.Before = resolved.Time
 		filter.Revisions.Before = resolved.Revision
+		if !resolved.Time.IsZero() {
+			last, ok := h.lastRevisionBefore(w, r, access, workspace,
+				resolved.Time)
+			if !ok {
+				return 0, false
+			}
+			filter.Revisions.Before = last + 1
+		}
 	}
 	return since, true
 }

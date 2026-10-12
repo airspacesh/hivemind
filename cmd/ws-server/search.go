@@ -255,8 +255,8 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.readBounds(w, r, access, query, api.Ref{},
-		&filter); !ok {
+	if _, ok := h.readBounds(w, r, access, workspace.ID, query,
+		api.Ref{}, &filter); !ok {
 		return
 	}
 	if values := query["under"]; len(values) != 0 {
