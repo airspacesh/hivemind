@@ -379,7 +379,8 @@ func TestSearchMatchesChatMessages(t *testing.T) {
 
 	// An edit lifts the post, but the message keeps its place as the
 	// first posted.
-	if _, _, err := store.EditMessage(ctx, everyAccess(store), store.mustKey(pond.Ref), 1,
+	if _, _, err := store.EditMessage(ctx, everyAccess(store),
+		store.mustKey(pond.Ref), 1,
 		ownEdit("heron at dawn")); err != nil {
 		t.Fatal(err)
 	}

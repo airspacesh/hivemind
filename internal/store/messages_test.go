@@ -53,7 +53,8 @@ func readChat(
 	t *testing.T, store *Store, post api.Ref, since int64, limit int,
 ) api.ChatPage {
 	t.Helper()
-	page, err := store.Messages(context.Background(), everyAccess(store), store.mustKey(post),
+	page, err := store.Messages(context.Background(), everyAccess(store),
+		store.mustKey(post),
 		api.ChatBound{Number: since}, Filter{}, nil, limit)
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +105,8 @@ func TestConcurrentPostsGetUniqueNumbersCountingFromOne(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			post := []api.Ref{first.Ref, second.Ref}[i%2]
-			message, _, err := store.PostMessage(context.Background(), everyAccess(store),
+			message, _, err := store.PostMessage(context.Background(),
+				everyAccess(store),
 				store.mustKey(post), api.PostMessageRequest{Body: "hi"})
 			if err != nil {
 				t.Errorf("posting: %v", err)
@@ -161,7 +163,8 @@ func TestChatReadsPageAfterTheCursor(t *testing.T) {
 		}
 	}
 
-	latest, err := store.LatestMessages(context.Background(), everyAccess(store),
+	latest, err := store.LatestMessages(context.Background(),
+		everyAccess(store),
 		store.mustKey(post.Ref), 3)
 	if err != nil {
 		t.Fatal(err)
@@ -249,7 +252,8 @@ func TestChatReadFromATime(t *testing.T) {
 		{hour(1), 1, "e1-m2:two cursor=2 remaining=1"},
 		{hour(3), 10, " cursor=3 remaining=0"},
 	} {
-		page, err := store.Messages(context.Background(), everyAccess(store), key,
+		page, err := store.Messages(context.Background(), everyAccess(store),
+			key,
 			api.ChatBound{Time: test.after}, Filter{}, nil, test.limit)
 		if err != nil {
 			t.Fatal(err)
@@ -269,7 +273,8 @@ func TestEditsKeepTheirPlaceAndAreNotReadAgain(t *testing.T) {
 	mustPostMessage(t, store, post.Ref, "answer")
 	cursor := readChat(t, store, post.Ref, 0, 20).Cursor
 
-	edited, changed, err := store.EditMessage(ctx, everyAccess(store), store.mustKey(post.Ref),
+	edited, changed, err := store.EditMessage(ctx, everyAccess(store),
+		store.mustKey(post.Ref),
 		question.Number, ownEdit("question, edited"))
 	if err != nil || !changed {
 		t.Fatalf("edit = %v, %v", changed, err)
@@ -287,11 +292,13 @@ func TestEditsKeepTheirPlaceAndAreNotReadAgain(t *testing.T) {
 		t.Fatalf("full read = %q, want the edit in its place", got)
 	}
 
-	if _, changed, err := store.EditMessage(ctx, everyAccess(store), store.mustKey(post.Ref),
+	if _, changed, err := store.EditMessage(ctx, everyAccess(store),
+		store.mustKey(post.Ref),
 		question.Number, ownEdit("question, edited")); err != nil || changed {
 		t.Fatalf("repeating an edit = %v, %v; want no change", changed, err)
 	}
-	if _, _, err := store.EditMessage(ctx, everyAccess(store), store.mustKey(post.Ref), 9,
+	if _, _, err := store.EditMessage(ctx, everyAccess(store),
+		store.mustKey(post.Ref), 9,
 		ownEdit("text")); !errors.Is(err, ErrMessageNotFound) {
 		t.Fatalf("editing a missing message = %v", err)
 	}
@@ -318,7 +325,8 @@ func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
 	}
 	editMessage := func(post api.Ref, body string) {
 		t.Helper()
-		if _, _, err := store.EditMessage(ctx, everyAccess(store), store.mustKey(post), 1,
+		if _, _, err := store.EditMessage(ctx, everyAccess(store),
+			store.mustKey(post), 1,
 			ownEdit(body)); err != nil {
 			t.Fatal(err)
 		}
@@ -362,12 +370,14 @@ func TestOverviewGroupsTheNewestMessagesByPost(t *testing.T) {
 	mustPostMessage(t, store, c.Ref, "c1")
 	mustPostMessage(t, store, private.Ref, "private")
 	mustPostMessage(t, store, b.Ref, "b2")
-	if _, _, err := store.EditMessage(ctx, everyAccess(store), store.mustKey(a.Ref),
+	if _, _, err := store.EditMessage(ctx, everyAccess(store),
+		store.mustKey(a.Ref),
 		first.Number, ownEdit("a1 edited")); err != nil {
 		t.Fatal(err)
 	}
 
-	overview, err := store.Overview(ctx, everyAccess(store), workspaceID(t, store, "general"), 4)
+	overview, err := store.Overview(ctx, everyAccess(store),
+		workspaceID(t, store, "general"), 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +409,8 @@ func TestOverwrittenTextLeavesNoCopyInTheDatabase(t *testing.T) {
 		api.EditPostRequest{Subject: &subject, User: testUser}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.EditMessage(ctx, everyAccess(store), store.mustKey(post.Ref),
+	if _, _, err := store.EditMessage(ctx, everyAccess(store),
+		store.mustKey(post.Ref),
 		message.Number, ownEdit("short")); err != nil {
 		t.Fatal(err)
 	}

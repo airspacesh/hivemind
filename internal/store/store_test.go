@@ -510,7 +510,8 @@ func TestReadsProceedWhileAWriteIsOpen(t *testing.T) {
 			return err
 		},
 		"chat": func(ctx context.Context) error {
-			_, err := store.Messages(ctx, everyAccess(store), key, api.ChatBound{}, Filter{},
+			_, err := store.Messages(ctx, everyAccess(store), key,
+				api.ChatBound{}, Filter{},
 				exclude, 10)
 			return err
 		},
@@ -536,7 +537,8 @@ func TestReadsProceedWhileAWriteIsOpen(t *testing.T) {
 			return err
 		},
 		"projects": func(ctx context.Context) error {
-			_, err := store.Projects(ctx, everyAccess(store), key.Workspace, 10, time.Now())
+			_, err := store.Projects(ctx, everyAccess(store), key.Workspace, 10,
+				time.Now())
 			return err
 		},
 		"ping": store.Ping,

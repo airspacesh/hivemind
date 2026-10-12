@@ -40,6 +40,14 @@ func testConfig(t *testing.T) serverConfig {
 
 type testServer struct {
 	url string
+	// user is the user requests read as, when it is not empty.
+	user string
+}
+
+// as is the server read as user.
+func (s testServer) as(user string) testServer {
+	s.user = user
+	return s
 }
 
 // startServer serves the routes on a loopback port, as ws-server does.
@@ -76,6 +84,9 @@ func (s testServer) do(
 	request.Header.Set(version.APIHeader, strconv.Itoa(version.API))
 	if secret != "" {
 		request.Header.Set("Authorization", "Bearer "+secret)
+	}
+	if s.user != "" {
+		request.Header.Set(api.UserHeader, s.user)
 	}
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -611,6 +622,57 @@ func TestChangesAfterAnIDOverHTTP(t *testing.T) {
 			t.Errorf("after %s gave %s, want %s", test.after, code,
 				test.code)
 		}
+	}
+}
+
+// Every read of a post private to alice, or of what is under it, is
+// refused to bob as if it did not exist, and so is any change.
+func TestPrivatePostsAreNotFoundForOthersOverHTTP(t *testing.T) {
+	s := startServer(t, testConfig(t))
+	alice, bob := s.as("alice"), s.as("bob")
+	alice.must(t, "POST", "/api/workspaces/general/posts",
+		`{"subject":"draft","project":"p","private":true,`+
+			`"origin":{"user":"alice"}}`, "", http.StatusCreated)
+	alice.must(t, "POST", "/api/posts/e1/messages",
+		`{"body":"note","origin":{"user":"alice"}}`, "",
+		http.StatusCreated)
+	text := alice.must(t, "GET", "/api/posts/e1", "", "", http.StatusOK)
+	if !strings.Contains(text, `"private_to":"alice"`) {
+		t.Fatalf("alice reads her private post as %s", text)
+	}
+
+	for _, request := range []struct{ method, path, body string }{
+		{"GET", "/api/posts/e1", ""},
+		{"GET", "/api/posts/e1/tree", ""},
+		{"GET", "/api/posts/e1/messages", ""},
+		{"GET", "/api/posts/e1/messages?latest=5", ""},
+		{"GET", "/api/posts/e1/messages/1", ""},
+		{"GET", "/api/workspaces/general/changes?after=e1", ""},
+		{"GET", "/api/workspaces/general/changes?after=e1-m1", ""},
+		{"GET", "/api/workspaces/general/posts?under=e1", ""},
+		{"POST", "/api/posts/e1/messages",
+			`{"body":"hi","origin":{"user":"bob"}}`},
+		{"PATCH", "/api/posts/e1", `{"private":false,"user":"bob"}`},
+		{"DELETE", "/api/posts/e1", `{"user":"bob"}`},
+	} {
+		text := bob.must(t, request.method, request.path, request.body,
+			"", http.StatusNotFound)
+		if code := errorCode(t, text); code != api.CodePostNotFound {
+			t.Errorf("bob's %s %s gave %s, want %s", request.method,
+				request.path, code, api.CodePostNotFound)
+		}
+	}
+
+	alice.must(t, "POST", "/api/workspaces/general/posts",
+		`{"subject":"topic","project":"p","origin":{"user":"alice"}}`, "",
+		http.StatusCreated)
+	bob.must(t, "POST", "/api/posts/e2/messages",
+		`{"body":"hi","origin":{"user":"bob"}}`, "", http.StatusCreated)
+	text = alice.must(t, "PATCH", "/api/posts/e2",
+		`{"private":true,"user":"alice"}`, "", http.StatusConflict)
+	if code := errorCode(t, text); code != api.CodeConflict {
+		t.Errorf("making a post bob chatted on private gave %s, want %s",
+			code, api.CodeConflict)
 	}
 }
 

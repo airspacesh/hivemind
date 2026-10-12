@@ -95,7 +95,8 @@ func TestRepeatedRequestReturnsTheMessageItSent(t *testing.T) {
 	}
 
 	// A repeat matches the request, not the message's current text.
-	edited, _, err := store.EditMessage(ctx, everyAccess(store), store.mustKey(pond.Ref),
+	edited, _, err := store.EditMessage(ctx, everyAccess(store),
+		store.mustKey(pond.Ref),
 		first.Number, ownEdit("quack quack"))
 	if err != nil {
 		t.Fatal(err)

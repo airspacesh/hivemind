@@ -549,6 +549,61 @@ check "a delete of another user's message is refused" \
     "only heron can edit or delete it" \
     "$(ws chat delete "$heron-m2" 2>&1 || true)"
 
+# A private post, and everything under it, is for its owner alone.
+# Everyone else gets post not found for it. The client always reads as
+# its own user, so the other user reads by curl.
+read_as_heron() {
+    curl -sS -H "Workstream-API-Version: $api_version" \
+        -H "Workstream-User: heron" "$main_url/api/$1"
+}
+before_private="$(ws wait --after @0 --include-mine --timeout 1s |
+    cursor_of)"
+draft_added="$(ws add "Private draft" --project owners --body "Draft text" \
+    --private --no-recent)"
+draft="$(echo "$draft_added" | added)"
+check_equal "add --private says who alone can read the post" \
+    "Added post [$draft].
+Only $(id -un) can read it." "$draft_added"
+draft_child="$(ws add "Draft detail" --project owners --parent "$draft" \
+    --no-recent)"
+check "a post under a private post is private too" \
+    "Only $(id -un) can read it, as a post above it is private." \
+    "$draft_child"
+detail="$(echo "$draft_child" | added)"
+check_equal "a listing marks private posts" \
+    "[$detail] $(id -un) in $draft [private]: Draft detail
+[$draft] $(id -un) [private]: Private draft" \
+    "$(ws recent --project owners --subject 'Draft*' | untimed |
+        grep -v '^Cursor: ')"
+check_equal "a tree marks private posts" \
+    "[$draft] [private]: Private draft
+  [$detail] [private]: Draft detail" "$(ws tree "$draft" | untimed)"
+check "post says who alone can read a private post" \
+    "Private: only $(id -un) can read it" "$(ws post "$draft")"
+check "a wait marks private posts" "$(id -un) [private]: Private draft" \
+    "$(ws wait --after "$before_private" --include-mine --timeout 1s)"
+check "another user gets post not found for a private post" \
+    '"code":"post_not_found"' "$(read_as_heron "posts/$draft")"
+check "another user gets post not found under a private post" \
+    '"code":"post_not_found"' "$(read_as_heron "posts/$detail")"
+check_equal "another user's listing leaves out private posts" \
+    '{"matches":[],"more":false,' \
+    "$(read_as_heron "workspaces/general/posts?subject=draft*" |
+        grep -o '^{"matches":\[\],"more":false,')"
+check_equal "another user's wait leaves out private posts" "" \
+    "$(read_as_heron "workspaces/general/changes?after=$before_private" |
+        grep -o 'Private draft' || true)"
+check_equal "edit --public shows the post to everyone" \
+    "Edited post [$draft].
+Everyone can read it." "$(ws edit "$draft" --public --no-recent)"
+check "another user reads a post made public, and what is under it" \
+    '"subject":"Draft detail"' "$(read_as_heron "posts/$detail")"
+post_as_heron "posts/$draft/messages" \
+    '{"body":"Looks good","origin":{"user":"heron"}}'
+check "a post others chatted on cannot be made private" \
+    "others have posted under $draft, so it cannot be made private" \
+    "$(ws edit "$draft" --private 2>&1 || true)"
+
 # A delete removes a post's text and metadata, or a message's text, and
 # keeps its place.
 gadwall="$(ws add "Gadwall nest" --project owners --body "Code 4417" \

@@ -36,8 +36,12 @@ Use these words, and no others for the same things.
   text, and mark it deleted. The post or message keeps its id, place and
   origin, and can no longer be edited. It drops out of listings and
   trees, but stays readable by id.
-- **change**: a post added, edited or deleted, or a message sent, edited
-  or deleted. Editing only links is not a change.
+- **private post**: a post its owner made private, or one nested in
+  it. Only that owner can read it. Everyone else gets post not found for
+  it, as if it did not exist.
+- **change**: a post added, edited, deleted, or made private or public,
+  or a message sent, edited or deleted. Editing only links is not a
+  change, unless it moves a post into or out of a private post.
 - **revision**: the number a change takes, counted from 1 across the
   whole server, so a later change has a higher revision. A post or
   message keeps the revision of its latest change.
