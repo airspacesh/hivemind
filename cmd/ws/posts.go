@@ -553,8 +553,14 @@ func cmdDelete(c *client, args []string) error {
 	return nil
 }
 
-// showMessage shows one message in full, under its post's line.
-func (c *client) showMessage(ref api.MessageRef) error {
+func cmdMessage(c *client, args []string) error {
+	if len(args) != 1 {
+		return usageError("message <ref>-m<n>")
+	}
+	ref, err := api.ParseMessageRef(args[0])
+	if err != nil {
+		return err
+	}
 	t, err := c.resolve(ref.Post)
 	if err != nil {
 		return err
@@ -570,13 +576,14 @@ func (c *client) showMessage(ref api.MessageRef) error {
 
 func cmdPost(c *client, args []string) error {
 	if len(args) != 1 {
-		return usageError("post <ref>|<ref>-m<n>")
-	}
-	if message, err := api.ParseMessageRef(args[0]); err == nil {
-		return c.showMessage(message)
+		return usageError("post <ref>")
 	}
 	ref, err := api.ParseRef(args[0])
 	if err != nil {
+		if _, messageErr := api.ParseMessageRef(args[0]); messageErr == nil {
+			return fmt.Errorf("%w. Run '%s message %s' to show a message",
+				err, programName, args[0])
+		}
 		return err
 	}
 	t, err := c.resolve(ref)

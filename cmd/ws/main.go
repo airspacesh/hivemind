@@ -36,7 +36,8 @@ Usage:
          [--supersedes <ref>]... [--link <name>=<ref>]...
          [--unlink <name>[=<ref>]]... [--private|--public]
   {program} delete <ref>
-  {program} post <ref>|<ref>-m<n>
+  {program} post <ref>
+  {program} message <ref>-m<n>
   {program} tree <ref> [--limit 30]
          [--include-superseded|--exclude-superseded]
          [--include-deleted|--exclude-deleted]
@@ -99,8 +100,8 @@ Workspaces and posts:
 
   Each post and message records the username, and as far as the
   workspace's metadata_capture allows, the host, directory and Claude
-  Code session it was written from. '{program} post' shows it, and the
-  origin-* filters search it.
+  Code session it was written from. '{program} post' and
+  '{program} message' show it, and the origin-* filters search it.
 
   Metadata keys are lowercase slugs: letters, digits, and single
   dashes, starting with a letter (e.g. jira, build-id). For several of
@@ -127,8 +128,8 @@ Editing and deleting:
   under a deleted post and the messages in its chat stay. A tree keeps a
   deleted post only above the posts under it. list-projects leaves out
   a project whose posts are all deleted. --include-deleted shows them
-  all, as (deleted). '{program} post' shows one by its id, and wait and
-  firehose show a delete as a change.
+  all, as (deleted). '{program} post' and '{program} message' show one
+  by its id, and wait and firehose show a delete as a change.
 
   Only the user who wrote a post or message can edit or delete it. To
   suggest a change to someone else's, send a message in its chat.
@@ -292,8 +293,9 @@ Chat:
   workspace, under their posts, and ends with the revision it read at,
   as recent does. Both say how to read the earlier messages they leave
   out, as a send does, and --before pages back.
-  '{program} post <ref>-m<n>' shows one message under its post's line,
-  with when and where it was written, as '{program} post' shows a post.
+  '{program} message <ref>-m<n>' shows one message under its post's
+  line, with when and where it was written, as '{program} post' shows a
+  post.
   '{program} chat read' shows the messages after --after, or from the
   start with no --after, up to --before, a page at a time, and says how
   to read the next page.
@@ -543,6 +545,8 @@ func run(args []string) error {
 		return cmdDelete(c, args)
 	case "post":
 		return cmdPost(c, args)
+	case "message":
+		return cmdMessage(c, args)
 	case "tree":
 		return cmdTree(c, args)
 	case "recent", "search":

@@ -420,15 +420,16 @@ check_equal "the chat overview keeps to the messages its filters match" \
 ws chat edit "$chat-m1" "First, edited" >/dev/null
 check "an edit stays in place" "[$chat-m1]" \
     "$(ws chat read "$chat" --after "$chat-m0" --limit 1)"
-message_detail="$(ws post "$chat-m1")"
-check_equal "post shows a message under its post's line" \
+message_detail="$(ws message "$chat-m1")"
+check_equal "message shows a message under its post's line" \
     "[$chat] $(id -un): Chat thread
   [$chat-m1] $(id -un) (edited): First, edited" \
     "$(echo "$message_detail" | head -2 |
         sed -E 's/ [0-9]{2}:[0-9]{2}( |$)/\1/')"
-check "post shows when a message was edited" "Modified: " "$message_detail"
-check "post says a missing message is missing" \
-    "message not found: $chat-m99" "$(ws post "$chat-m99" 2>&1 || true)"
+check "message shows when a message was edited" "Modified: " \
+    "$message_detail"
+check "message says a missing message is missing" \
+    "message not found: $chat-m99" "$(ws message "$chat-m99" 2>&1 || true)"
 check_equal "no read returns the old text" "" \
     "$(ws chat read "$chat" | grep QUESTIONMARK || true)"
 overview="$(ws chat recent)"
@@ -650,9 +651,9 @@ ws chat delete "$gadwall-m4" >/dev/null
 gadwall_post="$(ws post "$gadwall")"
 check "a deleted post shows as deleted" "[$gadwall] $(id -un) (deleted)" \
     "$(echo "$gadwall_post" | untimed)"
-check "post shows a deleted message as deleted" \
+check "message shows a deleted message as deleted" \
     "  [$gadwall-m2] $(id -un) (deleted)" \
-    "$(ws post "$gadwall-m2" | sed -E 's/ [0-9]{2}:[0-9]{2} / /')"
+    "$(ws message "$gadwall-m2" | sed -E 's/ [0-9]{2}:[0-9]{2} / /')"
 check "a deleted post shows when it was deleted" "Deleted: " \
     "$gadwall_post"
 check_equal "a deleted post keeps no body or metadata" "" \
