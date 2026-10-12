@@ -497,18 +497,91 @@ func queryFlag(query url.Values, key string) (bool, error) {
 	return true, nil
 }
 
-// queryBound reads a bound as api.ParseBound does, or the zero bound
-// when the parameter is absent.
-func queryBound(query url.Values, key string) (api.Bound, error) {
+// queryBound reads a bound as api.ParseBound does, or nil when the
+// parameter is absent.
+func queryBound(query url.Values, key string) (*api.Bound, error) {
 	values := query[key]
 	if len(values) == 0 {
-		return api.Bound{}, nil
+		return nil, nil
 	}
 	bound, err := api.ParseBound(values[0])
 	if err != nil {
-		return api.Bound{}, fmt.Errorf("%s: %w", key, err)
+		return nil, fmt.Errorf("%s: %w", key, err)
 	}
-	return bound, nil
+	return &bound, nil
+}
+
+// postedBound resolves a bound that names a post or message to the
+// revision that posted it, which the request must be able to read, and
+// leaves a time or a revision as it is. Revisions count across the
+// server, so a post of any workspace on it names a point in every
+// workspace's history.
+func (h *handler) postedBound(
+	w http.ResponseWriter, r *http.Request, access store.Access,
+	bound api.Bound,
+) (api.Bound, bool) {
+	if bound.Post.ID == 0 {
+		return bound, true
+	}
+	post, ok := h.postKey(w, access, bound.Post.String())
+	if !ok {
+		return api.Bound{}, false
+	}
+	revision, err := h.store.PostedRevision(r.Context(), access, post,
+		bound.Message)
+	if err != nil {
+		writeStoreError(w, err)
+		return api.Bound{}, false
+	}
+	return api.Bound{Revision: revision}, true
+}
+
+// readBounds keeps a filter's spans to what was posted or changed after
+// the query's after and before its before, each a time, a revision, or
+// a post or message for the revision that posted it. In a read of the
+// chat of the post chat, an after that names a message of that chat
+// gives its number as since, for the read to start after.
+func (h *handler) readBounds(
+	w http.ResponseWriter, r *http.Request, access store.Access,
+	query url.Values, chat api.Ref, filter *store.Filter,
+) (int64, bool) {
+	after, err := queryBound(query, "after")
+	if err != nil {
+		writeBadRequest(w, err.Error())
+		return 0, false
+	}
+	before, err := queryBound(query, "before")
+	if err != nil {
+		writeBadRequest(w, err.Error())
+		return 0, false
+	}
+
+	var since int64
+	if after != nil && after.Post == chat {
+		since = after.Message
+		after = nil
+	}
+	if after != nil {
+		resolved, ok := h.postedBound(w, r, access, *after)
+		if !ok {
+			return 0, false
+		}
+		filter.Changed.After = resolved.Time
+		filter.Revisions.After = resolved.Revision
+	}
+	if before != nil {
+		resolved, ok := h.postedBound(w, r, access, *before)
+		if !ok {
+			return 0, false
+		}
+		if resolved.Time.IsZero() && resolved.Revision == 0 {
+			writeBadRequest(w, "before: nothing comes before @0")
+			return 0, false
+		}
+		filter.Changed.Before = resolved.Time
+		filter.Revisions.Before = resolved.Revision
+	}
+	return since, true
 }
 
 // queryItems reads the items parameter, or fallback when it is absent.

@@ -1,11 +1,9 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/airspacesh/workstream/internal/api"
-	"github.com/airspacesh/workstream/internal/store"
 )
 
 const (
@@ -13,23 +11,21 @@ const (
 	maxChangesLimit     = 500
 )
 
-// changes returns a page of a workspace's changes after the change
-// bound the query's after names that match its conditions, or an empty
-// page whose cursor is the latest revision, given no after.
+// changes returns a page of a workspace's changes after the query's
+// after that match its conditions, or an empty page whose cursor is the
+// latest revision, given no after. After a time, the changes start at
+// the first change at or after it, and after a post or message, at the
+// first change after the one that posted it.
 func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 	query, ok := parseQueryOf(w, r, searchConditionParameters,
 		changesQueryParameters)
 	if !ok {
 		return
 	}
-	_, hasAfter := query["after"]
-	var after api.ChangeBound
-	if hasAfter {
-		var err error
-		if after, err = api.ParseChangeBound(query.Get("after")); err != nil {
-			writeBadRequest(w, "after: "+err.Error())
-			return
-		}
+	after, err := queryBound(query, "after")
+	if err != nil {
+		writeBadRequest(w, err.Error())
+		return
 	}
 	limit, err := queryInteger(query, "limit", defaultChangesLimit,
 		1, maxChangesLimit)
@@ -67,25 +63,25 @@ func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 		filter.Under = &under
 	}
 
-	since := after.Revision
-	if after.Post.ID != 0 {
-		if after.Post.Prefix != workspace.Prefix {
-			writeBadRequest(w, fmt.Sprintf("after: %s is in another "+
-				"workspace than %s, whose ids start with %s", after,
-				workspace.Name, workspace.Prefix))
+	var since int64
+	if after != nil {
+		resolved, ok := h.postedBound(w, r, access, *after)
+		if !ok {
 			return
 		}
-		post := store.Key{Workspace: workspace.ID, ID: after.Post.ID}
-		since, err = h.store.PostedRevision(r.Context(), access, post,
-			after.Message)
-		if err != nil {
-			writeStoreError(w, err)
-			return
+		since = resolved.Revision
+		if !resolved.Time.IsZero() {
+			since, err = h.store.LastRevisionBefore(r.Context(), access,
+				workspace.ID, resolved.Time)
+			if err != nil {
+				writeStoreError(w, err)
+				return
+			}
 		}
 	}
 
 	var page api.ChangesPage
-	if !hasAfter {
+	if after == nil {
 		page.Changes = []api.Change{}
 		page.Cursor, err = h.store.LatestRevision(r.Context())
 	} else {

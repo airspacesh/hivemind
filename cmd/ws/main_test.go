@@ -468,7 +468,11 @@ func sendAfterServer(t *testing.T, sent, newest int64) string {
 			reply(w, http.StatusCreated, message(sent))
 		case r.URL.Query().Has("latest"):
 			count, _ := strconv.ParseInt(r.URL.Query().Get("latest"), 10, 64)
-			after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+			from, err := api.ParseBound(r.URL.Query().Get("after"))
+			if err != nil {
+				t.Errorf("a send read after %v", err)
+			}
+			after := from.Message
 			first := max(after+1, newest-count+1)
 			page := api.ChatPage{Messages: []api.Message{}, Cursor: newest,
 				Earlier: int(first - 1 - after), Revision: 10 + newest}
@@ -1255,10 +1259,13 @@ func TestChangesShowEachAtItsLatestChange(t *testing.T) {
 	}
 }
 
-// A date, or a date and time, reads in local time, a span counts back
-// from now to a whole second, and @ names a revision.
-func TestBoundFlagsReadLocalDatesSpansAndRevisions(t *testing.T) {
+// Every --after and --before reads the same forms: a date, or a date
+// and time, in local time, a span back from now to a whole second, a
+// revision after @, and a post or message id, where -m0 names the post.
+// Each crosses the wire and back unchanged.
+func TestBoundFlagsReadEveryForm(t *testing.T) {
 	now := time.Date(2026, 10, 11, 9, 30, 0, 0, time.UTC)
+	post := api.Ref{Prefix: "e", ID: 40}
 	for value, want := range map[string]api.Bound{
 		"2d":         {Time: now.Add(-48 * time.Hour)},
 		"6h":         {Time: now.Add(-6 * time.Hour)},
@@ -1271,15 +1278,26 @@ func TestBoundFlagsReadLocalDatesSpansAndRevisions(t *testing.T) {
 		"2026-10-09T04:00:00+10:00": {Time: time.Date(2026, 10, 8, 18, 0,
 			0, 0, time.UTC)},
 		"@812345": {Revision: 812345},
+		"@0":      {},
+		"e40":     {Post: post},
+		"e40-m0":  {Post: post},
+		"e40-m3":  {Post: post, Message: 3},
 	} {
 		got, err := parseBoundFlag("--after", value, now)
 		if err != nil || !got.Time.Equal(want.Time) ||
-			got.Revision != want.Revision {
+			got.Revision != want.Revision || got.Post != want.Post ||
+			got.Message != want.Message {
 			t.Errorf("%q = %v, %v, want %v", value, got, err, want)
+		}
+		sent, err := api.ParseBound(got.String())
+		if err != nil || !sent.Time.Equal(got.Time) ||
+			sent.Revision != got.Revision || sent.Post != got.Post ||
+			sent.Message != got.Message {
+			t.Errorf("%q crossed the wire as %v, %v", value, sent, err)
 		}
 	}
 	for _, value := range []string{"-2h", "2", "yesterday", "2026-13-01",
-		"@0", "@", "@-3", "@12a"} {
+		"@", "@-3", "@12a", "e0", "e40-m", "E40"} {
 		if _, err := parseBoundFlag("--after", value, now); err == nil {
 			t.Errorf("%q was accepted", value)
 		}
@@ -1290,55 +1308,5 @@ func TestBoundFlagsReadLocalDatesSpansAndRevisions(t *testing.T) {
 		if err != nil || got.Time.Nanosecond() != 0 {
 			t.Errorf("%q = %v, %v, want a whole second", value, got, err)
 		}
-	}
-}
-
-// A chat's --after names a message of that chat, or its start as -m0,
-// or a time. A message of another chat, or a revision, is refused
-// rather than read as a number in this one.
-func TestChatAfterKeepsToItsOwnChat(t *testing.T) {
-	now := time.Date(2026, 10, 11, 9, 30, 0, 0, time.UTC)
-	post := api.Ref{Prefix: "e", ID: 40}
-	for value, want := range map[string]api.ChatBound{
-		"e40-m3": {Number: 3},
-		"e40-m0": {},
-		"2h":     {Time: now.Add(-2 * time.Hour)},
-	} {
-		got, err := parseChatAfter(post, value, now)
-		if err != nil || !got.Time.Equal(want.Time) ||
-			got.Number != want.Number {
-			t.Errorf("%q = %v, %v, want %v", value, got, err, want)
-		}
-	}
-	for _, value := range []string{"e41-m3", "e4-m0", "f40-m3", "@3"} {
-		if got, err := parseChatAfter(post, value, now); err == nil {
-			t.Errorf("%q was accepted as %v", value, got)
-		}
-	}
-}
-
-// A change cursor is a revision, @0 included, or a post or message id,
-// and a time is refused with the command that lists what changed since
-// it.
-func TestChangeCursorIsARevisionOrAnID(t *testing.T) {
-	post := api.Ref{Prefix: "e", ID: 40}
-	for value, want := range map[string]api.ChangeBound{
-		"@0":      {},
-		"@812345": {Revision: 812345},
-		"e40":     {Post: post},
-		"e40-m3":  {Post: post, Message: 3},
-	} {
-		got, err := parseChangeBoundFlag("--after", value)
-		if err != nil || got != want || got.String() != value {
-			t.Errorf("%q = %+v, %v, want %+v", value, got, err, want)
-		}
-	}
-	if got, err := parseChangeBoundFlag("--after", "e40-m0"); err == nil {
-		t.Errorf("e40-m0 was accepted as %+v", got)
-	}
-	_, err := parseChangeBoundFlag("--after", "2h")
-	if err == nil || !strings.Contains(err.Error(),
-		"'ws recent --include-chat --after 2h'") {
-		t.Errorf("a time gave %v", err)
 	}
 }

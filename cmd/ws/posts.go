@@ -309,6 +309,55 @@ func (c *client) targetBeside(p *parsedArgs, refFlag string) (target, error) {
 	return targetOf(workspace), nil
 }
 
+// checkBoundServer checks that a bound naming a post or message names
+// one on the target's server, since a bound names a point in its
+// server's history and revisions count on each server apart.
+func (c *client) checkBoundServer(t target, bound api.Bound) error {
+	if bound.Post.ID == 0 {
+		return nil
+	}
+	home, err := c.resolve(bound.Post)
+	if err != nil {
+		return err
+	}
+	if home.server != t.server {
+		return fmt.Errorf("%s is on %s, but workspace %s is on %s, and "+
+			"revisions count on each server apart, so %s cannot bound a "+
+			"read of %s", bound.Post, home.server, t.workspace, t.server,
+			bound, t.workspace)
+	}
+	return nil
+}
+
+// boundedTarget is where a listing or wait bounded by bounds works: as
+// targetBeside has it for --under, except that without --workspace or
+// --under it works in the workspace of the first post or message a
+// bound names, as a wait from a post's id reads on from it.
+func (c *client) boundedTarget(
+	p *parsedArgs, bounds ...api.Bound,
+) (target, error) {
+	t, err := c.targetBeside(p, "--under")
+	if err != nil {
+		return target{}, err
+	}
+	if p.strs["--workspace"] == "" && !p.has("--under") {
+		for _, bound := range bounds {
+			if bound.Post.ID != 0 {
+				if t, err = c.resolve(bound.Post); err != nil {
+					return target{}, err
+				}
+				break
+			}
+		}
+	}
+	for _, bound := range bounds {
+		if err := c.checkBoundServer(t, bound); err != nil {
+			return target{}, err
+		}
+	}
+	return t, nil
+}
+
 func cmdAdd(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
 		strs: []string{"--project", "--body", "--parent", "--workspace",
@@ -673,16 +722,6 @@ func listingHeader(p *parsedArgs, limit int, items api.Items) string {
 	return text + ":"
 }
 
-// boundArg writes a bound as a time flag reads it: a revision like
-// @812345, or a local time with its offset, to the nanosecond when the
-// time has any.
-func boundArg(bound api.Bound) string {
-	if bound.Revision != 0 {
-		return api.FormatRevision(bound.Revision)
-	}
-	return bound.Time.Local().Format(time.RFC3339Nano)
-}
-
 // olderCommand is the command that lists the matches before a revision,
 // with the text, flags and bounds a listing was given.
 func olderCommand(
@@ -744,6 +783,7 @@ func cmdListing(c *client, command string, args []string) error {
 
 	now := time.Now()
 	var after *api.Bound
+	var bounds []api.Bound
 	for _, flag := range []string{"--after", "--before"} {
 		if !p.has(flag) {
 			continue
@@ -753,6 +793,7 @@ func cmdListing(c *client, command string, args []string) error {
 			return err
 		}
 		query.Set(strings.TrimPrefix(flag, "--"), bound.String())
+		bounds = append(bounds, bound)
 		if flag == "--after" {
 			after = &bound
 		}
@@ -769,7 +810,7 @@ func cmdListing(c *client, command string, args []string) error {
 	includeDeleted.addTo(p, query)
 	query.Set("items", items.String())
 
-	t, err := c.targetBeside(p, "--under")
+	t, err := c.boundedTarget(p, bounds...)
 	if err != nil {
 		return err
 	}

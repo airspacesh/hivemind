@@ -220,7 +220,7 @@ func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 	}{
 		{"GET", "/api/posts/x1", "", 404, api.CodeUnknownPrefix},
 		{"GET", "/api/posts/e9", "", 404, api.CodePostNotFound},
-		{"GET", "/api/posts/e1/messages?after=0", "", 200, ""},
+		{"GET", "/api/posts/e1/messages?after=e1-m0", "", 200, ""},
 		{"GET", "/api/posts/x1/messages", "", 404, api.CodeUnknownPrefix},
 		{"GET", "/api/posts/e9/tree", "", 404, api.CodePostNotFound},
 		{"PATCH", "/api/posts/e1/messages/3",
@@ -518,12 +518,19 @@ func TestChatReadsOverHTTP(t *testing.T) {
 			strconv.Itoa(page.Remaining)
 	}
 	for query, want := range map[string]string{
-		"?after=0&limit=2": "e1-m1:one! e1-m2:two cursor=2 remaining=1",
-		"?after=2":         "e1-m3:three cursor=3 remaining=0",
+		"?after=e1-m0&limit=2": "e1-m1:one! e1-m2:two cursor=2 remaining=1",
+		"?after=e1-m2":         "e1-m3:three cursor=3 remaining=0",
+		"?after=e1": "e1-m1:one! e1-m2:two e1-m3:three cursor=3 " +
+			"remaining=0",
 		"?after=2000-01-01T00:00:00Z&limit=1": "e1-m1:one! cursor=1 " +
 			"remaining=2",
-		"?latest=2":         "e1-m2:two e1-m3:three cursor=3 remaining=0",
-		"?latest=2&after=2": "e1-m3:three cursor=3 remaining=0",
+		"?after=@2":              "e1-m2:two e1-m3:three cursor=3 remaining=0",
+		"?before=e1-m3":          "e1-m1:one! e1-m2:two cursor=2 remaining=0",
+		"?after=e1-m1&before=@4": "e1-m2:two cursor=2 remaining=0",
+		"?before=e1-m3&limit=1":  "e1-m1:one! cursor=1 remaining=1",
+		"?latest=2":              "e1-m2:two e1-m3:three cursor=3 remaining=0",
+		"?latest=2&after=e1-m2":  "e1-m3:three cursor=3 remaining=0",
+		"?latest=1&before=e1-m3": "e1-m2:two cursor=2 remaining=0",
 	} {
 		if got := read(query); got != want {
 			t.Fatalf("messages%s = %q, want %q", query, got, want)
@@ -545,7 +552,7 @@ func TestExcludedSessionlessKeyOverHTTP(t *testing.T) {
 
 	exclude := "exclude-user=duck&exclude-claude-session="
 	var chat api.ChatPage
-	text := s.must(t, "GET", "/api/posts/e1/messages?after=0&"+exclude,
+	text := s.must(t, "GET", "/api/posts/e1/messages?after=e1&"+exclude,
 		"", "", http.StatusOK)
 	if err := json.Unmarshal([]byte(text), &chat); err != nil {
 		t.Fatal(err)
@@ -600,6 +607,7 @@ func TestChangesAfterAnIDOverHTTP(t *testing.T) {
 	}
 	for after, want := range map[string]string{
 		"e1":    "e1-m1 e2 e1",
+		"e1-m0": "e1-m1 e2 e1",
 		"e1-m1": "e2 e1",
 		"e2":    "e1",
 	} {
@@ -613,10 +621,9 @@ func TestChangesAfterAnIDOverHTTP(t *testing.T) {
 		status int
 		code   api.ErrorCode
 	}{
-		{"p1", 400, api.CodeBadRequest},
+		{"p1", 401, api.CodeUnauthorized},
 		{"e1-m2", 404, api.CodeMessageNotFound},
 		{"e3", 404, api.CodePostNotFound},
-		{"e1-m0", 400, api.CodeBadRequest},
 	} {
 		text := s.must(t, "GET", "/api/workspaces/general/changes?after="+
 			test.after, "", "", test.status)

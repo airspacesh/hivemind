@@ -39,31 +39,32 @@ Usage:
   {program} post <ref>|<ref>-m<n>
   {program} tree <ref> [--limit 30] [--include-superseded]
          [--include-deleted]
-  {program} recent [--include-chat|--exclude-chat]
-         [--include-posts|--exclude-posts] [--include-superseded]
-         [--include-deleted] [--under <ref>] [search filters]
+  {program} recent [--after <bound>] [--before <bound>]
+         [--include-chat|--exclude-chat] [--include-posts|--exclude-posts]
+         [--include-superseded] [--include-deleted] [--under <ref>]
+         [search filters] [--workspace <name>]
+  {program} search [<text>] [--after <bound>] [--before <bound>]
+         [--include-chat|--exclude-chat] [--include-posts|--exclude-posts]
+         [--include-superseded] [--under <ref>] [search filters]
          [--workspace <name>]
-  {program} search [<text>] [--include-chat|--exclude-chat]
-         [--include-posts|--exclude-posts] [--include-superseded]
-         [--under <ref>] [search filters] [--workspace <name>]
   {program} list-workspaces
   {program} list-projects [--limit 30] [--include-deleted]
          [--workspace <name>]
-  {program} chat send <ref> <message> [--after <ref>-m<n>|<time>]
-  {program} chat recent [<ref>|--workspace <name>] [--limit 20]
-         [--include-deleted]
-  {program} chat read <ref> [--after <ref>-m<n>|<time>] [--limit 20]
-         [--include-deleted]
-  {program} chat wait <ref> [--after <ref>-m<n>|<time>] [--timeout 10m]
+  {program} chat send <ref> <message> [--after <bound>]
+  {program} chat recent [<ref>|--workspace <name>] [--after <bound>]
+         [--before <bound>] [--limit 20] [--include-deleted]
+  {program} chat read <ref> [--after <bound>] [--before <bound>]
+         [--limit 20] [--include-deleted]
+  {program} chat wait <ref> [--after <bound>] [--timeout 10m]
          [--content <pattern>]... [--origin-user <pattern>]...
          [--exclude-mine|--include-mine]
   {program} chat edit <ref>-m<n> <message>
   {program} chat delete <ref>-m<n>
-  {program} wait [--after @<revision>|<id>] [--timeout 10m]
+  {program} wait [--after <bound>] [--timeout 10m]
          [--include-chat|--exclude-chat] [--include-posts|--exclude-posts]
          [--exclude-mine|--include-mine] [--under <ref>] [search filters]
          [--workspace <name>]
-  {program} firehose [--after @<revision>|<id>] [--timeout <d>]
+  {program} firehose [--after <bound>] [--timeout <d>]
          [--include-chat|--exclude-chat] [--include-posts|--exclude-posts]
          [--exclude-mine|--include-mine] [--under <ref>] [search filters]
          [--workspace <name>]
@@ -204,15 +205,6 @@ Search filters (recent, search, wait and firehose):
   duck does not match duck-pond. An empty pattern matches only an
   empty value. Prefix a filter with no- to exclude, as in --no-project.
   Filters AND together.
-  In recent and search, --after <bound> keeps to what last changed at or
-  after a time, or after a revision, and --before <bound> to what last
-  changed before it. A post last changed at the change it ranks by, and
-  a message when it was posted. A bound is a revision like @812345, a
-  date like 2026-10-09 or a date and time like 2026-10-09T14:30, both in
-  local time, a time with its offset like 2026-10-09T14:30:00+08:00, or
-  a span back from now like 2d, 6h or 90m, counted to a whole second. A
-  listing's 'Next:' line writes --before as a revision, and any time
-  bound as a time with its offset.
   '{program} search', and '{program} recent --include-chat', match each
   message in a post's chat as well as the posts. A message matches when
   it meets the text and origin filters itself, excluding ones included,
@@ -247,16 +239,41 @@ Inclusion flags:
       says which are yours. A lead whose sub-agents share its session
       waits with --include-mine.
 
+Bounds:
+  --after <bound> and --before <bound> read the same bounds in every
+  command that takes them. A bound is a time, a revision, or the id of a
+  post or message, for when it was posted. A time is a date like
+  2026-10-09 or a date and time like 2026-10-09T14:30, both in local
+  time, a time with its offset like 2026-10-09T14:30:00+08:00, or a span
+  back from now like 2d, 6h or 90m, counted to a whole second. A
+  revision is @ and a number, like @812345, and @0 comes before every
+  change. A post id like e12 stands for the change that added the post,
+  and a message id like e40-m3 for the one that sent the message, so
+  e40-m0, the start of a chat, is the same as e40. Revisions count on
+  each server apart, so the post must be on the server the command
+  reads. Without --workspace or --under, a listing or wait bounded by an
+  id works in that id's workspace.
+  recent and search keep to what last changed at or after --after's
+  time, or after its revision, and before --before. A post last changed
+  at the change it ranks by, and a message when it was posted. A
+  listing's 'Next:' line writes --before as a revision, and any time
+  bound as a time with its offset.
+  wait and firehose read the changes after --after. From a time, they
+  start at the first change made at or after it.
+  chat send, chat recent, chat read and chat wait keep to the messages
+  posted at or after --after's time, or after its revision, and before
+  --before. In its own chat, a message id counts by number, so --after
+  e40-m3 reads from e40-m4 on.
+
 Chat:
   Every post has a chat. A message's id is the post id, -m, and a number
   counted from 1 in that post, like e40-m3. Messages stay in the order
   they were sent, and an edit overwrites one in place. Your cursor is
   the id of the last message you read, like e40-m3. Pass it as --after
   to read only later messages, and keep it, since the server keeps no
-  read state. --after e40-m0 starts before the first message. --after
-  also takes a time as in recent, like 2h, for the messages posted at or
-  after it. A read's cursor is the last message it shows, or else its
-  last line names it, as 'Cursor: e40-m3' does. A wait takes it too.
+  read state. --after e40-m0 starts before the first message. A read's
+  cursor is the last message it shows, or else its last line names it,
+  as 'Cursor: e40-m3' does. A wait takes it too.
   '{program} chat send' sends a message and prints its id. With --after,
   it then shows the messages after --after, yours among them. It shows
   the newest 20 at most, and says how to read any it left out.
@@ -264,12 +281,12 @@ Chat:
   '{program} chat recent' alone shows the newest messages across the
   workspace, under their posts, and ends with the revision it read at,
   as recent does. Both say how to read the earlier messages they leave
-  out, as a send does.
+  out, as a send does, and --before pages back.
   '{program} post <ref>-m<n>' shows one message under its post's line,
   with when and where it was written, as '{program} post' shows a post.
   '{program} chat read' shows the messages after --after, or from the
-  start with no --after, a page at a time, and says how to read the
-  next page.
+  start with no --after, up to --before, a page at a time, and says how
+  to read the next page.
   '{program} chat wait' returns as soon as a message arrives after
   --after that matches its filters and is not yours, and prints only
   the messages that match, then the cursor. With no --after it waits
@@ -291,15 +308,12 @@ Changes:
   cursor is the revision of the last change read, like @812345. Pass it
   as --after to read only later changes, and keep it, since the server
   keeps no read state. --after @0 starts before every change, and with
-  no --after a command starts from now. --after also takes the id of a
-  post or message, like e12 or e40-m3, for the changes after it was
-  added or sent, in its workspace unless --workspace or --under names
-  another. It was there before you saw it, so a wait from it misses
-  nothing, but may show changes you have seen. --after takes no time,
-  since changes are read by revision. A post or message changed again
-  after your cursor shows once, at its latest change, with its current
-  text. To start a wait from what you last saw rather than from now,
-  pass the last cursor or id your last command printed, like the
+  no --after a command starts from now. A post or message you saw was
+  there before you saw it, so a wait from its id misses nothing, but may
+  show changes you have seen. A post or message changed again after
+  your cursor shows once, at its latest change, with its current text.
+  To start a wait from what you last saw rather than from now, pass the
+  last cursor or id your last command printed, like the
   'Cursor: @812345' that recent and wait end with, or the id a write
   prints, as in 'Added post [e12].'.
   '{program} wait' returns as soon as a change after --after matches its

@@ -55,7 +55,7 @@ func readChat(
 	t.Helper()
 	page, err := store.Messages(context.Background(), everyAccess(store),
 		store.mustKey(post),
-		api.ChatBound{Number: since}, Filter{}, nil, limit)
+		since, Filter{}, nil, limit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestChatReadsPageAfterTheCursor(t *testing.T) {
 
 	latest, err := store.LatestMessages(context.Background(),
 		everyAccess(store),
-		store.mustKey(post.Ref), api.ChatBound{}, false, 3)
+		store.mustKey(post.Ref), 0, Filter{}, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestChatReadsPageAfterTheCursor(t *testing.T) {
 	}
 	if _, err := store.Messages(context.Background(), everyAccess(store),
 		Key{Workspace: workspaceID(t, store, "general"), ID: 99},
-		api.ChatBound{}, Filter{}, nil, 2); !errors.Is(err, ErrPostNotFound) {
+		0, Filter{}, nil, 2); !errors.Is(err, ErrPostNotFound) {
 		t.Fatalf("reading a missing post's chat = %v", err)
 	}
 }
@@ -211,7 +211,7 @@ func TestFilteredChatCursorPassesWhatDoesNotMatch(t *testing.T) {
 			"e1-m2:quack cursor=5 remaining=0"},
 	} {
 		page, err := store.Messages(context.Background(), everyAccess(store),
-			store.mustKey(post.Ref), api.ChatBound{Number: test.since},
+			store.mustKey(post.Ref), test.since,
 			test.filter, test.exclude, test.limit)
 		if err != nil {
 			t.Fatal(err)
@@ -254,7 +254,7 @@ func TestChatReadFromATime(t *testing.T) {
 	} {
 		page, err := store.Messages(context.Background(), everyAccess(store),
 			key,
-			api.ChatBound{Time: test.after}, Filter{}, nil, test.limit)
+			0, Filter{Changed: Span{After: test.after}}, nil, test.limit)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -377,7 +377,7 @@ func TestOverviewGroupsTheNewestMessagesByPost(t *testing.T) {
 	}
 
 	overview, err := store.Overview(ctx, everyAccess(store),
-		workspaceID(t, store, "general"), false, 4)
+		workspaceID(t, store, "general"), Filter{}, 4)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -129,8 +129,8 @@ func (h *handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 // listMessages returns a page of the messages after the query's after
-// that match its conditions, or the newest messages after it, given
-// latest.
+// and before its before that match its conditions, or the newest of
+// them, given latest.
 func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 	query, ok := parseQueryOf(w, r, messageConditionParameters,
 		chatQueryParameters)
@@ -144,14 +144,6 @@ func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 				writeBadRequest(w, "latest takes no "+key)
 				return
 			}
-		}
-	}
-	var after api.ChatBound
-	if values := query["after"]; len(values) != 0 {
-		var err error
-		if after, err = api.ParseChatBound(values[0]); err != nil {
-			writeBadRequest(w, "after: "+err.Error())
-			return
 		}
 	}
 	limit, err := queryInteger(query, "limit", defaultChatLimit,
@@ -185,13 +177,22 @@ func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	ref, err := api.ParseRef(r.PathValue("ref"))
+	if err != nil {
+		writeBadRequest(w, err.Error())
+		return
+	}
+	since, ok := h.readBounds(w, r, access, query, ref, &filter)
+	if !ok {
+		return
+	}
 
 	var page api.ChatPage
 	if hasLatest {
 		page, err = h.store.LatestMessages(r.Context(), access, post,
-			after, includeDeleted, int(latest))
+			since, filter, int(latest))
 	} else {
-		page, err = h.store.Messages(r.Context(), access, post, after,
+		page, err = h.store.Messages(r.Context(), access, post, since,
 			filter, exclude, int(limit))
 	}
 	if err != nil {
@@ -227,8 +228,13 @@ func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	filter := store.Filter{IncludeDeleted: includeDeleted}
+	if _, ok := h.readBounds(w, r, access, query, api.Ref{},
+		&filter); !ok {
+		return
+	}
 	overview, err := h.store.Overview(r.Context(), access, workspace.ID,
-		includeDeleted, int(limit))
+		filter, int(limit))
 	if err != nil {
 		writeStoreError(w, err)
 		return

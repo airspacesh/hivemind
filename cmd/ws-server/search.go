@@ -56,6 +56,7 @@ var messageConditionParameters = conditionParameters(api.MessageFields)
 // conditions.
 var chatQueryParameters = map[string]bool{
 	"after":                  true,
+	"before":                 true,
 	"latest":                 true,
 	"limit":                  true,
 	"include-deleted":        true,
@@ -68,12 +69,15 @@ var chatQueryParameters = map[string]bool{
 var latestQueryParameters = map[string]bool{
 	"latest":          true,
 	"after":           true,
+	"before":          true,
 	"include-deleted": true,
 }
 
 // overviewQueryParameters are the parameters of a chat overview.
 var overviewQueryParameters = map[string]bool{
 	"limit":           true,
+	"after":           true,
+	"before":          true,
 	"include-deleted": true,
 }
 
@@ -203,7 +207,7 @@ func excludedOrigin(query url.Values) (*store.OriginKey, error) {
 }
 
 // searchFilter reads the filter a search query asks for, apart from
-// the subtree it may be under.
+// the subtree it may be under and its bounds.
 func searchFilter(query url.Values) (store.Filter, error) {
 	filter, err := conditionsFilter(query)
 	if err != nil {
@@ -225,17 +229,6 @@ func searchFilter(query url.Values) (store.Filter, error) {
 	if err != nil {
 		return store.Filter{}, err
 	}
-	after, err := queryBound(query, "after")
-	if err != nil {
-		return store.Filter{}, err
-	}
-	before, err := queryBound(query, "before")
-	if err != nil {
-		return store.Filter{}, err
-	}
-	filter.Changed = store.Span{After: after.Time, Before: before.Time}
-	filter.Revisions = store.RevisionSpan{After: after.Revision,
-		Before: before.Revision}
 	filter.IncludeSuperseded = includeSuperseded
 	filter.IncludeDeleted = includeDeleted
 	filter.Items = items
@@ -260,6 +253,10 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 	}
 	workspace, ok := h.workspace(w, r, access)
 	if !ok {
+		return
+	}
+	if _, ok := h.readBounds(w, r, access, query, api.Ref{},
+		&filter); !ok {
 		return
 	}
 	if values := query["under"]; len(values) != 0 {

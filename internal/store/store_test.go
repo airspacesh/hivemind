@@ -511,18 +511,18 @@ func TestReadsProceedWhileAWriteIsOpen(t *testing.T) {
 		},
 		"chat": func(ctx context.Context) error {
 			_, err := store.Messages(ctx, everyAccess(store), key,
-				api.ChatBound{}, Filter{},
+				0, Filter{},
 				exclude, 10)
 			return err
 		},
 		"latest chat": func(ctx context.Context) error {
 			_, err := store.LatestMessages(ctx, everyAccess(store), key,
-				api.ChatBound{}, false, 10)
+				0, Filter{}, 10)
 			return err
 		},
 		"chat overview": func(ctx context.Context) error {
 			_, err := store.Overview(ctx, everyAccess(store), key.Workspace,
-				false, 10)
+				Filter{}, 10)
 			return err
 		},
 		"search": func(ctx context.Context) error {

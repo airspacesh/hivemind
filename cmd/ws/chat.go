@@ -121,48 +121,76 @@ func (c *client) chatPage(
 	return page, err
 }
 
-// parseChatAfter reads the --after of a command on a post's chat, which
-// is a message of that chat like e40-m3, e40-m0 for its start, or a
-// time as a listing's --after reads it.
-func parseChatAfter(
-	post api.Ref, value string, now time.Time,
-) (api.ChatBound, error) {
-	if cursor, err := api.ParseMessageCursor(value); err == nil {
-		if cursor.Post != post {
-			return api.ChatBound{}, fmt.Errorf("--after %s is a message "+
-				"of %s, but this is the chat of %s. Pass a message of %s, "+
-				"like %s-m3", value, cursor.Post, post, post, post)
+// chatBound reads the --after or --before of a command on the chat of
+// post, as parseBoundFlag does, and checks that a post or message it
+// names is on the chat's server. It returns nil when the command was not
+// given the flag.
+func (c *client) chatBound(
+	p *parsedArgs, flag string, t target, post api.Ref,
+) (*api.Bound, error) {
+	if !p.has(flag) {
+		return nil, nil
+	}
+	bound, err := parseBoundFlag(flag, p.strs[flag], time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if bound.Post != post {
+		if err := c.checkBoundServer(t, bound); err != nil {
+			return nil, err
 		}
-		return api.ChatBound{Number: cursor.Number}, nil
 	}
-	bound, err := parseBoundFlag("--after", value, now)
-	if err == nil && bound.Revision == 0 {
-		return api.ChatBound{Time: bound.Time}, nil
-	}
-	return api.ChatBound{}, fmt.Errorf("--after must be a message of the "+
-		"chat like %s-m3, %s-m0 for its start, a span back from now like "+
-		"2d, 6h or 90m, a date like 2026-10-09, or a date and time like "+
-		"2026-10-09T14:30, not %q", post, post, value)
+	return &bound, nil
 }
 
-// describeChatAfter says where a chat read started, for a reply that
-// found nothing.
-func describeChatAfter(post api.Ref, after api.ChatBound) string {
-	if !after.Time.IsZero() {
-		return "at or after " + after.Time.Local().Format(dateClockLayout)
+// chatCursor is the bound that a read of a post's chat after the
+// message numbered number takes.
+func chatCursor(post api.Ref, number int64) api.Bound {
+	return api.Bound{Post: post, Message: number}
+}
+
+// addChatBounds adds the bounds a read of a chat was given to its query.
+func addChatBounds(query url.Values, after, before *api.Bound) {
+	if after != nil {
+		query.Set("after", after.String())
 	}
-	return "after " + api.MessageRef{Post: post, Number: after.Number}.
-		String()
+	if before != nil {
+		query.Set("before", before.String())
+	}
+}
+
+// beforeArg repeats a --before a read was given, after a space, for a
+// command it suggests.
+func beforeArg(before *api.Bound) string {
+	if before == nil {
+		return ""
+	}
+	return " --before " + boundArg(*before)
+}
+
+// describeChatAfter says where a read of the chat of post started, for a
+// reply that found nothing.
+func describeChatAfter(post api.Ref, after api.Bound) string {
+	switch {
+	case after.Post == post:
+		return "after " + api.MessageRef{Post: post, Number: after.Message}.
+			String()
+	case after.Post.ID == 0 && !after.Time.IsZero():
+		return "at or after " + after.Time.Local().Format(dateClockLayout)
+	default:
+		return "posted after " + after.String()
+	}
 }
 
 // numberBefore is the number of the message a read of a post's chat
-// from after starts after. That is after's own number, or for a time,
-// the number of the last message posted before it, deleted or not.
+// from after starts after. That is after's own number for a message of
+// that chat, or else the number of the last message posted before after,
+// deleted or not.
 func (c *client) numberBefore(
-	t target, post api.Ref, after api.ChatBound,
+	t target, post api.Ref, after api.Bound,
 ) (int64, error) {
-	if after.Time.IsZero() {
-		return after.Number, nil
+	if after.Post == post {
+		return after.Message, nil
 	}
 	query := url.Values{"after": {after.String()}, "limit": {"1"},
 		"include-deleted": {"true"}}
@@ -185,7 +213,7 @@ func cmdChatSend(c *client, args []string) error {
 	}
 	if len(p.pos) != 2 {
 		usage := usageError("chat send <ref> <message> " +
-			"[--after <ref>-m<n>|<time>]")
+			"[--after <bound>]")
 		for _, arg := range p.pos {
 			if strings.HasPrefix(arg, "--") {
 				return fmt.Errorf("%s looks like a flag, but chat send "+
@@ -202,14 +230,11 @@ func cmdChatSend(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	var after api.ChatBound
-	if p.has("--after") {
-		after, err = parseChatAfter(ref, p.strs["--after"], time.Now())
-		if err != nil {
-			return err
-		}
-	}
 	t, err := c.resolve(ref)
+	if err != nil {
+		return err
+	}
+	after, err := c.chatBound(p, "--after", t, ref)
 	if err != nil {
 		return err
 	}
@@ -235,22 +260,22 @@ func cmdChatSend(c *client, args []string) error {
 	fmt.Printf("Sent [%s].\n", message.Ref())
 	// Without --after a send prints no cursor, since others may have
 	// sent messages between the reader's last read and this one.
-	if !p.has("--after") {
+	if after == nil {
 		return nil
 	}
 
-	start, err := c.numberBefore(t, ref, after)
+	start, err := c.numberBefore(t, ref, *after)
 	if err != nil {
 		return fmt.Errorf("reading the chat after the send: %w", err)
 	}
-	from := api.ChatBound{Number: start}
+	from := chatCursor(ref, start)
 	latest := url.Values{"latest": {fmt.Sprint(sendShownLimit)},
 		"after": {from.String()}}
 	page, err := c.chatPage(t, ref, latest)
 	if err != nil {
 		return fmt.Errorf("reading the chat after the send: %w", err)
 	}
-	printEarlier("", ref, start, page.Earlier, "")
+	printEarlier("", ref, from, page.Earlier, "")
 	cursor := api.MessageRef{Post: ref, Number: start}
 	printChatPage(ref, page, from,
 		fmt.Sprintf("No messages after %s.", cursor), "")
@@ -313,7 +338,7 @@ func cmdChatDelete(c *client, args []string) error {
 
 func cmdChatRecent(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs:  []string{"--limit", "--workspace"},
+		strs:  []string{"--limit", "--workspace", "--after", "--before"},
 		bools: includeDeleted.flags(),
 	})
 	if err != nil {
@@ -321,7 +346,8 @@ func cmdChatRecent(c *client, args []string) error {
 	}
 	if len(p.pos) > 1 || (len(p.pos) == 1 && p.has("--workspace")) {
 		return usageError("chat recent [<ref>|--workspace <name>] " +
-			"[--limit <n>] [--include-deleted]")
+			"[--after <bound>] [--before <bound>] [--limit <n>] " +
+			"[--include-deleted]")
 	}
 	limit := 20
 	if p.has("--limit") {
@@ -331,19 +357,33 @@ func cmdChatRecent(c *client, args []string) error {
 	}
 
 	if len(p.pos) == 0 {
-		workspace, err := c.config.chooseWorkspace(p.strs["--workspace"])
+		bounds := map[string]*api.Bound{}
+		var named []api.Bound
+		for _, flag := range []string{"--after", "--before"} {
+			if !p.has(flag) {
+				continue
+			}
+			bound, err := parseBoundFlag(flag, p.strs[flag], time.Now())
+			if err != nil {
+				return err
+			}
+			bounds[flag] = &bound
+			named = append(named, bound)
+		}
+		t, err := c.boundedTarget(p, named...)
 		if err != nil {
 			return err
 		}
-		t := targetOf(workspace)
 		query := url.Values{"limit": {fmt.Sprint(limit)}}
+		addChatBounds(query, bounds["--after"], bounds["--before"])
 		includeDeleted.addTo(p, query)
 		var overview api.ChatOverview
 		path := workspacePath(t, "/messages?"+query.Encode())
 		if err := c.do(t, "GET", path, nil, &overview); err != nil {
 			return err
 		}
-		printOverview(overview, t.workspace, includeDeleted.arg(p))
+		printOverview(overview, t.workspace, bounds["--after"],
+			beforeArg(bounds["--before"])+includeDeleted.arg(p))
 		printChangeCursor(os.Stdout, overview.Revision)
 		return nil
 	}
@@ -356,15 +396,30 @@ func cmdChatRecent(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
+	after, err := c.chatBound(p, "--after", t, ref)
+	if err != nil {
+		return err
+	}
+	before, err := c.chatBound(p, "--before", t, ref)
+	if err != nil {
+		return err
+	}
 	query := url.Values{"latest": {fmt.Sprint(limit)}}
+	addChatBounds(query, after, before)
 	includeDeleted.addTo(p, query)
 	page, err := c.chatPage(t, ref, query)
 	if err != nil {
 		return err
 	}
-	printEarlier("", ref, 0, page.Earlier, includeDeleted.arg(p))
-	printChatPage(ref, page, api.ChatBound{},
-		fmt.Sprintf("%s has no messages yet.", ref), includeDeleted.arg(p))
+	from := chatCursor(ref, 0)
+	empty := fmt.Sprintf("%s has no messages yet.", ref)
+	if after != nil {
+		from = *after
+		empty = fmt.Sprintf("No messages %s.", describeChatAfter(ref, from))
+	}
+	readFlags := beforeArg(before) + includeDeleted.arg(p)
+	printEarlier("", ref, from, page.Earlier, readFlags)
+	printChatPage(ref, page, from, empty, readFlags)
 	return nil
 }
 
@@ -386,28 +441,34 @@ func parseTimeout(
 
 func cmdChatRead(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs:  []string{"--after", "--limit"},
+		strs:  []string{"--after", "--before", "--limit"},
 		bools: includeDeleted.flags(),
 	})
 	if err != nil {
 		return err
 	}
 	if len(p.pos) != 1 {
-		return usageError("chat read <ref> [--after <ref>-m<n>|<time>] " +
-			"[--limit <n>] [--include-deleted]")
+		return usageError("chat read <ref> [--after <bound>] " +
+			"[--before <bound>] [--limit <n>] [--include-deleted]")
 	}
 	ref, err := api.ParseRef(p.pos[0])
 	if err != nil {
 		return err
 	}
-	var after api.ChatBound
-	if p.has("--after") {
-		after, err = parseChatAfter(ref, p.strs["--after"], time.Now())
-		if err != nil {
-			return err
-		}
+	t, err := c.resolve(ref)
+	if err != nil {
+		return err
 	}
-	query := url.Values{"after": {after.String()}}
+	after, err := c.chatBound(p, "--after", t, ref)
+	if err != nil {
+		return err
+	}
+	before, err := c.chatBound(p, "--before", t, ref)
+	if err != nil {
+		return err
+	}
+	query := url.Values{}
+	addChatBounds(query, after, before)
 	if p.has("--limit") {
 		limit, err := parsePositive("--limit", p.strs["--limit"])
 		if err != nil {
@@ -417,19 +478,18 @@ func cmdChatRead(c *client, args []string) error {
 	}
 	includeDeleted.addTo(p, query)
 
-	t, err := c.resolve(ref)
-	if err != nil {
-		return err
-	}
 	page, err := c.chatPage(t, ref, query)
 	if err != nil {
 		return err
 	}
+	from := chatCursor(ref, 0)
 	empty := fmt.Sprintf("%s has no messages yet.", ref)
-	if p.has("--after") {
-		empty = fmt.Sprintf("No messages %s.", describeChatAfter(ref, after))
+	if after != nil {
+		from = *after
+		empty = fmt.Sprintf("No messages %s.", describeChatAfter(ref, from))
 	}
-	printChatPage(ref, page, after, empty, includeDeleted.arg(p))
+	printChatPage(ref, page, from, empty,
+		beforeArg(before)+includeDeleted.arg(p))
 	return nil
 }
 
@@ -443,7 +503,7 @@ func cmdChatWait(c *client, args []string) error {
 		return err
 	}
 	if len(p.pos) != 1 {
-		return usageError("chat wait <ref> [--after <ref>-m<n>|<time>] " +
+		return usageError("chat wait <ref> [--after <bound>] " +
 			"[--timeout <d>] " +
 			"[--content <pattern>]... [--origin-user <pattern>]... " +
 			"[--exclude-mine|--include-mine]")
@@ -451,13 +511,6 @@ func cmdChatWait(c *client, args []string) error {
 	ref, err := api.ParseRef(p.pos[0])
 	if err != nil {
 		return err
-	}
-	var after api.ChatBound
-	if p.has("--after") {
-		after, err = parseChatAfter(ref, p.strs["--after"], time.Now())
-		if err != nil {
-			return err
-		}
 	}
 	timeout, err := parseTimeout(p, defaultWaitTimeout)
 	if err != nil {
@@ -476,18 +529,25 @@ func cmdChatWait(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
+	given, err := c.chatBound(p, "--after", t, ref)
+	if err != nil {
+		return err
+	}
 	if exclude {
 		if err := excludeMine(query, t.capture); err != nil {
 			return err
 		}
 	}
-	if !p.has("--after") {
+	var after api.Bound
+	if given != nil {
+		after = *given
+	} else {
 		newest := url.Values{"latest": {"1"}}
 		page, err := c.chatPage(t, ref, newest)
 		if err != nil {
 			return err
 		}
-		after = api.ChatBound{Number: page.Cursor}
+		after = chatCursor(ref, page.Cursor)
 	}
 	cursor := after
 	poll := func() (api.ChatPage, pollOutcome, error) {
@@ -496,7 +556,7 @@ func cmdChatWait(c *client, args []string) error {
 		if err != nil {
 			return page, nothingYet, err
 		}
-		cursor = api.ChatBound{Number: page.Cursor}
+		cursor = chatCursor(ref, page.Cursor)
 		if len(page.Messages) > 0 {
 			return page, found, nil
 		}

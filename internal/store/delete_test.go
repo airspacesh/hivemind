@@ -41,7 +41,7 @@ func readChatWithDeleted(
 ) api.ChatPage {
 	t.Helper()
 	page, err := store.Messages(context.Background(), everyAccess(store),
-		store.mustKey(post), api.ChatBound{Number: since},
+		store.mustKey(post), since,
 		Filter{IncludeDeleted: true}, nil, limit)
 	if err != nil {
 		t.Fatal(err)
@@ -244,7 +244,7 @@ func TestChatReadsLeaveOutDeletedMessages(t *testing.T) {
 		{0, true, "e1-m5:5 e1-m6: cursor=6 remaining=0", 4},
 	} {
 		latest, err := store.LatestMessages(ctx, everyAccess(store), key,
-			api.ChatBound{Number: test.after}, test.includeDeleted, 2)
+			test.after, Filter{IncludeDeleted: test.includeDeleted}, 2)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -257,7 +257,7 @@ func TestChatReadsLeaveOutDeletedMessages(t *testing.T) {
 	}
 
 	overview, err := store.Overview(ctx, everyAccess(store), key.Workspace,
-		false, 2)
+		Filter{}, 2)
 	if err != nil {
 		t.Fatal(err)
 	}

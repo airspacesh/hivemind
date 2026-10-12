@@ -166,7 +166,7 @@ func TestOnlyTheOwnerReadsAPrivatePostAndWhatIsUnderIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertNoSecret(t, "the changes", changes)
-	overview, err := store.Overview(ctx, bob, general, false, 20)
+	overview, err := store.Overview(ctx, bob, general, Filter{}, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,13 +185,13 @@ func TestOnlyTheOwnerReadsAPrivatePostAndWhatIsUnderIt(t *testing.T) {
 	draftKey := store.mustKey(draft.Ref)
 	for what, read := range map[string]func() error{
 		"chat": func() error {
-			_, err := store.Messages(ctx, bob, draftKey, api.ChatBound{},
-				Filter{}, nil, 20)
+			_, err := store.Messages(ctx, bob, draftKey, 0, Filter{},
+				nil, 20)
 			return err
 		},
 		"latest chat": func() error {
 			_, err := store.LatestMessages(ctx, bob, draftKey,
-				api.ChatBound{}, false, 20)
+				0, Filter{}, 20)
 			return err
 		},
 		"message": func() error {
@@ -466,8 +466,8 @@ func readsAs(
 		read("tree "+ref.String(), tree, err)
 		tree, err = store.Tree(ctx, access, key, false, false, 30)
 		read("current tree "+ref.String(), tree, err)
-		chat, err := store.Messages(ctx, access, key, api.ChatBound{},
-			Filter{}, nil, 20)
+		chat, err := store.Messages(ctx, access, key, 0, Filter{}, nil,
+			20)
 		read("chat "+ref.String(), chat, err)
 	}
 	for what, filter := range map[string]Filter{
@@ -487,7 +487,7 @@ func readsAs(
 			suffix = " with deleted"
 		}
 		overview, err := store.Overview(ctx, access, general,
-			includeDeleted, 20)
+			Filter{IncludeDeleted: includeDeleted}, 20)
 		read("chat overview"+suffix, overview, err)
 		projects, err := store.Projects(ctx, access, general,
 			includeDeleted, 20, time.Now())

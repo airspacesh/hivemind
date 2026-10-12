@@ -325,55 +325,71 @@ func (s *Store) DeleteMessage(
 	return message, nil
 }
 
-// addChat keeps to the messages of a post's chat from the bound after
-// on, leaving out deleted ones unless includeDeleted is set.
-func (builder *whereBuilder) addChat(
-	post Key, after api.ChatBound, includeDeleted bool,
-) {
-	builder.addSpan(`m.created_utc`, Span{After: after.Time})
+// addChat keeps to the messages of a post's chat after the message
+// numbered since that were posted within a filter's spans, leaving out
+// deleted ones unless the filter includes them.
+func (builder *whereBuilder) addChat(post Key, since int64, filter Filter) {
+	builder.addRanks(`m.posted_revision`, `m.created_utc`, filter)
 	builder.clauses = append(builder.clauses, `m.workspace_id = ?`,
 		`m.post_id = ?`, `m.id > ?`)
-	builder.args = append(builder.args, post.Workspace, post.ID,
-		after.Number)
-	if !includeDeleted {
+	builder.args = append(builder.args, post.Workspace, post.ID, since)
+	if !filter.IncludeDeleted {
 		builder.clauses = append(builder.clauses, `NOT m.deleted`)
 	}
 }
 
-// countMessages counts the messages of a post's chat from the bound
-// after on that are numbered below before, leaving out deleted ones
-// unless includeDeleted is set.
+// before keeps a filter's spans to their ends, so a read with it keeps
+// to what was posted before them, from the start of a chat.
+func (f Filter) before() Filter {
+	return Filter{
+		Changed:        Span{Before: f.Changed.Before},
+		Revisions:      RevisionSpan{Before: f.Revisions.Before},
+		IncludeDeleted: true,
+	}
+}
+
+// countMessages counts the messages of a post's chat after the message
+// numbered since and numbered below before that match a filter, as
+// buildMessageWhere and addChat have it.
 func countMessages(
 	ctx context.Context,
 	tx *sql.Tx,
 	post Key,
-	after api.ChatBound,
+	since int64,
 	before int64,
-	includeDeleted bool,
+	filter Filter,
 ) (int, error) {
-	var where whereBuilder
-	where.addChat(post, after, includeDeleted)
+	where, err := buildMessageWhere(filter)
+	if err != nil {
+		return 0, err
+	}
+	where.addChat(post, since, filter)
 	where.clauses = append(where.clauses, `m.id < ?`)
 	where.args = append(where.args, before)
 	var count int
 	if err := tx.QueryRowContext(ctx, `
-		SELECT count(*) FROM post_messages AS m`+where.sql(), where.args...,
+		SELECT count(*)
+		FROM post_messages AS m CROSS JOIN posts AS e
+			ON e.workspace_id = m.workspace_id AND e.id = m.post_id`+
+		where.sql(), where.args...,
 	).Scan(&count); err != nil {
 		return 0, fmt.Errorf("counting messages: %w", err)
 	}
 	return count, nil
 }
 
-// lastMessageNumber reads the number of a post's newest message,
-// deleted or not, or 0 for an empty chat.
+// lastMessageNumber reads the number of the newest message of a post's
+// chat posted before the ends of a filter's spans, deleted or not, or 0
+// when there is none.
 func lastMessageNumber(
-	ctx context.Context, tx *sql.Tx, post Key,
+	ctx context.Context, tx *sql.Tx, post Key, filter Filter,
 ) (int64, error) {
+	var where whereBuilder
+	where.addChat(post, 0, filter.before())
 	var last int64
 	if err := tx.QueryRowContext(ctx, `
-		SELECT coalesce(max(id), 0) FROM post_messages
-		WHERE workspace_id = ? AND post_id = ?`,
-		post.Workspace, post.ID,
+		SELECT coalesce(max(m.id), 0) FROM post_messages AS m`+where.sql(),
+		where.args...,
 	).Scan(&last); err != nil {
 		return 0, fmt.Errorf("reading chat: %w", err)
 	}
@@ -411,11 +427,11 @@ func (s *Store) readChatPage(
 	return page, nil
 }
 
-// Messages returns up to limit messages of a post's chat from the bound
-// after on that match a filter, oldest first, leaving out those whose
-// origin has the key exclude, when there is one, and deleted ones unless
-// the filter includes them. A message matches as buildMessageWhere has
-// it.
+// Messages returns up to limit messages of a post's chat after the
+// message numbered since that match a filter, oldest first, leaving out
+// those whose origin has the key exclude, when there is one, and deleted
+// ones unless the filter includes them. A message matches as
+// buildMessageWhere has it, and was posted within the filter's spans.
 //
 // The page's cursor is the highest message number the read checked.
 // Every message up to it is in the page or did not match, so a read
@@ -424,7 +440,7 @@ func (s *Store) Messages(
 	ctx context.Context,
 	access Access,
 	post Key,
-	after api.ChatBound,
+	since int64,
 	filter Filter,
 	exclude *OriginKey,
 	limit int,
@@ -434,7 +450,7 @@ func (s *Store) Messages(
 		return api.ChatPage{}, err
 	}
 	where.excludeOrigin("m", exclude)
-	where.addChat(post, after, filter.IncludeDeleted)
+	where.addChat(post, since, filter)
 
 	v, err := s.begin(ctx, access, true)
 	if err != nil {
@@ -457,39 +473,46 @@ func (s *Store) Messages(
 
 	// The query reads at most limit messages, so a full page ends at its
 	// last message, and a page short of it has checked every message
-	// after the bound, so its cursor passes them all.
+	// after since and before the spans end, so its cursor passes them
+	// all.
 	if len(page.Messages) < limit {
-		last, err := lastMessageNumber(ctx, tx, post)
+		last, err := lastMessageNumber(ctx, tx, post, filter)
 		if err != nil {
 			return api.ChatPage{}, err
 		}
-		page.Cursor = max(after.Number, last)
+		page.Cursor = max(since, last)
 		return page, nil
 	}
 	page.Cursor = page.Messages[len(page.Messages)-1].Number
-	page.Remaining, err = countMessages(ctx, tx, post,
-		api.ChatBound{Number: page.Cursor}, math.MaxInt64,
-		filter.IncludeDeleted)
+	page.Remaining, err = countMessages(ctx, tx, post, page.Cursor,
+		math.MaxInt64, Filter{IncludeDeleted: filter.IncludeDeleted,
+			Changed: filter.Changed, Revisions: filter.Revisions})
 	if err != nil {
 		return api.ChatPage{}, err
 	}
 	return page, nil
 }
 
-// LatestMessages returns the newest count messages of a post's chat from
-// the bound after on, oldest first, leaving out deleted ones unless
-// includeDeleted is set. Earlier counts the messages from after on that
-// it leaves out before the first it returns. Reading the newest first
-// checks every message after the oldest it returns, so the cursor
-// passes them all.
+// LatestMessages returns the newest count messages of a post's chat
+// after the message numbered since that match a filter, oldest first,
+// as Messages has it. Earlier counts those it leaves out before the
+// first it returns. Reading the newest first checks every message after
+// the oldest it returns and before the spans end, so the cursor passes
+// them all.
 func (s *Store) LatestMessages(
 	ctx context.Context,
 	access Access,
 	post Key,
-	after api.ChatBound,
-	includeDeleted bool,
+	since int64,
+	filter Filter,
 	count int,
 ) (api.ChatPage, error) {
+	where, err := buildMessageWhere(filter)
+	if err != nil {
+		return api.ChatPage{}, err
+	}
+	where.addChat(post, since, filter)
+
 	v, err := s.begin(ctx, access, true)
 	if err != nil {
 		return api.ChatPage{}, fmt.Errorf("reading chat: %w", err)
@@ -499,24 +522,25 @@ func (s *Store) LatestMessages(
 	if err := v.checkPostExists(ctx, post); err != nil {
 		return api.ChatPage{}, err
 	}
-	var where whereBuilder
-	where.addChat(post, after, includeDeleted)
 	page, err := s.readChatPage(ctx, tx, `
-		SELECT `+messageColumns+` FROM post_messages AS m`+where.sql()+`
+		SELECT `+messageColumns+`
+		FROM post_messages AS m CROSS JOIN posts AS e
+			ON e.workspace_id = m.workspace_id AND e.id = m.post_id`+
+		where.sql()+`
 		ORDER BY m.id DESC LIMIT ?`, append(where.args, count)...)
 	if err != nil {
 		return api.ChatPage{}, err
 	}
-	last, err := lastMessageNumber(ctx, tx, post)
+	last, err := lastMessageNumber(ctx, tx, post, filter)
 	if err != nil {
 		return api.ChatPage{}, err
 	}
-	page.Cursor = max(after.Number, last)
+	page.Cursor = max(since, last)
 	if len(page.Messages) == 0 {
 		return page, nil
 	}
-	page.Earlier, err = countMessages(ctx, tx, post, after,
-		page.Messages[0].Number, includeDeleted)
+	page.Earlier, err = countMessages(ctx, tx, post, since,
+		page.Messages[0].Number, filter)
 	if err != nil {
 		return api.ChatPage{}, err
 	}
@@ -524,17 +548,29 @@ func (s *Store) LatestMessages(
 }
 
 // Overview returns the newest limit messages across a workspace in the
-// chats of posts the reader can read, grouped by post, leaving out
-// deleted messages unless includeDeleted is set. Posts come in order of
-// their newest message, the most recent last, and each post's messages
-// oldest first, after a count of the earlier ones it leaves out.
+// chats of posts the reader can read that match a filter, as Messages
+// has it, grouped by post. Posts come in order of their newest message,
+// the most recent last, and each post's messages oldest first, after a
+// count of the earlier ones it leaves out.
 func (s *Store) Overview(
 	ctx context.Context,
 	access Access,
 	workspace int64,
-	includeDeleted bool,
+	filter Filter,
 	limit int,
 ) (api.ChatOverview, error) {
+	where, err := buildMessageWhere(filter)
+	if err != nil {
+		return api.ChatOverview{}, err
+	}
+	where.addRanks(`m.posted_revision`, `m.created_utc`, filter)
+	where.clauses = append(where.clauses, `m.workspace_id = ?`,
+		visibleClause("e"))
+	where.args = append(where.args, workspace, access.user)
+	if !filter.IncludeDeleted {
+		where.clauses = append(where.clauses, `NOT m.deleted`)
+	}
+
 	v, err := s.begin(ctx, access, true)
 	if err != nil {
 		return api.ChatOverview{}, fmt.Errorf("reading chats: %w", err)
@@ -550,11 +586,10 @@ func (s *Store) Overview(
 	rows, err := v.tx.QueryContext(ctx, `
 		SELECT `+messageColumns+`
 		FROM post_messages AS m CROSS JOIN posts AS e
-			ON e.workspace_id = m.workspace_id AND e.id = m.post_id
-		WHERE m.workspace_id = ? AND (? OR NOT m.deleted)
-			AND `+visibleClause("e")+`
+			ON e.workspace_id = m.workspace_id AND e.id = m.post_id`+
+		where.sql()+`
 		ORDER BY m.posted_revision DESC LIMIT ?`,
-		workspace, includeDeleted, v.access.user, limit,
+		append(where.args, limit)...,
 	)
 	if err != nil {
 		return api.ChatOverview{}, fmt.Errorf("reading chats: %w", err)
@@ -593,8 +628,7 @@ func (s *Store) Overview(
 		chat := &overview.Chats[i]
 		slices.Reverse(chat.Messages)
 		chat.Earlier, err = countMessages(ctx, v.tx,
-			s.mustKey(chat.Post.Ref), api.ChatBound{},
-			chat.Messages[0].Number, includeDeleted)
+			s.mustKey(chat.Post.Ref), 0, chat.Messages[0].Number, filter)
 		if err != nil {
 			return api.ChatOverview{}, err
 		}

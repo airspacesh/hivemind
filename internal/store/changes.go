@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/airspacesh/workstream/internal/api"
 )
@@ -287,6 +288,93 @@ func (s *Store) LatestRevision(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("reading the latest revision: %w", err)
 	}
 	return revision, nil
+}
+
+// firstChangeFrom reads the revision and time of the first change in a
+// workspace at or after the revision from and before the revision to,
+// to a post or to a message, as the changes feed has them. It reports
+// false when there is none.
+func firstChangeFrom(
+	ctx context.Context, tx *sql.Tx, workspace int64, from, to int64,
+) (int64, string, bool, error) {
+	var revision int64
+	var at string
+	err := tx.QueryRowContext(ctx, `
+		SELECT revision, modified_utc FROM (
+			SELECT * FROM (
+				SELECT revision, modified_utc FROM posts
+				WHERE workspace_id = ?1 AND revision >= ?2 AND revision < ?3
+				ORDER BY revision LIMIT 1
+			)
+			UNION ALL
+			SELECT * FROM (
+				SELECT revision, modified_utc FROM post_messages
+				WHERE workspace_id = ?1 AND revision >= ?2 AND revision < ?3
+				ORDER BY revision LIMIT 1
+			)
+		)
+		ORDER BY revision LIMIT 1`, workspace, from, to,
+	).Scan(&revision, &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, "", false, nil
+	}
+	if err != nil {
+		return 0, "", false, fmt.Errorf("reading a change: %w", err)
+	}
+	return revision, at, true, nil
+}
+
+// LastRevisionBefore returns the revision of the last change in a
+// workspace made before a time, as the changes feed holds them, or 0
+// when there is none, so a read of the changes after it starts at the
+// first change at or after the time.
+//
+// No index orders changes by time, so it searches by revision. A change
+// takes its revision and its time in its write transaction, and those
+// run one at a time, so a later revision has a later or equal time,
+// unless the clock steps back. Every change before a revision with a
+// time before at was made before at, and every change from one at or
+// after at was made at or after it. Halving the span of revisions left
+// takes a few dozen index seeks however many changes there are. When the
+// clock steps back, the revision found may fall short of the true
+// boundary or pass it, by the changes made while the clock was behind.
+func (s *Store) LastRevisionBefore(
+	ctx context.Context, access Access, workspace int64, at time.Time,
+) (int64, error) {
+	v, err := s.begin(ctx, access, true)
+	if err != nil {
+		return 0, fmt.Errorf("finding a revision by time: %w", err)
+	}
+	defer v.tx.Rollback()
+	latest, err := revisionSeen(ctx, v.tx)
+	if err != nil {
+		return 0, err
+	}
+
+	// Every change up to low was made before at, and every change from
+	// high on at or after it.
+	low, high := int64(0), latest+1
+	limit := formatTime(at)
+	for high-low > 1 {
+		middle := low + (high-low)/2
+		revision, changed, found, err := firstChangeFrom(ctx, v.tx,
+			workspace, middle, high)
+		if err != nil {
+			return 0, err
+		}
+		switch {
+		case !found:
+			high = middle
+		case changed < limit:
+			low = revision
+		default:
+			high = middle
+		}
+	}
+	if err := v.tx.Commit(); err != nil {
+		return 0, fmt.Errorf("finding a revision by time: %w", err)
+	}
+	return low, nil
 }
 
 // PostedRevision returns the revision of the change that added a post,

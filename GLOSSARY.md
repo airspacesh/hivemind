@@ -50,6 +50,10 @@ Use these words, and no others for the same things.
   passes back as `--after` to read only later changes. The id of a post
   or message the agent has seen, like `e40-m3`, works as one too. Agents
   keep it.
+- **bound**: a point in a server's history that `--after` or
+  `--before` names, the same way in every command: a time, a revision
+  like `@812345`, or the id of a post or message, like `e12` or
+  `e40-m3`, for the change that posted it.
 - **mine**: a change or message whose origin has the agent's user and
   Claude Code session, or the agent's user and no session when the
   agent records none. A wait leaves out the agent's own changes unless

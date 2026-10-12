@@ -326,17 +326,25 @@ var localTimeLayouts = []string{
 	"2006-01-02T15:04:05", "2006-01-02 15:04:05",
 }
 
-// parseBoundFlag reads a flag that bounds a listing: a revision like
-// @812345, a span back from now like 2d, 6h or 90m, a date or a date
-// and time in local time, or an RFC 3339 time. A span ends on a whole
-// second, so a command that repeats the bound as a time stays short.
+// parseBoundFlag reads an --after or --before, which every command
+// that takes one reads alike: a revision like @812345, the id of a post
+// or message, like e12 or e40-m3, for when it was posted, a span back
+// from now like 2d, 6h or 90m, a date or a date and time in local time,
+// or an RFC 3339 time. A span ends on a whole second, so a command that
+// repeats the bound as a time stays short.
 func parseBoundFlag(flag, value string, now time.Time) (api.Bound, error) {
 	if strings.HasPrefix(value, "@") {
-		bound, err := api.ParseBound(value)
+		revision, err := api.ParseRevision(value)
 		if err != nil {
 			return api.Bound{}, fmt.Errorf("%s: %w", flag, err)
 		}
-		return bound, nil
+		return api.Bound{Revision: revision}, nil
+	}
+	if message, err := api.ParseMessageCursor(value); err == nil {
+		return api.Bound{Post: message.Post, Message: message.Number}, nil
+	}
+	if post, err := api.ParseRef(value); err == nil {
+		return api.Bound{Post: post}, nil
 	}
 	if days, ok := strings.CutSuffix(value, "d"); ok {
 		if n, err := strconv.Atoi(days); err == nil && n >= 0 {
@@ -357,29 +365,16 @@ func parseBoundFlag(flag, value string, now time.Time) (api.Bound, error) {
 		return api.Bound{Time: at}, nil
 	}
 	return api.Bound{}, fmt.Errorf("%s must be a revision like @812345, a "+
-		"span back from now like 2d, 6h or 90m, a date like 2026-10-09, "+
-		"or a date and time like 2026-10-09T14:30, not %q", flag, value)
+		"post or message id like e12 or e40-m3, a span back from now like "+
+		"2d, 6h or 90m, a date like 2026-10-09, or a date and time like "+
+		"2026-10-09T14:30, not %q", flag, value)
 }
 
-// parseChangeBoundFlag reads a flag that takes where a read of changes
-// starts: a revision like @812345, @0 for the start, or the id of a post
-// or message, for what changed after it was posted.
-func parseChangeBoundFlag(flag, value string) (api.ChangeBound, error) {
-	bound, err := api.ParseChangeBound(value)
-	if err == nil {
-		return bound, nil
+// boundArg writes a bound as parseBoundFlag reads it, a time in local
+// time with its offset, to the nanosecond when the time has any.
+func boundArg(bound api.Bound) string {
+	if bound.Post.ID == 0 && !bound.Time.IsZero() {
+		return bound.Time.Local().Format(time.RFC3339Nano)
 	}
-	if strings.HasPrefix(value, "@") {
-		return api.ChangeBound{}, fmt.Errorf("%s: %w", flag, err)
-	}
-	if _, err := parseBoundFlag(flag, value, time.Now()); err == nil {
-		return api.ChangeBound{}, fmt.Errorf("%s takes a revision like "+
-			"@812345 or an id like e40-m3, not a time, because the server "+
-			"reads changes by revision. To list what changed after a "+
-			"time, run '%s recent --include-chat %s %s'", flag,
-			programName, flag, shellQuote(value))
-	}
-	return api.ChangeBound{}, fmt.Errorf("%s must be a revision like "+
-		"@812345, @0 for the start, or a post or message id like e12 or "+
-		"e40-m3, not %q", flag, value)
+	return bound.String()
 }

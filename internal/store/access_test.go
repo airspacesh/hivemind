@@ -151,7 +151,8 @@ func TestProtectedPostsStayOutOfListings(t *testing.T) {
 		}
 	}
 
-	overview, err := w.store.Overview(ctx, open, root.Workspace, false, 20)
+	overview, err := w.store.Overview(ctx, open, root.Workspace, Filter{},
+		20)
 	if err != nil {
 		t.Fatal(err)
 	}

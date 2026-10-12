@@ -397,8 +397,8 @@ check "an empty read from a time ends with the cursor" \
     "Cursor: $chat-m3" "$(ws chat read "$chat" --after 2100-01-01)"
 check "a read from a time starts at the first message posted since" \
     "[$chat-m1]" "$(ws chat read "$chat" --after 1h --limit 1)"
-check "a read refuses a message of another chat" \
-    "--after e1-m1 is a message of e1, but this is the chat of $chat" \
+check "a read after another chat's missing message says it is missing" \
+    "message not found: e1-m1" \
     "$(ws chat read "$chat" --after e1-m1 2>&1 || true)"
 check_equal "chat recent shows the newest, oldest first" "[$chat-m2]
 [$chat-m3]" "$(ws chat recent "$chat" --limit 2 |
@@ -746,9 +746,12 @@ private_cursor="$(echo "$private_changes" | cursor_of)"
 check "a wait from the last cursor finds nothing new" \
     "No matching changes after $private_cursor" \
     "$(ws wait --after "$private_cursor" --workspace personal --timeout 1s)"
-check "a wait refuses a time and says how to list what changed since" \
-    "--after takes a revision like @812345 or an id like e40-m3, not a time" \
-    "$(ws wait --after 2h 2>&1 || true)"
+sleep 1
+mark="$(date +%Y-%m-%dT%H:%M:%S%:z)"
+marked="$(peer add "After the mark" --project marks | added)"
+check_equal "a wait from a time shows the changes from that time on" \
+    "[$marked] $(id -un): After the mark" \
+    "$(ws wait --after "$mark" --timeout 1s | grep '^\[' | untimed)"
 (sleep 1.5 && peer chat send "$chat" "Changed" >/dev/null) &
 sender_pid=$!
 check "a wait from now returns when anything changes" "[$chat-m5]" \
@@ -828,10 +831,27 @@ check_equal "a wait from an edited post's id shows what came after it was added"
         grep '^\[' | untimed)"
 check "a wait from an id waits in that id's workspace" "[p2-m1]" \
     "$(ws wait --after p1 --include-mine --timeout 1s)"
-check "a wait refuses an id from another workspace than its own" \
-    "$sent is in another workspace than personal" \
-    "$(ws wait --after "$sent" --workspace personal --timeout 1s 2>&1 ||
-        true)"
+check "a wait from an id in another workspace reads on from its posting" \
+    "No matching changes after $sent" \
+    "$(ws wait --after "$sent" --workspace personal --timeout 1s)"
+check_equal "a listing after an id keeps to what changed after its posting" \
+    "[$waited] $(id -un): Waited post, edited
+[$chat-m10] $(id -un) in $chat: After the post
+[$written-m1] $(id -un) in $written: In another chat" \
+    "$(ws recent --project chat --include-chat --after "$sent" |
+        grep '^\[' | untimed)"
+check_equal "a chat read after another post keeps to what came after it" \
+    "$chat-m8 $chat-m9 $chat-m10" \
+    "$(ws chat read "$chat" --after "$written" |
+        sed -n 's/^\[\([a-z0-9-]*\)\].*/\1/p' | tr '\n' ' ' | sed 's/ $//')"
+check_equal "a chat read keeps between its bounds" "[$chat-m8]" \
+    "$(ws chat read "$chat" --after "$chat-m7" --before "$chat-m9" |
+        sed 's/ .*//')"
+check_equal "chat recent pages back with --before" \
+    "... 1 earlier (ws chat read $chat --after $chat-m0 --before $chat-m3)
+[$chat-m2]" \
+    "$(ws chat recent "$chat" --before "$chat-m3" -n 1 |
+        sed -E 's/^(\[[a-z0-9-]*\]) .*/\1/')"
 
 # A wait leaves out the changes of its own session, and wakes for
 # another session of the same user. Its cursor passes what it left out.

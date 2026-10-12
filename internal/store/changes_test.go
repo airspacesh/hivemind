@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"reflect"
 	"slices"
 	"strings"
@@ -554,7 +555,7 @@ func TestFilteredChangesReadDuringWritesMissNone(t *testing.T) {
 
 	page, err := store.Messages(ctx, everyAccess(store),
 		store.mustKey(post.Ref),
-		api.ChatBound{}, Filter{}, exclude, messages)
+		0, Filter{}, exclude, messages)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,18 +590,18 @@ func TestReadsAndWritesGiveARevisionToReadChangesAfter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := store.Messages(ctx, everyAccess(store), key, api.ChatBound{},
-		Filter{}, nil,
-		20)
+	chat, err := store.Messages(ctx, everyAccess(store), key, 0, Filter{},
+		nil, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
 	latest, err := store.LatestMessages(ctx, everyAccess(store), key,
-		api.ChatBound{}, false, 20)
+		0, Filter{}, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	overview, err := store.Overview(ctx, everyAccess(store), general, false, 20)
+	overview, err := store.Overview(ctx, everyAccess(store), general, Filter{},
+		20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -681,5 +682,84 @@ func TestPostedRevisionOfAMissingMessageIsNotFound(t *testing.T) {
 		Key{Workspace: workspaceID(t, store, "general"), ID: 2}, 0)
 	if !errors.Is(err, ErrPostNotFound) {
 		t.Fatalf("e2 gave %v", err)
+	}
+}
+
+// The revision a read of changes after a time starts after is the last
+// change in the workspace made before that time, as the feed holds the
+// changes, whatever the other workspace changed between them, and when
+// several changes share a time.
+func TestLastRevisionBeforeIsTheLastChangeBeforeATime(t *testing.T) {
+	store := openTestStore(t)
+	writer := newForestWriter(t, store, rand.New(rand.NewSource(1)))
+	for range 300 {
+		writer.write()
+	}
+	// Three revisions share each minute, so the times follow the
+	// revisions as the clock gives them, ties included.
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	at := func(revision int64) time.Time {
+		return start.Add(time.Duration(revision/3) * time.Minute)
+	}
+	for _, table := range []string{"posts", "post_messages"} {
+		rows, err := store.db.Query(`SELECT rowid, revision FROM ` + table)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rowids, revisions []int64
+		for rows.Next() {
+			var rowid, revision int64
+			if err := rows.Scan(&rowid, &revision); err != nil {
+				t.Fatal(err)
+			}
+			rowids = append(rowids, rowid)
+			revisions = append(revisions, revision)
+		}
+		rows.Close()
+		for i, rowid := range rowids {
+			if _, err := store.db.Exec(`UPDATE `+table+
+				` SET modified_utc = ? WHERE rowid = ?`,
+				formatTime(at(revisions[i])), rowid); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	general := workspaceID(t, store, "general")
+	var changed []int64
+	rows, err := store.db.Query(`
+		SELECT revision FROM posts WHERE workspace_id = ?1
+		UNION ALL
+		SELECT revision FROM post_messages WHERE workspace_id = ?1`,
+		general)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var revision int64
+		if err := rows.Scan(&revision); err != nil {
+			t.Fatal(err)
+		}
+		changed = append(changed, revision)
+	}
+	rows.Close()
+
+	latest := latestRevision(t, store)
+	for revision := int64(0); revision <= latest+3; revision++ {
+		for _, when := range []time.Time{at(revision),
+			at(revision).Add(30 * time.Second)} {
+			want := int64(0)
+			for _, other := range changed {
+				if at(other).Before(when) {
+					want = max(want, other)
+				}
+			}
+			got, err := store.LastRevisionBefore(context.Background(),
+				everyAccess(store), general, when)
+			if err != nil || got != want {
+				t.Fatalf("the last revision before %v = %d, %v, want %d",
+					when, got, err, want)
+			}
+		}
 	}
 }
