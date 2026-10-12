@@ -30,12 +30,11 @@ const usage = `{program} - a client for workstream: shared workspaces of posts
 Usage:
   {program} add <subject> --project <p> [--body <b>]
          [--meta <key>=<value>]... [--parent <ref>] [--supersedes <ref>]...
-         [--link <name>=<ref>]... [--private] [--no-recent]
-         [--workspace <name>]
+         [--link <name>=<ref>]... [--private] [--workspace <name>]
   {program} edit <ref> [<subject>] [--project <p>] [--body <b>]
          [--meta <key>=<value>]... [--parent <ref>|""]
          [--supersedes <ref>]... [--link <name>=<ref>]...
-         [--unlink <name>[=<ref>]]... [--private|--public] [--no-recent]
+         [--unlink <name>[=<ref>]]... [--private|--public]
   {program} delete <ref>
   {program} post <ref>|<ref>-m<n>
   {program} tree <ref> [--limit 30] [--include-superseded]
@@ -102,10 +101,7 @@ Editing and deleting:
   '{program} edit' changes the project, subject, body, metadata and
   links. --body "" clears the body. Giving a metadata key no value
   removes it, as in --meta jira= or --jira "". The project can change
-  but not be removed. A post's id, times and origin cannot change. add
-  and edit end by listing the 5 most recently changed other posts in the
-  workspace, so you see what others are doing. --no-recent leaves the
-  listing out.
+  but not be removed. A post's id, times and origin cannot change.
 
   '{program} delete <ref>' deletes a post. Its subject, body and
   metadata are removed for good. Its id, project, links, origin and chat

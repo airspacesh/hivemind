@@ -156,35 +156,6 @@ func (c *client) search(t target, query url.Values) (api.MatchPage, error) {
 	return page, err
 }
 
-const recentAfterChangeCount = 5
-
-// printRecentAfterChange lists the most recently changed posts in a
-// workspace other than the one just changed. That post is dropped after
-// the fetch rather than skipped in the query, because another agent's
-// write can land in between and take the top slot.
-func (c *client) printRecentAfterChange(t target, changed api.Ref) error {
-	query := url.Values{}
-	query.Set("limit", fmt.Sprint(recentAfterChangeCount+1))
-	page, err := c.search(t, query)
-	if err != nil {
-		return err
-	}
-
-	var others []api.Match
-	for _, m := range page.Matches {
-		if m.Post.Ref != changed && len(others) < recentAfterChangeCount {
-			others = append(others, m)
-		}
-	}
-	if len(others) == 0 {
-		return nil
-	}
-	fmt.Println()
-	fmt.Println("Other recent posts:")
-	printMatches(others)
-	return nil
-}
-
 func shorthandFlags() []string {
 	flags := make([]string, len(shorthandKeys))
 	for i, key := range shorthandKeys {
@@ -341,7 +312,7 @@ func cmdAdd(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
 		strs: []string{"--project", "--body", "--parent", "--workspace",
 			"--request-id"},
-		bools: []string{"--no-recent", "--private"},
+		bools: []string{"--private"},
 		repeat: append([]string{"--meta", "--supersedes", "--link"},
 			shorthandFlags()...),
 	})
@@ -352,7 +323,7 @@ func cmdAdd(c *client, args []string) error {
 		return usageError("add <subject> --project <p> " +
 			"[--body <b>] [--meta <key>=<value>]... [--parent <ref>] " +
 			"[--supersedes <ref>]... [--link <name>=<ref>]... [--private] " +
-			"[--no-recent] [--workspace <name>]")
+			"[--workspace <name>]")
 	}
 	metadata, err := collectMetadata(p)
 	if err != nil {
@@ -410,20 +381,13 @@ func cmdAdd(c *client, args []string) error {
 		return fmt.Errorf("the post was added, but listing projects "+
 			"failed: %w", err)
 	}
-	if p.bools["--no-recent"] {
-		return nil
-	}
-	if err := c.printRecentAfterChange(t, post.Ref); err != nil {
-		return fmt.Errorf("the post was added, but listing recent "+
-			"posts failed: %w", err)
-	}
 	return nil
 }
 
 func cmdEdit(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
 		strs:  []string{"--project", "--subject", "--body", "--parent"},
-		bools: []string{"--no-recent", "--private", "--public"},
+		bools: []string{"--private", "--public"},
 		repeat: append(
 			[]string{"--meta", "--supersedes", "--link", "--unlink"},
 			shorthandFlags()...),
@@ -436,7 +400,7 @@ func cmdEdit(c *client, args []string) error {
 			"[--body <b>] [--meta <key>=<value>]... " +
 			"[--parent <ref>|\"\"] [--supersedes <ref>]... " +
 			"[--link <name>=<ref>]... [--unlink <name>[=<ref>]]... " +
-			"[--private|--public] [--no-recent]")
+			"[--private|--public]")
 	}
 	ref, err := api.ParseRef(p.pos[0])
 	if err != nil {
@@ -510,13 +474,6 @@ func cmdEdit(c *client, args []string) error {
 	}
 	fmt.Printf("Edited post [%s].\n", post.Ref)
 	printWhoCanRead(post, request.Private != nil)
-	if p.bools["--no-recent"] {
-		return nil
-	}
-	if err := c.printRecentAfterChange(t, post.Ref); err != nil {
-		return fmt.Errorf("the post was edited, but listing recent "+
-			"posts failed: %w", err)
-	}
 	return nil
 }
 

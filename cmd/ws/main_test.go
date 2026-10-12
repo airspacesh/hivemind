@@ -377,7 +377,7 @@ func TestAddTakesItsParentsWorkspace(t *testing.T) {
 		"server: %s\n    prefix: e\n  personal:\n    server: %s\n    "+
 		"prefix: p\n", server.URL, server.URL), 0o600)
 	got := ws(t, config, "add", "Answer", "--project", "pond",
-		"--parent", "p3", "--no-recent")
+		"--parent", "p3")
 	if !got.ok || !strings.Contains(got.stdout, "Added post [p4].") {
 		t.Fatal(got)
 	}

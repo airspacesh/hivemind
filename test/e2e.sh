@@ -207,23 +207,21 @@ check_equal "the project filter ignores ASCII case" "e1" \
     "$(ws search --project duck-pond --id-only)"
 
 # Edits.
-ws edit e3 --project nest --no-recent >/dev/null
+ws edit e3 --project nest >/dev/null
 check_equal "a moved post is found under its new project" "e3" \
     "$(ws search --project nest --id-only)"
 check "post shows the project" "Project: Duck-Pond" "$(ws post e1)"
-ws edit e2 --jira "" --no-recent >/dev/null
+ws edit e2 --jira "" >/dev/null
 check_equal "an empty value removes the metadata" "" \
     "$(ws search --key jira --id-only)"
 check "the project can change but not be removed" "not removed" \
     "$(ws edit e1 --project "" 2>&1 || true)"
-ws edit e1 --body "The Long Form Detail" --no-recent >/dev/null
+ws edit e1 --body "The Long Form Detail" >/dev/null
 check "post shows the body" "The Long Form Detail" "$(ws post e1)"
 check "a listing hides the body" "0" \
     "$(ws search Stock | grep -c 'Long Form Detail' || true)"
-after_add="$(ws add "Fourth duck" --project pond)"
-check_equal "a change lists the other recent posts" "e1
-e2
-e3" "$(echo "$after_add" | sed -n 's/^\[\(e[0-9]*\)\].*/\1/p')"
+check_equal "an add prints only what it added" "Added post [e4]." \
+    "$(ws add "Fourth duck" --project pond)"
 
 # Projects.
 check "add needs a project" "add needs --project" \
@@ -233,16 +231,16 @@ check "the project is not metadata" "project is not a metadata key" \
         2>&1 || true)"
 check "the first post in a project is noticed" \
     'first post in project "lake-shore"' \
-    "$(ws add "Shore duck" --project lake-shore --no-recent)"
+    "$(ws add "Shore duck" --project lake-shore)"
 check "list-projects counts a project's recent posts" "1 post" \
     "$(ws list-projects | grep lake-shore)"
 
 # Links: one parent, supersession hides the older post, no loops.
-topic="$(ws add "Topic" --project links --no-recent | added)"
+topic="$(ws add "Topic" --project links | added)"
 old_note="$(ws add "Old finding" --project links --parent "$topic" \
-    --no-recent | added)"
+    | added)"
 fix_a="$(ws add "Corrected finding" --project links \
-    --supersedes "$old_note" --link "see=$topic" --no-recent | added)"
+    --supersedes "$old_note" --link "see=$topic" | added)"
 check "the older post names its successor" "Superseded by $fix_a" \
     "$(ws post "$old_note")"
 check "the target shows who links to it" "$fix_a see this post" \
@@ -251,26 +249,26 @@ check_equal "a superseded post is hidden by default" "" \
     "$(ws search --project links --subject 'Old finding' --id-only)"
 check "a parent loop is refused" "loop" \
     "$(ws edit "$topic" --parent "$old_note" 2>&1 || true)"
-ws edit "$fix_a" --unlink see --no-recent >/dev/null
+ws edit "$fix_a" --unlink see >/dev/null
 check_equal "unlinking by name removes the link" "" \
     "$(ws post "$topic" | grep 'see this post' || true)"
 
 # Views and tree cuts.
-root="$(ws add "Count the ducklings" --project views --no-recent |
+root="$(ws add "Count the ducklings" --project views |
     added)"
 pond_a="$(ws add "Pond A counted" --project views --parent "$root" \
-    --no-recent | added)"
+    | added)"
 recount="$(ws add "Recount needed" --project views \
-    --parent "$pond_a" --no-recent | added)"
+    --parent "$pond_a" | added)"
 for index in 1 2 3; do
     ws add "Recount $index" --project views --parent "$recount" \
-        --no-recent >/dev/null
+        >/dev/null
 done
 pond_1="$(ws add "Pond 1" --project views --parent "$root" \
-    --no-recent | added)"
+    | added)"
 for index in 2 3; do
     ws add "Pond $index" --project views --parent "$root" \
-        --no-recent >/dev/null
+        >/dev/null
 done
 pond_n="${pond_1#e}"
 check_equal "recent shows the newest posts with their paths" \
@@ -324,7 +322,7 @@ check_equal "times on one day show the clock alone" "" \
 # Two workspaces on one server count their posts apart, and an id picks
 # its workspace.
 private="$(ws add "Private PROTECTEDMARK" --project mine \
-    --workspace personal --link "see=$root" --no-recent | added)"
+    --workspace personal --link "see=$root" | added)"
 check_equal "the second workspace counts from 1" "p1" "$private"
 check "an id picks its workspace" "Private PROTECTEDMARK" \
     "$(ws post p1)"
@@ -334,7 +332,7 @@ check_equal "a workspace lists only its own posts" "p1" \
 # A second server: its ids resolve by asking the servers in turn, and a
 # link cannot reach across.
 remote="$(ws add "Remote post" --project remote --workspace remote \
-    --no-recent | added)"
+    | added)"
 check_equal "the second server's workspace has its own prefix" "r1" \
     "$remote"
 check "an id on the second server resolves" "Remote post" \
@@ -355,9 +353,9 @@ check "a parent cannot cross workspaces" \
     "$(ws add "Protected child" --project mine --workspace personal \
         --parent "$root" 2>&1 || true)"
 ws add "Protected see PROTECTEDMARK" --project mine \
-    --workspace personal --link "see=$root" --no-recent >/dev/null # p2
+    --workspace personal --link "see=$root" >/dev/null # p2
 check "add takes its parent's workspace" "Added post [p3]." \
-    "$(ws add "Protected child" --project mine --parent p2 --no-recent)"
+    "$(ws add "Protected child" --project mine --parent p2)"
 curl -fsS -X POST -H "Workstream-API-Version: $api_version" \
     -H "Authorization: Bearer $test_secret" \
     --data "{\"subject\":\"Open linking protected\",\"project\":\"views\",\"origin\":{},\"links\":[{\"name\":\"see\",\"ref\":\"p1\"}]}" \
@@ -381,7 +379,7 @@ check_equal "a tree holds no protected post" "" \
     "$(ws tree "$root" | grep -E '\[p[0-9]+\]' || true)"
 
 # Chat.
-chat="$(ws add "Chat thread" --project chat --no-recent | added)"
+chat="$(ws add "Chat thread" --project chat | added)"
 check_equal "a send prints only the message id" "Sent [$chat-m1]." \
     "$(ws chat send "$chat" "First QUESTIONMARK")"
 ws chat send "$chat" "Second" >/dev/null
@@ -426,7 +424,7 @@ check_equal "the overview lists the post with the newest message last" \
 # Read to 1, a peer sends 2, you send 3 with --after at 1. The send shows
 # the peer's message and yours, and a wait from its cursor waits for
 # the next message rather than returning yours.
-race="$(ws add "Cursor race" --project chat --no-recent | added)"
+race="$(ws add "Cursor race" --project chat | added)"
 ws chat send "$race" "Read first" >/dev/null
 ws chat send "$race" "From a peer" >/dev/null
 check_equal "a send with --after shows what others sent, then yours" \
@@ -498,7 +496,7 @@ check "an edit of another user's post names its owner and the next step" \
 check "a link alone is refused too" "only heron can edit or delete it" \
     "$(ws edit "$heron" --link "see=$chat" 2>&1 || true)"
 reply="$(ws add "Reply under heron" --project owners --parent "$heron" \
-    --no-recent | added)"
+    | added)"
 check "anyone can add under another user's post" "[$reply]" \
     "$(ws tree "$heron")"
 check_equal "anyone can chat on another user's post" "Sent [$heron-m1]." \
@@ -559,13 +557,13 @@ read_as_heron() {
 before_private="$(ws wait --after @0 --include-mine --timeout 1s |
     cursor_of)"
 draft_added="$(ws add "Private draft" --project owners --body "Draft text" \
-    --private --no-recent)"
+    --private)"
 draft="$(echo "$draft_added" | added)"
 check_equal "add --private says who alone can read the post" \
     "Added post [$draft].
 Only $(id -un) can read it." "$draft_added"
 draft_child="$(ws add "Draft detail" --project owners --parent "$draft" \
-    --no-recent)"
+   )"
 check "a post under a private post is private too" \
     "Only $(id -un) can read it, as a post above it is private." \
     "$draft_child"
@@ -595,7 +593,7 @@ check_equal "another user's wait leaves out private posts" "" \
         grep -o 'Private draft' || true)"
 check_equal "edit --public shows the post to everyone" \
     "Edited post [$draft].
-Everyone can read it." "$(ws edit "$draft" --public --no-recent)"
+Everyone can read it." "$(ws edit "$draft" --public)"
 check "another user reads a post made public, and what is under it" \
     '"subject":"Draft detail"' "$(read_as_heron "posts/$detail")"
 looks_good="$(curl -fsS -X POST -H "Workstream-API-Version: $api_version" \
@@ -610,20 +608,18 @@ curl -fsS -X DELETE -H "Workstream-API-Version: $api_version" \
     "$main_url/api/posts/$draft/messages/$looks_good" >/dev/null
 check_equal "a post whose other messages are deleted can be made private" \
     "Edited post [$draft].
-Only $(id -un) can read it." "$(ws edit "$draft" --private --no-recent)"
+Only $(id -un) can read it." "$(ws edit "$draft" --private)"
 check "the other user then loses the deleted message too" \
     '"code":"post_not_found"' \
     "$(read_as_heron "posts/$draft/messages/$looks_good")"
-ws edit "$draft" --public --no-recent >/dev/null
+ws edit "$draft" --public >/dev/null
 
 # A delete removes a post's text and metadata, or a message's text, and
 # keeps its place.
 gadwall="$(ws add "Gadwall nest" --project owners --body "Code 4417" \
-    --jira QUACK-9 --parent "$reply" --no-recent | added)"
-egg="$(ws add "Eggs counted" --project owners --parent "$gadwall" \
-    --no-recent | added)"
-empty="$(ws add "Empty nest" --project owners --parent "$reply" \
-    --no-recent | added)"
+    --jira QUACK-9 --parent "$reply" | added)"
+egg="$(ws add "Eggs counted" --project owners --parent "$gadwall" | added)"
+empty="$(ws add "Empty nest" --project owners --parent "$reply" | added)"
 ws delete "$empty" >/dev/null
 ws chat send "$gadwall" "Before" >/dev/null
 ws chat send "$gadwall" "The code is 4417" >/dev/null
@@ -733,7 +729,7 @@ $deleted_message" \
     "$(ws delete "$gadwall" && ws chat delete "$gadwall-m2")"
 check "deleting again changes nothing" "No matching changes" \
     "$(ws wait --after "$after_delete" --include-mine --timeout 1s)"
-ws delete "$(ws add "Ghost" --project ghosts --no-recent | added)" \
+ws delete "$(ws add "Ghost" --project ghosts | added)" \
     >/dev/null
 check_equal "list-projects leaves out a project whose posts are deleted" \
     "" "$(ws list-projects | grep ghosts || true)"
@@ -770,7 +766,7 @@ if [[ ! -s "$test_dir/firehose.out" ]]; then
     exit 1
 fi
 ws chat send "$chat" "Hosed" >/dev/null
-ws add "Hosed post" --project chat --no-recent >/dev/null
+ws add "Hosed post" --project chat >/dev/null
 wait "$firehose_pid"
 firehose_output="$(cat -- "$test_dir/firehose.out")"
 check "a firehose prints messages as they arrive" "[$chat-m6]" \
@@ -789,7 +785,7 @@ check_equal "a wait from a listing's cursor shows only what came after" \
     "$(echo "$since_listing" | grep '^\[' | untimed)"
 last_read="$(ws chat read "$chat" --after "$chat-m6" | tail -1 |
     sed 's/^\[\([a-z0-9-]*\)\].*/\1/')"
-written="$(ws add "Written" --project chat --no-recent | added)"
+written="$(ws add "Written" --project chat | added)"
 peer chat send "$chat" "After the write" >/dev/null
 check_equal "a wait from a chat read's last message shows what came after" \
     "[$written] $(id -un): Written
@@ -813,7 +809,7 @@ check_equal "a wait from a message id shows exactly what came after" \
 [$written-m1] $(id -un) in $written: In another chat" \
     "$(ws wait --after "$sent" --include-mine --timeout 1s |
         grep '^\[' | untimed)"
-waited="$(ws add "Waited post" --project chat --no-recent | added)"
+waited="$(ws add "Waited post" --project chat | added)"
 peer chat send "$chat" "After the post" >/dev/null
 peer edit "$waited" --subject "Waited post, edited" >/dev/null
 check_equal "a wait from an edited post's id shows what came after it was added" \
@@ -831,7 +827,7 @@ check "a wait refuses an id from another workspace than its own" \
 # A wait leaves out the changes of its own session, and wakes for
 # another session of the same user. Its cursor passes what it left out.
 start="$(lead wait --timeout 1ms | cursor_of)"
-own="$(lead add "Own changes" --project own --no-recent | added)"
+own="$(lead add "Own changes" --project own | added)"
 lead chat send "$own" "Lead message" >/dev/null
 mine="$(lead wait --after "$start" --timeout 1s)"
 check "a wait sleeps through your own session's changes" \
@@ -886,7 +882,7 @@ check "a chat wait with --include-mine shows your own messages" \
 
 # The server log keeps no client text, and records each issued id.
 ws add "Subject OLDSUBJECTMARK" --body "Body OLDBODYMARK" \
-    --project pond --no-recent >/dev/null
+    --project pond >/dev/null
 ws search SEARCHMARK >/dev/null
 check_status "an unknown field is refused" "400" \
     -X POST -H "Workstream-API-Version: $api_version" \
@@ -910,7 +906,7 @@ workspaces:
 EOF
 forum_post="$(cd "$test_dir/private-project" &&
     CLAUDE_CODE_SESSION_ID=private-session-id \
-        forum add "Forum question" --project chat --no-recent | added)"
+        forum add "Forum question" --project chat | added)"
 check_equal "forum records the user alone" \
     "\"origin\":{\"user\":\"$(id -un)\"}" \
     "$(curl -fsS -H "Workstream-API-Version: $api_version" \
@@ -947,11 +943,11 @@ check "an unreachable server is named" "request to http://127.0.0.1:1 failed" \
 # A write repeated under its request id makes one post or message, and
 # an id used for other content is refused.
 once="$(ws add "Added once" --project repeats --request-id e2e-post \
-    --no-recent | added)"
+    | added)"
 check "an add repeated under its request id gives the same post" \
     "Added post [$once]." \
     "$(ws add "Added once" --project repeats --request-id e2e-post \
-        --no-recent)"
+       )"
 for _ in 1 2; do
     check_equal "a send repeated under its request id gives one message" \
         "Sent [$once-m1]." \
@@ -966,7 +962,7 @@ check "a request id used for other text is refused" \
 # Subjects: a headline of 72 characters, then an optional kind suffix.
 headline="$(printf 'h%.0s' {1..72})"
 check "a 72-character headline may end with a kind" "Added post" \
-    "$(ws add "$headline (answered)" --project limits --no-recent)"
+    "$(ws add "$headline (answered)" --project limits)"
 check "a headline over 72 characters is refused" "subject is too long: 73" \
     "$(ws add "${headline}h (answered)" --project limits 2>&1 || true)"
 check "a suffix that is not one word counts toward the headline" \
