@@ -488,10 +488,7 @@ func Open(
 	if err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("opening database: %w", err)
-	}
+	db := sql.OpenDB(cachingConnector{dsn})
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	defer func() {
@@ -527,10 +524,7 @@ func Open(
 	if err != nil {
 		return nil, err
 	}
-	reads, err := sql.Open("sqlite", readDSN)
-	if err != nil {
-		return nil, fmt.Errorf("opening database for reads: %w", err)
-	}
+	reads := sql.OpenDB(cachingConnector{readDSN})
 	reads.SetMaxOpenConns(maxReadConnections)
 	reads.SetMaxIdleConns(maxReadConnections)
 	stream := &Store{
