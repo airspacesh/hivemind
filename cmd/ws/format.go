@@ -285,9 +285,13 @@ func printPostDetail(d api.PostDetail) {
 			programName, post.Ref)
 	}
 	if d.Messages > 0 {
+		noun := "messages"
+		if d.Messages == 1 {
+			noun = "message"
+		}
 		newest := api.MessageRef{Post: post.Ref, Number: d.LastMessage}
-		fmt.Printf("Chat: %d messages, newest %s (see '%s chat recent %s')\n",
-			d.Messages, newest, programName, post.Ref)
+		fmt.Printf("Chat: %d %s, newest %s (see '%s chat recent %s')\n",
+			d.Messages, noun, newest, programName, post.Ref)
 	}
 	if post.Body != "" {
 		fmt.Println()

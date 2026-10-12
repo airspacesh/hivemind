@@ -482,6 +482,13 @@ check "a wait with no --after waits from the newest message" \
     "$(ws chat wait "$chat" --timeout 1s)"
 check "a post shows its chat" "Chat: 4 messages, newest $chat-m4" \
     "$(ws post "$chat")"
+lone="$(ws add "Lone message" --project lone | added)"
+ws chat send "$lone" "Only one" >/dev/null
+check "a post counts one message in the singular" \
+    "Chat: 1 message, newest $lone-m1" "$(ws post "$lone")"
+ws chat delete "$lone-m1" >/dev/null
+check_equal "a post whose messages are all deleted shows no chat" "" \
+    "$(ws post "$lone" | grep '^Chat:' || true)"
 check_equal "recent counts the messages posted since its oldest match" \
     "[$chat] $(id -un): Chat thread (1 new message)" \
     "$(ws recent --project chat -n 1 | untimed | head -1)"
