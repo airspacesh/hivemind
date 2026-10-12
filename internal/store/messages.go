@@ -77,7 +77,7 @@ func (s *Store) MessageDetail(
 		return api.MessageDetail{}, err
 	}
 	detail := api.MessageDetail{Message: message}
-	if detail.Post, err = v.postRef(ctx, post); err != nil {
+	if detail.Post, err = v.getPost(ctx, post); err != nil {
 		return api.MessageDetail{}, err
 	}
 	if detail.Ancestors, err = v.ancestors(ctx, post); err != nil {
@@ -612,7 +612,7 @@ func (s *Store) Overview(
 	chatOf := map[api.Ref]int{}
 	for _, message := range newestFirst {
 		if _, ok := chatOf[message.Post]; !ok {
-			described, err := v.postRef(ctx, s.mustKey(message.Post))
+			described, err := v.getPost(ctx, s.mustKey(message.Post))
 			if err != nil {
 				return api.ChatOverview{}, err
 			}

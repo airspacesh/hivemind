@@ -428,8 +428,9 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 	}
 	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		reply(w, http.StatusOK, api.ChatOverview{Chats: []api.PostChat{
-			{Post: api.PostRef{Ref: api.Ref{Prefix: "e", ID: 1},
-				Subject: "Why?"},
+			{Post: api.Post{Ref: api.Ref{Prefix: "e", ID: 1},
+				Subject: "Why?", Created: when, Modified: when,
+				Origin: api.Origin{User: "heron"}},
 				Messages: []api.Message{message(7), message(8)},
 				Earlier:  6},
 		}, Revision: 31})
@@ -437,7 +438,7 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
 	got := ws(t, config, "chat", "recent")
-	want := "[e1] Why?\n" +
+	want := "[e1] 05:20 heron: Why?\n" +
 		"  ... 6 earlier (ws chat read e1 --after e1-m0)\n" +
 		"  [e1-m7] 05:20 duck: quack\n  [e1-m8] 05:20 duck: quack\n" +
 		"Cursor: @31\n"

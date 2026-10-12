@@ -241,7 +241,7 @@ old_note="$(ws add "Old finding" --project links --parent "$topic" \
     | added)"
 fix_a="$(ws add "Corrected finding" --project links \
     --supersedes "$old_note" --link "see=$topic" | added)"
-check "the older post names its successor" "Superseded by $fix_a" \
+check "the older post names its successor" "(superseded by $fix_a)" \
     "$(ws post "$old_note")"
 check "the target shows who links to it" "$fix_a see this post" \
     "$(ws post "$topic")"
@@ -421,7 +421,8 @@ ws chat edit "$chat-m1" "First, edited" >/dev/null
 check "an edit stays in place" "[$chat-m1]" \
     "$(ws chat read "$chat" --after "$chat-m0" --limit 1)"
 message_detail="$(ws post "$chat-m1")"
-check_equal "post shows a message under its post's line" "[$chat] Chat thread
+check_equal "post shows a message under its post's line" \
+    "[$chat] $(id -un): Chat thread
   [$chat-m1] $(id -un) (edited): First, edited" \
     "$(echo "$message_detail" | head -2 |
         sed -E 's/ [0-9]{2}:[0-9]{2}( |$)/\1/')"
@@ -432,7 +433,8 @@ check_equal "no read returns the old text" "" \
     "$(ws chat read "$chat" | grep QUESTIONMARK || true)"
 overview="$(ws chat recent)"
 check_equal "the overview lists the post with the newest message last" \
-    "[$chat] Chat thread" "$(echo "$overview" | grep '^\[' | tail -1)"
+    "[$chat] $(id -un): Chat thread" \
+    "$(echo "$overview" | grep '^\[' | tail -1 | sed -E 's/ [0-9]{2}:[0-9]{2}//')"
 # Read to 1, a peer sends 2, you send 3 with --after at 1. The send shows
 # the peer's message and yours, and a wait from its cursor waits for
 # the next message rather than returning yours.
@@ -586,8 +588,8 @@ check_equal "a listing marks private posts" \
     "$(ws recent --project owners --subject 'Draft*' | untimed |
         grep -v '^Cursor: ')"
 check_equal "a tree marks private posts" \
-    "[$draft] [private]: Private draft
-  [$detail] [private]: Draft detail" "$(ws tree "$draft" | untimed)"
+    "[$draft] $(id -un) [private]: Private draft
+  [$detail] $(id -un) [private]: Draft detail" "$(ws tree "$draft" | untimed)"
 check "post says who alone can read a private post" \
     "Private: only $(id -un) can read it" "$(ws post "$draft")"
 check "a wait marks private posts" "$(id -un) [private]: Private draft" \
@@ -646,8 +648,8 @@ check_equal "you can delete your own message" "Deleted [$gadwall-m2]." \
     "$deleted_message"
 ws chat delete "$gadwall-m4" >/dev/null
 gadwall_post="$(ws post "$gadwall")"
-check "a deleted post shows as deleted" "[$gadwall] (deleted)" \
-    "$gadwall_post"
+check "a deleted post shows as deleted" "[$gadwall] $(id -un) (deleted)" \
+    "$(echo "$gadwall_post" | untimed)"
 check "post shows a deleted message as deleted" \
     "  [$gadwall-m2] $(id -un) (deleted)" \
     "$(ws post "$gadwall-m2" | sed -E 's/ [0-9]{2}:[0-9]{2} / /')"
@@ -661,18 +663,19 @@ check "a child's path shows its deleted parent" "> $gadwall (deleted)" \
     "$(ws post "$egg")"
 untimed() { sed -E 's/\] ([0-9/]+ )?[0-9]{2}:[0-9]{2}:? /] /'; }
 check_equal "a tree keeps a deleted post above the posts under it" \
-    "[$reply] Reply under heron
-  [$gadwall] (deleted)
-    [$egg] Eggs counted" "$(ws tree "$reply" | untimed | grep -v '^Path:')"
+    "[$reply] $(id -un): Reply under heron
+  [$gadwall] $(id -un) (deleted)
+    [$egg] $(id -un): Eggs counted" \
+    "$(ws tree "$reply" | untimed | grep -v '^Path:')"
 check_equal "a tree with deleted posts shows them" \
-    "[$reply] Reply under heron
-  [$gadwall] (deleted)
-    [$egg] Eggs counted
-  [$empty] (deleted)" \
+    "[$reply] $(id -un): Reply under heron
+  [$gadwall] $(id -un) (deleted)
+    [$egg] $(id -un): Eggs counted
+  [$empty] $(id -un) (deleted)" \
     "$(ws tree "$reply" --include-deleted | untimed | grep -v '^Path:')"
 check_equal "a tree of a deleted post shows it and the posts under it" \
-    "[$gadwall] (deleted)
-  [$egg] Eggs counted" \
+    "[$gadwall] $(id -un) (deleted)
+  [$egg] $(id -un): Eggs counted" \
     "$(ws tree "$gadwall" | untimed | grep -v '^Path:')"
 owners="$(ws recent --project owners --include-chat | untimed)"
 check "a listing leaves out a deleted post but not the posts under it" \
@@ -717,7 +720,7 @@ Cursor: $gadwall-m4" \
 check "post counts the messages that are not deleted" \
     "Chat: 2 messages, newest $gadwall-m3" "$gadwall_post"
 check "the chat overview names a deleted post as deleted" \
-    "[$gadwall] (deleted)" "$(ws chat recent)"
+    "[$gadwall] $(id -un) (deleted)" "$(ws chat recent | untimed)"
 check_equal "search no longer finds deleted text" "No matches." \
     "$(ws search 4417 | head -1)"
 deletes="$(ws wait --after "$before_delete" --include-mine --timeout 1s |

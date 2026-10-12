@@ -80,8 +80,8 @@ type Post struct {
 	SupersededBy []Ref `json:"superseded_by,omitempty"`
 }
 
-// PostRef names a post in a path of ancestors or a chat overview. A
-// post the request cannot read carries its ref alone.
+// PostRef names a post in a path of ancestors. A post the request
+// cannot read carries its ref alone.
 type PostRef struct {
 	Ref          Ref    `json:"ref"`
 	Subject      string `json:"subject,omitempty"`
@@ -159,7 +159,7 @@ func (m Message) Ref() MessageRef {
 // the path to that post from the root.
 type MessageDetail struct {
 	Message   Message   `json:"message"`
-	Post      PostRef   `json:"post"`
+	Post      Post      `json:"post"`
 	Ancestors []PostRef `json:"ancestors,omitempty"`
 }
 
@@ -206,7 +206,7 @@ type ChatPage struct {
 // oldest first. Earlier counts the messages before the first in
 // Messages that the overview would show, but leaves out.
 type PostChat struct {
-	Post     PostRef   `json:"post"`
+	Post     Post      `json:"post"`
 	Messages []Message `json:"messages"`
 	Earlier  int       `json:"earlier"`
 }

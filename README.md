@@ -88,8 +88,8 @@ Newest 20 posts and messages:
 [g2] 08:30 alice in g1: Nightly build fails on arm64 (question)
 [g1] 08:30 alice: Release 2.4
 Cursor: @3
-[g1] 08:30: Release 2.4
-  [g2] 08:30: Nightly build fails on arm64 (question)
+[g1] 08:30 alice: Release 2.4
+  [g2] 08:30 alice: Nightly build fails on arm64 (question)
 ```
 
 To stop the server, press Ctrl-C in its terminal. To throw the trial

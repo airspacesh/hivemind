@@ -142,10 +142,10 @@ func lineHead(
 // printPostLine prints a post on one line, with a time, its author, the
 // path to it, whether it is private, and a suffix such as a count.
 func printPostLine(
-	post api.Post, ancestors []api.PostRef, at time.Time, layout string,
-	suffix string,
+	post api.Post, ancestors []api.PostRef, at time.Time,
+	indent, layout, suffix string,
 ) {
-	fmt.Printf("%s%s%s%s%s\n",
+	fmt.Printf("%s%s%s%s%s%s\n", indent,
 		lineHead(post.Ref, at, layout, post.Origin.User, ancestors),
 		privateLabel(post.PrivateTo),
 		headedSubject(post.Subject, post.Deleted),
@@ -186,7 +186,7 @@ func printMatches(matches []api.Match) {
 			printMessage(*m.Message, pathTo(m.Ancestors, m.Post.Ref), m.At,
 				"", layout)
 		} else {
-			printPostLine(m.Post, m.Ancestors, m.At, layout,
+			printPostLine(m.Post, m.Ancestors, m.At, "", layout,
 				newMessagesLabel(m.NewMessages))
 		}
 	}
@@ -243,11 +243,8 @@ func printBacklinks(backlinks []api.Link) {
 
 func printPostDetail(d api.PostDetail) {
 	post := d.Post
-	fmt.Printf("[%s]%s %s\n", post.Ref, privateLabel(post.PrivateTo),
-		subjectLine(post.Subject, post.Deleted))
-	if len(post.SupersededBy) > 0 {
-		fmt.Println("Superseded by " + joinRefs(post.SupersededBy))
-	}
+	layout := timeLayout([]time.Time{post.Created, post.Modified})
+	printPostLine(post, nil, post.Modified, "", layout, "")
 	fmt.Println()
 	fmt.Println("Project: " + post.Project)
 	fmt.Println("Created: " + localTimeDetail(post.Created))
@@ -302,8 +299,9 @@ func printPostDetail(d api.PostDetail) {
 // when and where it was written.
 func printMessageDetail(d api.MessageDetail) {
 	m := d.Message
-	printChatHeader(d.Post)
-	printMessage(m, nil, m.Created, "  ", clockLayout)
+	layout := timeLayout([]time.Time{d.Post.Modified, m.Created})
+	printChatHeader(d.Post, layout)
+	printMessage(m, nil, m.Created, "  ", layout)
 	fmt.Println()
 	fmt.Println("Created: " + localTimeDetail(m.Created))
 	if m.Deleted {
@@ -339,11 +337,7 @@ func printTree(tree api.TreeResponse, root api.Ref) {
 	var printFrom func(post api.TreePost, depth int)
 	printFrom = func(post api.TreePost, depth int) {
 		indent := strings.Repeat("  ", depth)
-		fmt.Printf("%s[%s] %s%s%s%s\n", indent, post.Ref,
-			post.Modified.Local().Format(layout),
-			privateLabel(post.PrivateTo),
-			headedSubject(post.Subject, post.Deleted),
-			supersededLabel(post.SupersededBy))
+		printPostLine(post.Post, nil, post.Modified, indent, layout, "")
 		if post.MoreBelow > 0 {
 			fmt.Printf("%s  ... %d more below %s\n", indent, post.MoreBelow,
 				post.Ref)
@@ -480,10 +474,8 @@ func printChatPage(
 }
 
 // printChatHeader names the post a run of chat messages belongs to.
-func printChatHeader(post api.PostRef) {
-	fmt.Printf("[%s]%s %s%s\n", post.Ref, privateLabel(post.PrivateTo),
-		subjectLine(post.Subject, post.Deleted),
-		supersededLabel(post.SupersededBy))
+func printChatHeader(post api.Post, layout string) {
+	printPostLine(post, nil, post.Modified, "", layout, "")
 }
 
 // printOverview prints the newest messages across a workspace under
@@ -500,11 +492,12 @@ func printOverview(
 	}
 	var times []time.Time
 	for _, chat := range overview.Chats {
+		times = append(times, chat.Post.Modified)
 		times = append(times, messageTimes(chat.Messages)...)
 	}
 	layout := timeLayout(times)
 	for _, chat := range overview.Chats {
-		printChatHeader(chat.Post)
+		printChatHeader(chat.Post, layout)
 		from := chatCursor(chat.Post.Ref, 0)
 		if after != nil {
 			from = *after
@@ -585,7 +578,8 @@ func printChanges(changes []api.Change) {
 			printMessage(*change.Message, pathTo(post.Ancestors, post.Ref),
 				change.Message.Modified, "", layout)
 		} else {
-			printPostLine(post.Post, post.Ancestors, post.Modified, layout, "")
+			printPostLine(post.Post, post.Ancestors, post.Modified, "",
+				layout, "")
 		}
 	}
 }

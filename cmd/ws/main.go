@@ -186,8 +186,9 @@ Listings:
   --under <ref> keeps recent or search to a post and what is beneath
   it.
   '{program} tree <ref>' shows the path to a post, then its subtree, at
-  most --limit posts, marking where it was cut. A superseded post shows
-  only above the posts under it, unless --include-superseded shows it.
+  most --limit posts, marking where it was cut. Each post's line shows
+  who wrote it, as recent's do. A superseded post shows only above the
+  posts under it, unless --include-superseded shows it.
   '{program} list-projects' lists the --limit most recently active
   projects, each with the number of its posts created in the last 90
   days, and their share of the workspace's. When the limit leaves some
