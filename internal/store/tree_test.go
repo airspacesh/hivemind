@@ -113,7 +113,7 @@ func TestTreeHidesSupersededLeavesAndOrdersOldestFirst(t *testing.T) {
 	}
 }
 
-func TestTreeLiftsThePostsUnderADeletedPostIntoItsPlace(t *testing.T) {
+func TestTreeKeepsADeletedPostOnlyAboveLivePosts(t *testing.T) {
 	store := openTestStore(t)
 	root := mustAdd(t, store, "root", "", nil)
 	addChild(t, store, "first", root.Ref)
@@ -121,26 +121,31 @@ func TestTreeLiftsThePostsUnderADeletedPostIntoItsPlace(t *testing.T) {
 	addChild(t, store, "under gone", gone.Ref)
 	deeper := addChild(t, store, "deeper", gone.Ref)
 	addChild(t, store, "under deeper", deeper.Ref)
+	empty := addChild(t, store, "empty", gone.Ref)
 	addChild(t, store, "last", root.Ref)
-	mustDelete(t, store, gone.Ref)
-	mustDelete(t, store, deeper.Ref)
+	leaf := addChild(t, store, "leaf", root.Ref)
+	for _, ref := range []api.Ref{gone.Ref, deeper.Ref, empty.Ref,
+		leaf.Ref} {
+		mustDelete(t, store, ref)
+	}
 
 	if got := treeText(readTree(t, store, root.Ref, false, false, 30)); got !=
-		"root, first, under gone, under deeper, last" {
-		t.Fatalf("tree = %q, want the deleted posts left out", got)
+		"root, first, (deleted), under gone, (deleted), under deeper, last" {
+		t.Fatalf("tree = %q, want the deleted posts above live ones "+
+			"and no others", got)
 	}
 	if got := treeText(readTree(t, store, root.Ref, false, true, 30)); got !=
-		"root, first, (deleted), under gone, (deleted), under deeper, last" {
+		"root, first, (deleted), under gone, (deleted), under deeper, "+
+			"(deleted), last, (deleted)" {
 		t.Fatalf("tree with deleted = %q", got)
 	}
 	if got := treeText(readTree(t, store, root.Ref, false, false, 3)); got !=
-		"root (2 more under), first, under gone" {
-		t.Fatalf("cut tree = %q, want no count of the deleted posts", got)
+		"root (1 more under), first, (deleted) (3 more below)" {
+		t.Fatalf("cut tree = %q, want no count of the deleted leaves", got)
 	}
-	if got := treeText(readTree(t, store, gone.Ref, false, false, 30)); got !=
-		"(deleted), under gone, under deeper" {
-		t.Fatalf("tree of a deleted post = %q, want it and the posts "+
-			"under it", got)
+	if got := treeText(readTree(t, store, empty.Ref, false, false, 30)); got !=
+		"(deleted)" {
+		t.Fatalf("tree of a deleted leaf = %q, want it alone", got)
 	}
 }
 

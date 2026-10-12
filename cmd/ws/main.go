@@ -109,10 +109,11 @@ Editing and deleting:
   stay, and the posts under it stay in place. A message deleted with
   '{program} chat delete <ref>-m<n>' loses its text for good, and keeps
   its number and place. Deleting again changes nothing. A deleted post
-  or message cannot be edited. recent, search and tree leave deleted
-  posts and messages out, but not the posts under a deleted post or the
-  messages in its chat. '{program} post' and the chat commands show
-  them as (deleted), as do recent and tree with --include-deleted.
+  or message cannot be edited. recent and search leave deleted posts and
+  messages out, but not the posts under a deleted post or the messages
+  in its chat. tree shows a deleted post only above the posts under it.
+  '{program} post' and the chat commands show them as (deleted), as do
+  recent and tree with --include-deleted.
 
   Only the user who wrote a post or message can edit or delete it. To
   suggest a change to someone else's, send a message in its chat.
@@ -173,8 +174,9 @@ Listings:
   read at, like 'Cursor: @812345', which a wait takes. --under <ref>
   keeps recent or search to a post and what is beneath it.
   '{program} tree <ref>' shows the path to a post, then its subtree, at
-  most --limit posts, marking where it was cut. The posts under a
-  deleted post take its place, unless --include-deleted shows it.
+  most --limit posts, marking where it was cut. A deleted or superseded
+  post shows as context above the posts under it, and only then, unless
+  --include-deleted or --include-superseded shows it.
   '{program} list-projects' lists the --limit most recently active
   projects, each with the number of its posts created in the last 90
   days, and their share of the workspace's. When the limit leaves some

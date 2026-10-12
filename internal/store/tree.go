@@ -153,45 +153,23 @@ func (v view) readSubtree(ctx context.Context, root Key) (*treeNode, error) {
 	return nodes[root], nil
 }
 
-// liftDeleted replaces each deleted node under node with its children,
-// in its place, so the live posts under a deleted post stay in the tree.
-func liftDeleted(node *treeNode) {
-	var kept []*treeNode
-	for _, child := range node.children {
-		liftDeleted(child)
-		if child.deleted {
-			kept = append(kept, child.children...)
-		} else {
-			kept = append(kept, child)
-		}
-	}
-	node.children = kept
-}
-
-// pruneSuperseded drops each superseded node with no current node under
-// it, and sets every remaining node's size. It reports whether the node
-// holds a current post, itself included.
-func pruneSuperseded(node *treeNode) bool {
+// pruneHidden drops each node that hide picks out and that has no
+// shown node under it, and sets every remaining node's size. A hidden
+// node with a shown node under it stays, to give that node context. It
+// reports whether the node holds a shown node, itself included.
+func pruneHidden(node *treeNode, hide func(*treeNode) bool) bool {
 	node.size = 1
-	current := !node.superseded
+	shown := !hide(node)
 	var kept []*treeNode
 	for _, child := range node.children {
-		if pruneSuperseded(child) {
+		if pruneHidden(child, hide) {
 			kept = append(kept, child)
 			node.size += child.size
-			current = true
+			shown = true
 		}
 	}
 	node.children = kept
-	return current
-}
-
-func countSizes(node *treeNode) {
-	node.size = 1
-	for _, child := range node.children {
-		countSizes(child)
-		node.size += child.size
-	}
+	return shown
 }
 
 // showLevels marks up to limit nodes as shown, a level at a time, so
@@ -248,10 +226,9 @@ func treeCuts(node *treeNode) (moreBelow, moreUnder int) {
 
 // Tree returns up to limit posts of a post's subtree, filled level by
 // level, with where it was cut. A superseded post is left out unless
-// includeSuperseded is set or a current post is under it, which it then
-// gives context to. A deleted post is left out unless includeDeleted is
-// set, and the posts under it take its place. The requested post is
-// always included.
+// includeSuperseded is set, and a deleted post unless includeDeleted is
+// set, but either stays when a post the tree shows is under it, which
+// it then gives context to. The requested post is always included.
 func (s *Store) Tree(
 	ctx context.Context,
 	access Access,
@@ -278,14 +255,10 @@ func (s *Store) Tree(
 	if err != nil {
 		return api.TreeResponse{}, err
 	}
-	if !includeDeleted {
-		liftDeleted(root)
-	}
-	if includeSuperseded {
-		countSizes(root)
-	} else {
-		pruneSuperseded(root)
-	}
+	pruneHidden(root, func(node *treeNode) bool {
+		return (node.superseded && !includeSuperseded) ||
+			(node.deleted && !includeDeleted)
+	})
 	showLevels(root, limit)
 
 	response := api.TreeResponse{}

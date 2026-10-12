@@ -622,6 +622,9 @@ gadwall="$(ws add "Gadwall nest" --project owners --body "Code 4417" \
     --jira QUACK-9 --parent "$reply" --no-recent | added)"
 egg="$(ws add "Eggs counted" --project owners --parent "$gadwall" \
     --no-recent | added)"
+empty="$(ws add "Empty nest" --project owners --parent "$reply" \
+    --no-recent | added)"
+ws delete "$empty" >/dev/null
 ws chat send "$gadwall" "Before" >/dev/null
 ws chat send "$gadwall" "The code is 4417" >/dev/null
 ws chat send "$gadwall" "After" >/dev/null
@@ -647,13 +650,15 @@ check "a deleted post keeps its origin" "From: $(id -un)@" "$gadwall_post"
 check "a child's path shows its deleted parent" "> $gadwall (deleted)" \
     "$(ws post "$egg")"
 untimed() { sed -E 's/\] ([0-9/]+ )?[0-9]{2}:[0-9]{2}:? /] /'; }
-check_equal "a tree puts the posts under a deleted post in its place" \
+check_equal "a tree keeps a deleted post above the posts under it" \
     "[$reply] Reply under heron
-  [$egg] Eggs counted" "$(ws tree "$reply" | untimed | grep -v '^Path:')"
+  [$gadwall] (deleted)
+    [$egg] Eggs counted" "$(ws tree "$reply" | untimed | grep -v '^Path:')"
 check_equal "a tree with deleted posts shows them" \
     "[$reply] Reply under heron
   [$gadwall] (deleted)
-    [$egg] Eggs counted" \
+    [$egg] Eggs counted
+  [$empty] (deleted)" \
     "$(ws tree "$reply" --include-deleted | untimed | grep -v '^Path:')"
 check_equal "a tree of a deleted post shows it and the posts under it" \
     "[$gadwall] (deleted)

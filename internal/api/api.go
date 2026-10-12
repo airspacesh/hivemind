@@ -125,10 +125,8 @@ type TreePost struct {
 }
 
 // TreeResponse is a post's subtree with the path to it. Posts come
-// depth first, each post's children oldest first. Each post sits under
-// the nearest of its ancestors in Posts, which is its parent unless the
-// tree leaves its deleted parent out, and then the posts under the
-// deleted post take its place.
+// depth first, each post's children oldest first, and each post's
+// parent link places it in the tree.
 type TreeResponse struct {
 	Ancestors []PostRef  `json:"ancestors,omitempty"`
 	Posts     []TreePost `json:"posts"`

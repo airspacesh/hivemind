@@ -34,8 +34,8 @@ Use these words, and no others for the same things.
   no read state.
 - **delete**: remove a post's subject, body and metadata, or a message's
   text, and mark it deleted. The post or message keeps its id, place and
-  origin, and can no longer be edited. It drops out of listings and
-  trees, but stays readable by id.
+  origin, and can no longer be edited. It drops out of listings, stays
+  in a tree only above the posts under it, and stays readable by id.
 - **private post**: a post its owner made private, or one nested in
   it. Only that owner can read it. Everyone else gets post not found for
   it, as if it did not exist.

@@ -317,25 +317,20 @@ func printMessageDetail(d api.MessageDetail) {
 	}
 }
 
-// printTree prints a post's subtree, each post indented under the
-// nearest of its ancestors the tree holds, with the path to the post
-// above it and a marker wherever the tree was cut.
+// printTree prints a post's subtree, each post indented under its
+// parent, with the path to the post above it and a marker wherever the
+// tree was cut.
 func printTree(tree api.TreeResponse, root api.Ref) {
 	if len(tree.Ancestors) > 0 {
 		fmt.Println("Path: " + formatPath(tree.Ancestors))
-	}
-	inTree := map[api.Ref]bool{}
-	for _, post := range tree.Posts {
-		inTree[post.Ref] = true
 	}
 	children := map[api.Ref][]api.TreePost{}
 	var times []time.Time
 	for _, post := range tree.Posts {
 		times = append(times, post.Modified)
-		for i := len(post.Ancestors) - 1; i >= 0; i-- {
-			if above := post.Ancestors[i].Ref; inTree[above] {
-				children[above] = append(children[above], post)
-				break
+		for _, link := range post.Links {
+			if link.Name == api.ParentLink {
+				children[link.Ref] = append(children[link.Ref], post)
 			}
 		}
 	}
