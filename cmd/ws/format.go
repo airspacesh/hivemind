@@ -488,13 +488,14 @@ func printChatHeader(post api.PostRef) {
 
 // printOverview prints the newest messages across a workspace under
 // their posts, each chat's earlier ones since after counted with the
-// read that shows them, which repeats the flags readFlags holds.
+// read that shows them, which repeats the flags readFlags holds, or
+// empty when there are none.
 func printOverview(
-	overview api.ChatOverview, workspace string, after *api.Bound,
+	overview api.ChatOverview, empty string, after *api.Bound,
 	readFlags string,
 ) {
 	if len(overview.Chats) == 0 {
-		fmt.Printf("No messages in workspace %s yet.\n", workspace)
+		fmt.Println(empty)
 		return
 	}
 	var times []time.Time

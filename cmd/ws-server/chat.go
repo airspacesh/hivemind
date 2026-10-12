@@ -140,7 +140,8 @@ func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 	_, hasLatest := query["latest"]
 	if hasLatest {
 		for _, key := range slices.Sorted(maps.Keys(query)) {
-			if !latestQueryParameters[key] {
+			if !latestQueryParameters[key] &&
+				!messageConditionParameters[key] {
 				writeBadRequest(w, "latest takes no "+key)
 				return
 			}
@@ -202,10 +203,11 @@ func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, page)
 }
 
-// overview returns the newest messages across a workspace, grouped by
-// post.
+// overview returns the newest messages across a workspace that match
+// the query's conditions, grouped by post.
 func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
-	query, ok := parseQueryOf(w, r, nil, overviewQueryParameters)
+	query, ok := parseQueryOf(w, r, messageConditionParameters,
+		overviewQueryParameters)
 	if !ok {
 		return
 	}
@@ -228,7 +230,12 @@ func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	filter := store.Filter{IncludeDeleted: includeDeleted}
+	filter, err := conditionsFilter(query)
+	if err != nil {
+		writeBadRequest(w, err.Error())
+		return
+	}
+	filter.IncludeDeleted = includeDeleted
 	if _, ok := h.readBounds(w, r, access, query, api.Ref{},
 		&filter); !ok {
 		return

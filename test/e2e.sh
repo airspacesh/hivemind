@@ -406,6 +406,17 @@ check_equal "chat recent shows the newest, oldest first" "[$chat-m2]
 check_equal "chat recent says how to read what it left out" \
     "... 1 earlier (ws chat read $chat --after $chat-m0)" \
     "$(ws chat recent "$chat" --limit 2 | head -1)"
+check_equal "a chat read keeps to the messages its filters match" \
+    "[$chat-m2]
+Cursor: $chat-m3" "$(ws chat read "$chat" --content second |
+    sed -E 's/^(\[[a-z0-9-]*\]) .*/\1/')"
+check_equal "chat recent filters, and its hint repeats the filters" \
+    "... 1 earlier (ws chat read $chat --after $chat-m0 --no-content second)
+[$chat-m3]" "$(ws chat recent "$chat" --no-content second -n 1 |
+    sed -E 's/^(\[[a-z0-9-]*\]) .*/\1/')"
+check_equal "the chat overview keeps to the messages its filters match" \
+    "[$chat-m1]" "$(ws chat recent --content questionmark |
+    sed -n 's/^  \(\[[a-z0-9-]*\]\).*/\1/p')"
 ws chat edit "$chat-m1" "First, edited" >/dev/null
 check "an edit stays in place" "[$chat-m1]" \
     "$(ws chat read "$chat" --after "$chat-m0" --limit 1)"

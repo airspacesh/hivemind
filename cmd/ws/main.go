@@ -53,8 +53,10 @@ Usage:
   {program} chat send <ref> <message> [--after <bound>]
   {program} chat recent [<ref>|--workspace <name>] [--after <bound>]
          [--before <bound>] [--limit 20] [--include-deleted]
+         [--content <pattern>]... [--origin-user <pattern>]...
   {program} chat read <ref> [--after <bound>] [--before <bound>]
          [--limit 20] [--include-deleted]
+         [--content <pattern>]... [--origin-user <pattern>]...
   {program} chat wait <ref> [--after <bound>] [--timeout 10m]
          [--content <pattern>]... [--origin-user <pattern>]...
          [--exclude-mine|--include-mine]
@@ -290,10 +292,11 @@ Chat:
   '{program} chat wait' returns as soon as a message arrives after
   --after that matches its filters and is not yours, and prints only
   the messages that match, then the cursor. With no --after it waits
-  for the next message. --content and the origin filters, and their
-  no- forms, match each message itself, as in a search. The cursor
-  passes every message the wait checked, matching or not, so wait on
-  from it.
+  for the next message. The cursor passes every message the wait
+  checked, matching or not, so wait on from it.
+  chat recent, chat read and chat wait take --content and the origin
+  filters, and their no- forms, which match each message itself, as in
+  a search.
   A message is yours when both its user and its Claude Code session are
   yours, so a message from another session of your user wakes a wait.
   Outside a session, or when the workspace does not capture the session,
