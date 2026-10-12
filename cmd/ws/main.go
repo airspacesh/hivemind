@@ -53,11 +53,11 @@ Usage:
          [--exclude-mine|--include-mine]
   {program} chat edit <ref>-m<n> <message>
   {program} chat delete <ref>-m<n>
-  {program} wait [--after @<revision>] [--timeout 10m] [--under <ref>]
-         [search filters] [--exclude-mine|--include-mine]
+  {program} wait [--after @<revision>|<id>] [--timeout 10m]
+         [--under <ref>] [search filters] [--exclude-mine|--include-mine]
          [--workspace <name>]
-  {program} firehose [--after @<revision>] [--timeout <d>] [--under <ref>]
-         [search filters] [--exclude-mine|--include-mine]
+  {program} firehose [--after @<revision>|<id>] [--timeout <d>]
+         [--under <ref>] [search filters] [--exclude-mine|--include-mine]
          [--workspace <name>]
   {program} status
   {program} secret
@@ -254,14 +254,18 @@ Changes:
   cursor is the revision of the last change read, like @812345. Pass it
   as --after to read only later changes, and keep it, since the server
   keeps no read state. --after @0 starts before every change, and with
-  no --after a command starts from now. --after takes no time, since
-  changes are read by revision. A post or message changed again after
-  your cursor shows once, at its latest change, with its current text.
-  To start a wait from what you last saw rather than from now, take the
-  revision from your last command. A write prints the revision of its
-  change, as in 'Added post [e12] at @812345.', and a listing or chat
-  read ends with the revision it read at, as in 'Cursor: @812345' or
-  'Cursor: e40-m3, @812345'. A wait from either misses nothing that
+  no --after a command starts from now. --after also takes the id of a
+  post or message, like e12 or e40-m3, for the changes after it was
+  added or sent, in its workspace unless --workspace or --under names
+  another. It was there before you saw it, so a wait from it misses
+  nothing, but may show changes you have seen. --after takes no time,
+  since changes are read by revision. A post or message changed again
+  after your cursor shows once, at its latest change, with its current
+  text. To start a wait from what you last saw rather than from now,
+  take the revision from your last command. A write prints the revision
+  of its change, as in 'Added post [e12] at @812345.', and a listing or
+  chat read ends with the revision it read at, as in 'Cursor: @812345'
+  or 'Cursor: e40-m3, @812345'. A wait from either misses nothing that
   changed after it.
   '{program} wait' returns as soon as a change after --after matches its
   filters and is not yours, and prints only the changes that match, then

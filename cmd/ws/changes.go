@@ -31,18 +31,18 @@ func (c *client) latestRevision(t target) (int64, error) {
 }
 
 // pollChanges polls a workspace's changes that match filters after the
-// revision after, moving after to each page's cursor.
+// bound after, moving after to each page's cursor.
 func (c *client) pollChanges(
-	t target, after int64, filters url.Values,
+	t target, after api.ChangeBound, filters url.Values,
 ) func() (api.ChangesPage, pollOutcome, error) {
 	query := maps.Clone(filters)
 	return func() (api.ChangesPage, pollOutcome, error) {
-		query.Set("after", api.FormatRevision(after))
+		query.Set("after", after.String())
 		page, err := c.changesPage(t, query)
 		if err != nil {
 			return page, nothingYet, err
 		}
-		after = page.Cursor
+		after = api.ChangeBound{Revision: page.Cursor}
 		switch {
 		case len(page.Changes) > 0:
 			return page, found, nil
@@ -76,9 +76,9 @@ func follow(
 
 type changesArgs struct {
 	target target
-	// after is the revision to read changes after, which is the latest
-	// change when the command names none.
-	after   int64
+	// after is where to read changes after, which is the latest change
+	// when the command names none.
+	after   api.ChangeBound
 	timeout time.Duration
 	// filters holds the query parameters that pick the changes shown.
 	filters url.Values
@@ -100,13 +100,15 @@ func (c *client) parseChangesArgs(
 		return changesArgs{}, err
 	}
 	if len(p.pos) != 0 {
-		return changesArgs{}, usageError(command + " [--after @<revision>] " +
-			"[--timeout <d>] [--under <ref>] [search filters] " +
+		return changesArgs{}, usageError(command + " " +
+			"[--after @<revision>|<id>] [--timeout <d>] [--under <ref>] " +
+			"[search filters] " +
 			"[--exclude-mine|--include-mine] [--workspace <name>]")
 	}
 	parsed := changesArgs{filterArgs: filterArgs(p)}
 	if p.has("--after") {
-		parsed.after, err = parseRevisionFlag("--after", p.strs["--after"])
+		parsed.after, err = parseChangeBoundFlag("--after",
+			p.strs["--after"])
 		if err != nil {
 			return changesArgs{}, err
 		}
@@ -121,7 +123,15 @@ func (c *client) parseChangesArgs(
 	if parsed.filters, err = searchQuery(p); err != nil {
 		return changesArgs{}, err
 	}
-	if parsed.target, err = c.targetBeside(p, "--under"); err != nil {
+	// A wait after a post or message reads that post's workspace, as a
+	// wait under a post does, unless the command names another.
+	if p.strs["--workspace"] == "" && !p.has("--under") &&
+		parsed.after.Post.ID != 0 {
+		parsed.target, err = c.resolve(parsed.after.Post)
+	} else {
+		parsed.target, err = c.targetBeside(p, "--under")
+	}
+	if err != nil {
 		return changesArgs{}, err
 	}
 	if err := c.addUnder(parsed.target, p, parsed.filters); err != nil {
@@ -134,9 +144,11 @@ func (c *client) parseChangesArgs(
 		}
 	}
 	if !p.has("--after") {
-		if parsed.after, err = c.latestRevision(parsed.target); err != nil {
+		latest, err := c.latestRevision(parsed.target)
+		if err != nil {
 			return changesArgs{}, err
 		}
+		parsed.after = api.ChangeBound{Revision: latest}
 	}
 	return parsed, nil
 }
@@ -165,7 +177,7 @@ func cmdFirehose(c *client, args []string) error {
 	t := parsed.target
 
 	fmt.Printf("Following workspace %s after %s.\n", t.workspace,
-		api.FormatRevision(parsed.after))
+		parsed.after)
 	show := func(page api.ChangesPage) {
 		printChanges(page.Changes)
 		fmt.Printf("Cursor: %s\n", api.FormatRevision(page.Cursor))
@@ -195,7 +207,7 @@ func cmdWait(c *client, args []string) error {
 
 	if len(page.Changes) == 0 {
 		fmt.Printf("No matching changes after %s within %s.\n",
-			api.FormatRevision(parsed.after), parsed.timeout)
+			parsed.after, parsed.timeout)
 	}
 	printChanges(page.Changes)
 	if page.More {

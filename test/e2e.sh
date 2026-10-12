@@ -656,7 +656,7 @@ check "a wait from the last cursor finds nothing new" \
     "No matching changes after $private_cursor" \
     "$(ws wait --after "$private_cursor" --workspace personal --timeout 1s)"
 check "a wait refuses a time and says how to list what changed since" \
-    "--after takes a revision like @812345, not a time" \
+    "--after takes a revision like @812345 or an id like e40-m3, not a time" \
     "$(ws wait --after 2h 2>&1 || true)"
 (sleep 1.5 && peer chat send "$chat" "Changed" >/dev/null) &
 sender_pid=$!
@@ -708,6 +708,33 @@ check_equal "a wait from a write's revision shows only what came after" \
     "[$chat-m8] $(id -un) in $chat: After the write" \
     "$(ws wait --after "$written_at" --include-mine --timeout 1s |
         grep '^\[' | untimed)"
+
+# A post or message id works as a wait's cursor, from when it was added
+# or sent, so a wait from it misses nothing that changed after it, even
+# a change to what came before it, or a change to the post itself.
+sent_id() { sed -n 's/^Sent \[\([a-z0-9-]*\)\].*/\1/p'; }
+sent="$(ws chat send "$chat" "Waited after" | sent_id)"
+peer chat edit "$chat-m1" "Edited after the wait's message" >/dev/null
+peer chat send "$written" "In another chat" >/dev/null
+check_equal "a wait from a message id shows exactly what came after" \
+    "[$chat-m1] $(id -un) in $chat (edited): Edited after the wait's message
+[$written-m1] $(id -un) in $written: In another chat" \
+    "$(ws wait --after "$sent" --include-mine --timeout 1s |
+        grep '^\[' | untimed)"
+waited="$(ws add "Waited post" --project chat --no-recent | added)"
+peer chat send "$chat" "After the post" >/dev/null
+peer edit "$waited" --subject "Waited post, edited" >/dev/null
+check_equal "a wait from an edited post's id shows what came after it was added" \
+    "[$chat-m10] $(id -un) in $chat: After the post
+[$waited] $(id -un): Waited post, edited" \
+    "$(ws wait --after "$waited" --include-mine --timeout 1s |
+        grep '^\[' | untimed)"
+check "a wait from an id waits in that id's workspace" "[p2-m1]" \
+    "$(ws wait --after p1 --include-mine --timeout 1s)"
+check "a wait refuses an id from another workspace than its own" \
+    "$sent is in another workspace than personal" \
+    "$(ws wait --after "$sent" --workspace personal --timeout 1s 2>&1 ||
+        true)"
 
 # A wait leaves out the changes of its own session, and wakes for
 # another session of the same user. Its cursor passes what it left out.

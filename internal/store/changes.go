@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/airspacesh/workstream/internal/api"
@@ -270,6 +271,45 @@ func (s *Store) LatestRevision(ctx context.Context) (int64, error) {
 		SELECT revision FROM revision_counter`,
 	).Scan(&revision); err != nil {
 		return 0, fmt.Errorf("reading the latest revision: %w", err)
+	}
+	return revision, nil
+}
+
+// PostedRevision returns the revision of the change that added a post,
+// or that sent its message number when that is not 0. Later changes
+// leave it alone, so a reader who has seen the post or message, in any
+// state, has seen every change up to it.
+func (s *Store) PostedRevision(
+	ctx context.Context, access Access, post Key, number int64,
+) (int64, error) {
+	v, err := s.begin(ctx, access, true)
+	if err != nil {
+		return 0, fmt.Errorf("reading a posted revision: %w", err)
+	}
+	defer v.tx.Rollback()
+	if err := v.checkPostExists(ctx, post); err != nil {
+		return 0, err
+	}
+
+	var revision int64
+	if number == 0 {
+		err = v.tx.QueryRowContext(ctx, `
+			SELECT posted_revision FROM posts
+			WHERE workspace_id = ? AND id = ?`, post.Workspace, post.ID,
+		).Scan(&revision)
+	} else {
+		err = v.tx.QueryRowContext(ctx, `
+			SELECT posted_revision FROM post_messages
+			WHERE workspace_id = ? AND post_id = ? AND id = ?`,
+			post.Workspace, post.ID, number,
+		).Scan(&revision)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		ref := api.MessageRef{Post: s.mustRef(post), Number: number}
+		return 0, fmt.Errorf("%w: %s", ErrMessageNotFound, ref)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("reading a posted revision: %w", err)
 	}
 	return revision, nil
 }

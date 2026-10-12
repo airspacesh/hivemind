@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/workstream/internal/store"
 )
 
 const (
@@ -11,9 +13,9 @@ const (
 	maxChangesLimit     = 500
 )
 
-// changes returns a page of a workspace's changes after the revision
-// the query's after names that match its conditions, or an empty page
-// whose cursor is the latest revision, given no after.
+// changes returns a page of a workspace's changes after the change
+// bound the query's after names that match its conditions, or an empty
+// page whose cursor is the latest revision, given no after.
 func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 	query, ok := parseQueryOf(w, r, searchConditionParameters,
 		changesQueryParameters)
@@ -21,10 +23,10 @@ func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, hasAfter := query["after"]
-	var after int64
+	var after api.ChangeBound
 	if hasAfter {
 		var err error
-		if after, err = api.ParseRevision(query.Get("after")); err != nil {
+		if after, err = api.ParseChangeBound(query.Get("after")); err != nil {
 			writeBadRequest(w, "after: "+err.Error())
 			return
 		}
@@ -61,13 +63,30 @@ func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 		filter.Under = &under
 	}
 
+	since := after.Revision
+	if after.Post.ID != 0 {
+		if after.Post.Prefix != workspace.Prefix {
+			writeBadRequest(w, fmt.Sprintf("after: %s is in another "+
+				"workspace than %s, whose ids start with %s", after,
+				workspace.Name, workspace.Prefix))
+			return
+		}
+		post := store.Key{Workspace: workspace.ID, ID: after.Post.ID}
+		since, err = h.store.PostedRevision(r.Context(), access, post,
+			after.Message)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+	}
+
 	var page api.ChangesPage
 	if !hasAfter {
 		page.Changes = []api.Change{}
 		page.Cursor, err = h.store.LatestRevision(r.Context())
 	} else {
 		page, err = h.store.Changes(r.Context(), access, workspace.ID,
-			after, filter, exclude, int(limit))
+			since, filter, exclude, int(limit))
 	}
 	if err != nil {
 		writeStoreError(w, err)

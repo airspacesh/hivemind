@@ -242,13 +242,14 @@ func (s *Store) Add(
 	if _, err := v.tx.ExecContext(ctx, `
 		INSERT INTO posts (
 			workspace_id, id, created_utc, modified_utc, activity_utc,
-			revision, activity_revision, project, subject, body,
-			origin_user, origin_host, origin_dir, origin_claude_session,
+			revision, activity_revision, posted_revision, project, subject,
+			body, origin_user, origin_host, origin_dir, origin_claude_session,
 			request_id, request_digest
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		key.Workspace, key.ID, now, now, now, revision, revision, req.Project,
-		req.Subject, req.Body, req.Origin.User, req.Origin.Host,
-		req.Origin.Dir, req.Origin.ClaudeSession, req.RequestID, digest,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		key.Workspace, key.ID, now, now, now, revision, revision, revision,
+		req.Project, req.Subject, req.Body, req.Origin.User,
+		req.Origin.Host, req.Origin.Dir, req.Origin.ClaudeSession,
+		req.RequestID, digest,
 	); err != nil {
 		return api.Post{}, false, fmt.Errorf("adding post: %w", err)
 	}

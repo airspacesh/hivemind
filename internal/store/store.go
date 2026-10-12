@@ -62,11 +62,13 @@ INSERT INTO revision_counter (only_row, revision) VALUES (1, 0)`
 // regard to ASCII case. activity_utc is the latest change to the post
 // or its chat. Every write to either sets it, so listings read it
 // rather than the chat. revision is the revision of the post's own
-// latest change, which also set modified_utc, and activity_revision the
-// revision of the change that set activity_utc. deleted is 1 once a
-// delete has cleared the subject and body, and 0 before. request_id is
-// the id the client gave the request that added the post, or empty, and
-// request_digest the requestDigest of what that request asked for.
+// latest change, which also set modified_utc, activity_revision the
+// revision of the change that set activity_utc, and posted_revision the
+// revision of the change that added the post, which later changes leave
+// alone. deleted is 1 once a delete has cleared the subject and body,
+// and 0 before. request_id is the id the client gave the request that
+// added the post, or empty, and request_digest the requestDigest of what
+// that request asked for.
 const createPosts = `
 CREATE TABLE posts (
 	workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
@@ -76,6 +78,7 @@ CREATE TABLE posts (
 	activity_utc TEXT NOT NULL,
 	revision INTEGER NOT NULL,
 	activity_revision INTEGER NOT NULL,
+	posted_revision INTEGER NOT NULL,
 	project TEXT NOT NULL,
 	project_lower TEXT COLLATE BINARY
 		GENERATED ALWAYS AS (lower(project)) STORED,

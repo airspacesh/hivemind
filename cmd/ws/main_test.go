@@ -1309,16 +1309,26 @@ func TestChatAfterKeepsToItsOwnChat(t *testing.T) {
 	}
 }
 
-// A change cursor is a revision, @0 included, and a time is refused
-// with the command that lists what changed since it.
-func TestChangeCursorIsARevision(t *testing.T) {
-	for value, want := range map[string]int64{"@0": 0, "@812345": 812345} {
-		got, err := parseRevisionFlag("--after", value)
-		if err != nil || got != want {
-			t.Errorf("%q = %d, %v, want %d", value, got, err, want)
+// A change cursor is a revision, @0 included, or a post or message id,
+// and a time is refused with the command that lists what changed since
+// it.
+func TestChangeCursorIsARevisionOrAnID(t *testing.T) {
+	post := api.Ref{Prefix: "e", ID: 40}
+	for value, want := range map[string]api.ChangeBound{
+		"@0":      {},
+		"@812345": {Revision: 812345},
+		"e40":     {Post: post},
+		"e40-m3":  {Post: post, Message: 3},
+	} {
+		got, err := parseChangeBoundFlag("--after", value)
+		if err != nil || got != want || got.String() != value {
+			t.Errorf("%q = %+v, %v, want %+v", value, got, err, want)
 		}
 	}
-	_, err := parseRevisionFlag("--after", "2h")
+	if got, err := parseChangeBoundFlag("--after", "e40-m0"); err == nil {
+		t.Errorf("e40-m0 was accepted as %+v", got)
+	}
+	_, err := parseChangeBoundFlag("--after", "2h")
 	if err == nil || !strings.Contains(err.Error(),
 		"'ws recent --include-chat --after 2h'") {
 		t.Errorf("a time gave %v", err)

@@ -554,6 +554,66 @@ func TestExcludedSessionlessKeyOverHTTP(t *testing.T) {
 	}
 }
 
+// A post or message id as after reads the changes after it was added or
+// sent, however it has changed since, and only in its own workspace.
+func TestChangesAfterAnIDOverHTTP(t *testing.T) {
+	s := startServer(t, testConfig(t))
+	s.must(t, "POST", "/api/workspaces/general/posts", postBody("seen"),
+		"", http.StatusCreated)
+	s.must(t, "POST", "/api/posts/e1/messages",
+		`{"body":"hi","origin":{"user":"duck"}}`, "", http.StatusCreated)
+	s.must(t, "POST", "/api/workspaces/general/posts", postBody("later"),
+		"", http.StatusCreated)
+	s.must(t, "PATCH", "/api/posts/e1", `{"subject":"seen, edited",`+
+		`"user":"duck"}`, "", http.StatusOK)
+
+	changesAfter := func(after string) string {
+		t.Helper()
+		text := s.must(t, "GET", "/api/workspaces/general/changes?after="+
+			after, "", "", http.StatusOK)
+		var page api.ChangesPage
+		if err := json.Unmarshal([]byte(text), &page); err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, change := range page.Changes {
+			if change.Message != nil {
+				ids = append(ids, change.Message.Ref().String())
+			} else {
+				ids = append(ids, change.Post.Ref.String())
+			}
+		}
+		return strings.Join(ids, " ")
+	}
+	for after, want := range map[string]string{
+		"e1":    "e1-m1 e2 e1",
+		"e1-m1": "e2 e1",
+		"e2":    "e1",
+	} {
+		if got := changesAfter(after); got != want {
+			t.Errorf("changes after %s = %q, want %q", after, got, want)
+		}
+	}
+
+	for _, test := range []struct {
+		after  string
+		status int
+		code   api.ErrorCode
+	}{
+		{"p1", 400, api.CodeBadRequest},
+		{"e1-m2", 404, api.CodeMessageNotFound},
+		{"e3", 404, api.CodePostNotFound},
+		{"e1-m0", 400, api.CodeBadRequest},
+	} {
+		text := s.must(t, "GET", "/api/workspaces/general/changes?after="+
+			test.after, "", "", test.status)
+		if code := errorCode(t, text); code != test.code {
+			t.Errorf("after %s gave %s, want %s", test.after, code,
+				test.code)
+		}
+	}
+}
+
 func TestRequestLogKeepsNoClientText(t *testing.T) {
 	var logs bytes.Buffer
 	oldOutput := log.Writer()

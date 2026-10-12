@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -593,5 +594,66 @@ func TestReadsAndWritesGiveARevisionToReadChangesAfter(t *testing.T) {
 	if want := []string{second.Ref().String()}; !reflect.DeepEqual(got,
 		want) {
 		t.Fatalf("the changes after the reads are %v, want %v", got, want)
+	}
+}
+
+// postedRevision reads the revision that added a post, or sent its
+// message number when that is not 0.
+func postedRevision(
+	t *testing.T, store *Store, post api.Ref, number int64,
+) int64 {
+	t.Helper()
+	revision, err := store.PostedRevision(context.Background(),
+		everyAccess(store), store.mustKey(post), number)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return revision
+}
+
+// A reader who saw a post or message in any state saw its adding, so
+// reading changes from there shows every change after it, those to
+// what came before it included, even once it has been edited or
+// deleted.
+func TestChangesAfterAPostedRevisionMissNothingAfterIt(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	earlier := mustAdd(t, store, "earlier", "", nil)
+	old := mustPostMessage(t, store, earlier.Ref, "old")
+	post := mustAdd(t, store, "seen", "", nil)
+	message := mustPostMessage(t, store, post.Ref, "seen")
+
+	other := mustAdd(t, store, "other", "", nil)
+	mustPostMessage(t, store, other.Ref, "elsewhere")
+	if _, _, err := store.EditMessage(ctx, store.mustKey(earlier.Ref),
+		old.Number, ownEdit("old, edited")); err != nil {
+		t.Fatal(err)
+	}
+	mustDeleteMessage(t, store, message.Ref())
+	mustDelete(t, store, post.Ref)
+
+	if got := postedRevision(t, store, post.Ref, 0); got != post.Revision {
+		t.Fatalf("e2 was added at @%d, but reads as @%d", post.Revision, got)
+	}
+	got, _ := readAllChanges(t, store,
+		postedRevision(t, store, post.Ref, message.Number), 10)
+	want := []string{"e3", "e3-m1", "e1-m1", "e2-m1", "e2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("changes after e2-m1 = %v, want %v", got, want)
+	}
+}
+
+func TestPostedRevisionOfAMissingMessageIsNotFound(t *testing.T) {
+	store := openTestStore(t)
+	post := mustAdd(t, store, "post", "", nil)
+	_, err := store.PostedRevision(context.Background(), everyAccess(store),
+		store.mustKey(post.Ref), 1)
+	if !errors.Is(err, ErrMessageNotFound) {
+		t.Fatalf("e1-m1 gave %v", err)
+	}
+	_, err = store.PostedRevision(context.Background(), everyAccess(store),
+		Key{Workspace: workspaceID(t, store, "general"), ID: 2}, 0)
+	if !errors.Is(err, ErrPostNotFound) {
+		t.Fatalf("e2 gave %v", err)
 	}
 }

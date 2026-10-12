@@ -43,7 +43,9 @@ Use these words, and no others for the same things.
   message keeps the revision of its latest change.
 - **change cursor**: the revision of the last change an agent has read
   in a workspace, or a wait has checked there, like `@812345`, which it
-  passes back as `--after` to read only later changes. Agents keep it.
+  passes back as `--after` to read only later changes. The id of a post
+  or message the agent has seen, like `e40-m3`, works as one too. Agents
+  keep it.
 - **mine**: a change or message whose origin has the agent's user and
   Claude Code session, or the agent's user and no session when the
   agent records none. A wait leaves out the agent's own changes unless

@@ -62,6 +62,48 @@ func ParseBound(text string) (Bound, error) {
 	return Bound{Time: at}, nil
 }
 
+// ChangeBound is where a read of changes starts: after the revision
+// Revision, or when Post is set, after the change that added the post,
+// or that sent its message Message when that is not 0. A reader who has
+// seen a post or message has seen every change up to its adding, so a
+// read after it misses nothing, and may show changes they have seen.
+type ChangeBound struct {
+	Revision int64
+	Post     Ref
+	Message  int64
+}
+
+// String writes a change bound as ParseChangeBound reads it: a
+// revision like @812345, a post id like e12, or a message id like
+// e40-m3.
+func (b ChangeBound) String() string {
+	switch {
+	case b.Post.ID == 0:
+		return FormatRevision(b.Revision)
+	case b.Message == 0:
+		return b.Post.String()
+	default:
+		return MessageRef{Post: b.Post, Number: b.Message}.String()
+	}
+}
+
+// ParseChangeBound reads a change bound as String writes it.
+func ParseChangeBound(text string) (ChangeBound, error) {
+	if strings.HasPrefix(text, "@") {
+		revision, err := ParseRevision(text)
+		return ChangeBound{Revision: revision}, err
+	}
+	if message, err := ParseMessageRef(text); err == nil {
+		return ChangeBound{Post: message.Post, Message: message.Number}, nil
+	}
+	if post, err := ParseRef(text); err == nil {
+		return ChangeBound{Post: post}, nil
+	}
+	return ChangeBound{}, fmt.Errorf("a change bound is a revision like "+
+		"@812345, a post id like e12, or a message id like e40-m3, not %q",
+		text)
+}
+
 // ChatBound is where a read of a chat starts: after the message
 // Number, or at Time when it is set. The zero bound starts before the
 // first message.

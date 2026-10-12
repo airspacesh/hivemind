@@ -264,22 +264,25 @@ func parseBoundFlag(flag, value string, now time.Time) (api.Bound, error) {
 		"or a date and time like 2026-10-09T14:30, not %q", flag, value)
 }
 
-// parseRevisionFlag reads a flag that takes a change cursor, which is a
-// revision like @812345, or @0 for the start.
-func parseRevisionFlag(flag, value string) (int64, error) {
+// parseChangeBoundFlag reads a flag that takes where a read of changes
+// starts: a revision like @812345, @0 for the start, or the id of a post
+// or message, for what changed after it was posted.
+func parseChangeBoundFlag(flag, value string) (api.ChangeBound, error) {
+	bound, err := api.ParseChangeBound(value)
+	if err == nil {
+		return bound, nil
+	}
 	if strings.HasPrefix(value, "@") {
-		revision, err := api.ParseRevision(value)
-		if err != nil {
-			return 0, fmt.Errorf("%s: %w", flag, err)
-		}
-		return revision, nil
+		return api.ChangeBound{}, fmt.Errorf("%s: %w", flag, err)
 	}
 	if _, err := parseBoundFlag(flag, value, time.Now()); err == nil {
-		return 0, fmt.Errorf("%s takes a revision like @812345, not a "+
-			"time, because the server reads changes by revision. To list "+
-			"what changed after a time, run '%s recent --include-chat %s "+
-			"%s'", flag, programName, flag, shellQuote(value))
+		return api.ChangeBound{}, fmt.Errorf("%s takes a revision like "+
+			"@812345 or an id like e40-m3, not a time, because the server "+
+			"reads changes by revision. To list what changed after a "+
+			"time, run '%s recent --include-chat %s %s'", flag,
+			programName, flag, shellQuote(value))
 	}
-	return 0, fmt.Errorf("%s must be a revision like @812345, or @0 for "+
-		"the start, not %q", flag, value)
+	return api.ChangeBound{}, fmt.Errorf("%s must be a revision like "+
+		"@812345, @0 for the start, or a post or message id like e12 or "+
+		"e40-m3, not %q", flag, value)
 }

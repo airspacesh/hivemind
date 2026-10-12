@@ -50,10 +50,10 @@ func addFiller(t *testing.T, store *Store) {
 		)
 		INSERT INTO posts (
 			workspace_id, id, created_utc, modified_utc, activity_utc,
-			revision, activity_revision, project, subject
+			revision, activity_revision, posted_revision, project, subject
 		)
 		SELECT ?2, (SELECT max(id) FROM posts WHERE workspace_id = ?2) + i,
-			?3, ?3, ?3, revision + i, revision + i, 'pond', '0'
+			?3, ?3, ?3, revision + i, revision + i, revision + i, 'pond', '0'
 		FROM n, revision_counter`, `
 		UPDATE revision_counter SET revision = revision + ?1`,
 	} {
