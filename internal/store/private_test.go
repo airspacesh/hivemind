@@ -142,8 +142,8 @@ func TestOnlyTheOwnerReadsAPrivatePostAndWhatIsUnderIt(t *testing.T) {
 	}
 
 	for _, filter := range []Filter{
-		{Limit: 20, IncludeChat: true},
-		{Limit: 20, IncludeChat: true,
+		{Limit: 20, Items: api.PostsAndChat},
+		{Limit: 20, Items: api.PostsAndChat,
 			Content: []FieldCond{{Value: "secret"}}},
 		{Limit: 20, Project: []FieldCond{{Value: "secret-project"}}},
 		{Limit: 20, OriginUser: []FieldCond{{Value: "alice"}}},
@@ -160,7 +160,8 @@ func TestOnlyTheOwnerReadsAPrivatePostAndWhatIsUnderIt(t *testing.T) {
 				"which only a private post supersedes", matchRefs(page))
 		}
 	}
-	changes, err := store.Changes(ctx, bob, general, 0, Filter{}, nil, 50)
+	changes, err := store.Changes(ctx, bob, general, 0,
+		Filter{Items: api.PostsAndChat}, nil, 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +205,7 @@ func TestOnlyTheOwnerReadsAPrivatePostAndWhatIsUnderIt(t *testing.T) {
 		},
 		"changes under": func() error {
 			_, err := store.Changes(ctx, bob, general, 0,
-				Filter{Under: &draftKey}, nil, 20)
+				Filter{Items: api.PostsAndChat, Under: &draftKey}, nil, 20)
 			return err
 		},
 		"tree": func() error {
@@ -405,7 +406,7 @@ func TestMakingAPostPublicOrPrivateIsAChange(t *testing.T) {
 	changes := func(user string, since int64) api.ChangesPage {
 		t.Helper()
 		page, err := store.Changes(ctx, accessAs(store, user), general,
-			since, Filter{}, nil, 50)
+			since, Filter{Items: api.PostsAndChat}, nil, 50)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -471,14 +472,14 @@ func readsAs(
 	}
 	for what, filter := range map[string]Filter{
 		"recent": {Limit: 50},
-		"recent with everything": {Limit: 50, IncludeChat: true,
+		"recent with everything": {Limit: 50, Items: api.PostsAndChat,
 			IncludeSuperseded: true, IncludeDeleted: true},
 	} {
 		page, err := store.Search(ctx, access, general, filter)
 		read(what, page, err)
 	}
-	changes, err := store.Changes(ctx, access, general, 0, Filter{}, nil,
-		100)
+	changes, err := store.Changes(ctx, access, general, 0,
+		Filter{Items: api.PostsAndChat}, nil, 100)
 	read("changes", changes, err)
 	for _, includeDeleted := range []bool{false, true} {
 		suffix := ""

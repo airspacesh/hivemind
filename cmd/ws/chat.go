@@ -314,7 +314,7 @@ func cmdChatDelete(c *client, args []string) error {
 func cmdChatRecent(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
 		strs:  []string{"--limit", "--workspace"},
-		bools: []string{includeDeleted},
+		bools: includeDeleted.flags(),
 	})
 	if err != nil {
 		return err
@@ -337,13 +337,13 @@ func cmdChatRecent(c *client, args []string) error {
 		}
 		t := targetOf(workspace)
 		query := url.Values{"limit": {fmt.Sprint(limit)}}
-		addIncludeDeleted(p, query)
+		includeDeleted.addTo(p, query)
 		var overview api.ChatOverview
 		path := workspacePath(t, "/messages?"+query.Encode())
 		if err := c.do(t, "GET", path, nil, &overview); err != nil {
 			return err
 		}
-		printOverview(overview, t.workspace, includeDeletedArg(p))
+		printOverview(overview, t.workspace, includeDeleted.arg(p))
 		printChangeCursor(os.Stdout, overview.Revision)
 		return nil
 	}
@@ -357,14 +357,14 @@ func cmdChatRecent(c *client, args []string) error {
 		return err
 	}
 	query := url.Values{"latest": {fmt.Sprint(limit)}}
-	addIncludeDeleted(p, query)
+	includeDeleted.addTo(p, query)
 	page, err := c.chatPage(t, ref, query)
 	if err != nil {
 		return err
 	}
-	printEarlier("", ref, 0, page.Earlier, includeDeletedArg(p))
+	printEarlier("", ref, 0, page.Earlier, includeDeleted.arg(p))
 	printChatPage(ref, page, api.ChatBound{},
-		fmt.Sprintf("%s has no messages yet.", ref), includeDeletedArg(p))
+		fmt.Sprintf("%s has no messages yet.", ref), includeDeleted.arg(p))
 	return nil
 }
 
@@ -387,7 +387,7 @@ func parseTimeout(
 func cmdChatRead(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
 		strs:  []string{"--after", "--limit"},
-		bools: []string{includeDeleted},
+		bools: includeDeleted.flags(),
 	})
 	if err != nil {
 		return err
@@ -415,7 +415,7 @@ func cmdChatRead(c *client, args []string) error {
 		}
 		query.Set("limit", fmt.Sprint(limit))
 	}
-	addIncludeDeleted(p, query)
+	includeDeleted.addTo(p, query)
 
 	t, err := c.resolve(ref)
 	if err != nil {
@@ -429,14 +429,14 @@ func cmdChatRead(c *client, args []string) error {
 	if p.has("--after") {
 		empty = fmt.Sprintf("No messages %s.", describeChatAfter(ref, after))
 	}
-	printChatPage(ref, page, after, empty, includeDeletedArg(p))
+	printChatPage(ref, page, after, empty, includeDeleted.arg(p))
 	return nil
 }
 
 func cmdChatWait(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
 		strs:   []string{"--after", "--timeout"},
-		bools:  mineFlags,
+		bools:  mineToggle.flags(),
 		repeat: filterFlags(api.MessageFields...),
 	})
 	if err != nil {
@@ -463,7 +463,7 @@ func cmdChatWait(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	exclude, err := excludesMine(p, true)
+	exclude, err := mineToggle.isOn(p, true)
 	if err != nil {
 		return err
 	}

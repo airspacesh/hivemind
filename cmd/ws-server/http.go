@@ -510,3 +510,12 @@ func queryBound(query url.Values, key string) (api.Bound, error) {
 	}
 	return bound, nil
 }
+
+// queryItems reads the items parameter, or fallback when it is absent.
+func queryItems(query url.Values, fallback api.Items) (api.Items, error) {
+	values := query["items"]
+	if len(values) == 0 {
+		return fallback, nil
+	}
+	return api.ParseItems(values[0])
+}

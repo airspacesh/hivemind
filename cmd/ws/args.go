@@ -133,53 +133,131 @@ func searchFilterFlags() []string {
 		shorthandKeys...)...)
 }
 
-// includeDeleted is the flag of every listing that leaves out deleted
-// posts and messages, which shows them.
-const includeDeleted = "--include-deleted"
+// toggle is a pair of flags that turn one thing on and off, like
+// --include-chat and --exclude-chat. A command takes at most one of the
+// pair, and does as its own default says without either.
+type toggle struct {
+	on, off string
+}
 
-// addIncludeDeleted passes on a command's includeDeleted to its query.
-func addIncludeDeleted(p *parsedArgs, query url.Values) {
-	if p.bools[includeDeleted] {
-		query.Set("include-deleted", "true")
+// inclusion is a flag that shows what a command leaves out by default,
+// like --include-deleted, and passes on to a query as the parameter of
+// its name.
+type inclusion struct {
+	flag string
+}
+
+// The inclusion flags. The help documents them together, under
+// Inclusion flags.
+var (
+	chatToggle        = toggle{on: "--include-chat", off: "--exclude-chat"}
+	postsToggle       = toggle{on: "--include-posts", off: "--exclude-posts"}
+	mineToggle        = toggle{on: "--exclude-mine", off: "--include-mine"}
+	includeDeleted    = inclusion{flag: "--include-deleted"}
+	includeSuperseded = inclusion{flag: "--include-superseded"}
+)
+
+func (t toggle) flags() []string {
+	return []string{t.on, t.off}
+}
+
+func (f inclusion) flags() []string {
+	return []string{f.flag}
+}
+
+func (f inclusion) isOn(p *parsedArgs) bool {
+	return p.bools[f.flag]
+}
+
+// addTo passes the flag on to a query, when a command was given it.
+func (f inclusion) addTo(p *parsedArgs, query url.Values) {
+	if f.isOn(p) {
+		query.Set(strings.TrimPrefix(f.flag, "--"), "true")
 	}
 }
 
-// includeDeletedArg repeats a command's includeDeleted after a space,
-// for a command it suggests.
-func includeDeletedArg(p *parsedArgs) string {
-	if p.bools[includeDeleted] {
-		return " " + includeDeleted
+// arg repeats the flag, after a space, when a command was given it, so
+// a command it suggests does the same.
+func (f inclusion) arg(p *parsedArgs) string {
+	if f.isOn(p) {
+		return " " + f.flag
 	}
 	return ""
+}
+
+// isOn reads whether a command's toggle is on, given its default.
+func (t toggle) isOn(p *parsedArgs, byDefault bool) (bool, error) {
+	switch {
+	case p.has(t.on) && p.has(t.off):
+		return false, fmt.Errorf("give one of %s and %s", t.on, t.off)
+	case p.has(t.on):
+		return true, nil
+	case p.has(t.off):
+		return false, nil
+	default:
+		return byDefault, nil
+	}
+}
+
+// arg repeats the flag of the toggle a command was given, after a
+// space, so a command it suggests does the same.
+func (t toggle) arg(p *parsedArgs) string {
+	for _, flag := range t.flags() {
+		if p.has(flag) {
+			return " " + flag
+		}
+	}
+	return ""
+}
+
+// itemFlags are the flags that choose whether a listing or wait holds
+// posts, messages, or both.
+var itemFlags = append(postsToggle.flags(), chatToggle.flags()...)
+
+// readItems reads whether a listing or wait holds posts, messages, or
+// both, given whether the command holds messages by default. Posts it
+// holds by default.
+func readItems(
+	p *parsedArgs, command string, chatByDefault bool,
+) (api.Items, error) {
+	posts, err := postsToggle.isOn(p, true)
+	if err != nil {
+		return 0, err
+	}
+	chat, err := chatToggle.isOn(p, chatByDefault)
+	if err != nil {
+		return 0, err
+	}
+	switch {
+	case posts && chat:
+		return api.PostsAndChat, nil
+	case posts:
+		return api.PostsOnly, nil
+	case chat:
+		return api.ChatOnly, nil
+	case p.has(chatToggle.off):
+		return 0, fmt.Errorf("%s and %s leave nothing to show. Give at "+
+			"most one", postsToggle.off, chatToggle.off)
+	default:
+		return 0, fmt.Errorf("%s leaves nothing to show, since %s leaves "+
+			"out chat unless %s. Add %s to show only messages",
+			postsToggle.off, command, chatToggle.on, chatToggle.on)
+	}
+}
+
+// itemArgs repeats the item flags a command was given, each after a
+// space, so a command it suggests holds the same.
+func itemArgs(p *parsedArgs) string {
+	return postsToggle.arg(p) + chatToggle.arg(p)
 }
 
 func searchFlagSpec() flagSpec {
 	return flagSpec{
 		strs: []string{"--limit", "--under", "--workspace", "--after",
 			"--before"},
-		bools: []string{"--id-only", "--include-superseded",
-			includeDeleted, "--posts-only", "--include-chat"},
+		bools: slices.Concat([]string{"--id-only"},
+			includeSuperseded.flags(), includeDeleted.flags(), itemFlags),
 		repeat: searchFilterFlags(),
-	}
-}
-
-// mineFlags choose whether a wait or firehose leaves out your own
-// changes.
-var mineFlags = []string{"--exclude-mine", "--include-mine"}
-
-// excludesMine reads whether a command leaves out your own changes,
-// given what it does by default.
-func excludesMine(p *parsedArgs, byDefault bool) (bool, error) {
-	switch {
-	case p.has("--exclude-mine") && p.has("--include-mine"):
-		return false, fmt.Errorf("give one of --exclude-mine and " +
-			"--include-mine")
-	case p.has("--exclude-mine"):
-		return true, nil
-	case p.has("--include-mine"):
-		return false, nil
-	default:
-		return byDefault, nil
 	}
 }
 
@@ -213,12 +291,7 @@ func filterArgs(p *parsedArgs) string {
 	if p.has("--under") {
 		text += " --under " + shellQuote(p.strs["--under"])
 	}
-	for _, flag := range mineFlags {
-		if p.has(flag) {
-			text += " " + flag
-		}
-	}
-	return text
+	return text + itemArgs(p) + mineToggle.arg(p)
 }
 
 // shorthandFor reports whether a flag is a metadata-key shorthand

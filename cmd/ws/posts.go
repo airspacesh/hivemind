@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/user"
+	"slices"
 	"strings"
 	"time"
 
@@ -544,8 +545,9 @@ func cmdPost(c *client, args []string) error {
 
 func cmdTree(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs:  []string{"--limit"},
-		bools: []string{"--include-superseded", includeDeleted},
+		strs: []string{"--limit"},
+		bools: slices.Concat(includeSuperseded.flags(),
+			includeDeleted.flags()),
 	})
 	if err != nil {
 		return err
@@ -566,10 +568,8 @@ func cmdTree(c *client, args []string) error {
 		}
 		query.Set("limit", fmt.Sprint(limit))
 	}
-	if p.bools["--include-superseded"] {
-		query.Set("include-superseded", "true")
-	}
-	addIncludeDeleted(p, query)
+	includeSuperseded.addTo(p, query)
+	includeDeleted.addTo(p, query)
 
 	t, err := c.resolve(ref)
 	if err != nil {
@@ -638,17 +638,15 @@ func searchQuery(p *parsedArgs) (url.Values, error) {
 
 // listingHeader says what a listing ran, like Newest 20 posts matching
 // --project launcher:
-func listingHeader(p *parsedArgs, limit int, includeChat bool) string {
-	var noun string
-	switch {
-	case limit == 1 && includeChat:
-		noun = "post or message"
-	case limit == 1:
-		noun = "post"
-	case includeChat:
-		noun = "posts and messages"
-	default:
-		noun = "posts"
+func listingHeader(p *parsedArgs, limit int, items api.Items) string {
+	nouns := map[api.Items][2]string{
+		api.PostsOnly:    {"post", "posts"},
+		api.ChatOnly:     {"message", "messages"},
+		api.PostsAndChat: {"post or message", "posts and messages"},
+	}[items]
+	noun := nouns[1]
+	if limit == 1 {
+		noun = nouns[0]
 	}
 	text := fmt.Sprintf("Newest %d %s", limit, noun)
 	if p.has("--under") {
@@ -666,10 +664,10 @@ func listingHeader(p *parsedArgs, limit int, includeChat bool) string {
 	if matching != "" {
 		text += " matching" + matching
 	}
-	if p.bools["--include-superseded"] {
+	if includeSuperseded.isOn(p) {
 		text += ", superseded included"
 	}
-	if p.bools[includeDeleted] {
+	if includeDeleted.isOn(p) {
 		text += ", deleted included"
 	}
 	return text + ":"
@@ -703,49 +701,37 @@ func olderCommand(
 	if p.has("--limit") {
 		text += " --limit " + shellQuote(p.strs["--limit"])
 	}
-	for _, flag := range []string{"--include-chat", "--include-superseded",
-		includeDeleted, "--posts-only"} {
-		if p.bools[flag] {
-			text += " " + flag
-		}
-	}
-	return text + filterArgs(p)
+	return text + includeSuperseded.arg(p) + includeDeleted.arg(p) +
+		filterArgs(p)
 }
 
 // cmdListing lists the newest matches, for recent or search. Search
-// takes a <text> and includes chat unless --posts-only. Recent leaves
-// chat out unless --include-chat.
+// takes a <text> and includes chat by default. Recent leaves chat out
+// by default.
 func cmdListing(c *client, command string, args []string) error {
 	p, err := parseArgs(args, searchFlagSpec())
 	if err != nil {
 		return err
 	}
-	var includeChat bool
 	switch command {
 	case "search":
 		if len(p.pos) > 1 {
 			return fmt.Errorf("give at most one <text> (got %d)",
 				len(p.pos))
 		}
-		if p.has("--include-chat") {
-			return fmt.Errorf("search includes chat unless " +
-				"--posts-only. --include-chat is for recent")
+		if includeDeleted.isOn(p) {
+			return fmt.Errorf("search never lists deleted posts or "+
+				"messages, so it takes no %s", includeDeleted.flag)
 		}
-		if p.has(includeDeleted) {
-			return fmt.Errorf("search never lists deleted posts or " +
-				"messages, so it takes no " + includeDeleted)
-		}
-		includeChat = !p.bools["--posts-only"]
 	case "recent":
 		if len(p.pos) != 0 {
 			return fmt.Errorf("recent takes no <text>. Use '%s search "+
 				"<text>'", programName)
 		}
-		if p.has("--posts-only") {
-			return fmt.Errorf("recent leaves chat out unless " +
-				"--include-chat. --posts-only is for search")
-		}
-		includeChat = p.bools["--include-chat"]
+	}
+	items, err := readItems(p, command, command == "search")
+	if err != nil {
+		return err
 	}
 
 	query, err := searchQuery(p)
@@ -779,13 +765,9 @@ func cmdListing(c *client, command string, args []string) error {
 		}
 	}
 	query.Set("limit", fmt.Sprint(limit))
-	if p.bools["--include-superseded"] {
-		query.Set("include-superseded", "true")
-	}
-	addIncludeDeleted(p, query)
-	if includeChat {
-		query.Set("include-chat", "true")
-	}
+	includeSuperseded.addTo(p, query)
+	includeDeleted.addTo(p, query)
+	query.Set("items", items.String())
 
 	t, err := c.targetBeside(p, "--under")
 	if err != nil {
@@ -798,7 +780,7 @@ func cmdListing(c *client, command string, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stderr, listingHeader(p, limit, includeChat))
+	fmt.Fprintln(os.Stderr, listingHeader(p, limit, items))
 	// With --id-only, stdout holds only ids, so the footer goes to
 	// stderr with the header, where a script can still find the next
 	// page and the cursor.
@@ -826,7 +808,7 @@ func cmdListing(c *client, command string, args []string) error {
 func cmdListProjects(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
 		strs:  []string{"--limit", "--workspace"},
-		bools: []string{includeDeleted},
+		bools: includeDeleted.flags(),
 	})
 	if err != nil {
 		return err
@@ -846,7 +828,7 @@ func cmdListProjects(c *client, args []string) error {
 		return err
 	}
 	query := url.Values{"limit": {fmt.Sprint(limit)}}
-	addIncludeDeleted(p, query)
+	includeDeleted.addTo(p, query)
 	result, err := c.projects(targetOf(workspace), query)
 	if err != nil {
 		return err
@@ -864,7 +846,7 @@ func cmdListProjects(c *client, args []string) error {
 	if more > 0 {
 		fmt.Printf("Next: %s list-projects --limit %d%s --workspace %s "+
 			"(%d more %s)\n", programName, result.Count,
-			includeDeletedArg(p), shellQuote(workspace.name), more, noun)
+			includeDeleted.arg(p), shellQuote(workspace.name), more, noun)
 	}
 	return nil
 }

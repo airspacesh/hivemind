@@ -93,7 +93,7 @@ func (c *client) parseChangesArgs(
 ) (changesArgs, error) {
 	p, err := parseArgs(args, flagSpec{
 		strs:   []string{"--after", "--timeout", "--workspace", "--under"},
-		bools:  mineFlags,
+		bools:  append(mineToggle.flags(), itemFlags...),
 		repeat: searchFilterFlags(),
 	})
 	if err != nil {
@@ -102,7 +102,7 @@ func (c *client) parseChangesArgs(
 	if len(p.pos) != 0 {
 		return changesArgs{}, usageError(command + " " +
 			"[--after @<revision>|<id>] [--timeout <d>] [--under <ref>] " +
-			"[search filters] " +
+			"[search filters] [--exclude-chat|--exclude-posts] " +
 			"[--exclude-mine|--include-mine] [--workspace <name>]")
 	}
 	parsed := changesArgs{filterArgs: filterArgs(p)}
@@ -116,13 +116,18 @@ func (c *client) parseChangesArgs(
 	if parsed.timeout, err = parseTimeout(p, timeout); err != nil {
 		return changesArgs{}, err
 	}
-	exclude, err := excludesMine(p, mine)
+	exclude, err := mineToggle.isOn(p, mine)
+	if err != nil {
+		return changesArgs{}, err
+	}
+	items, err := readItems(p, command, true)
 	if err != nil {
 		return changesArgs{}, err
 	}
 	if parsed.filters, err = searchQuery(p); err != nil {
 		return changesArgs{}, err
 	}
+	parsed.filters.Set("items", items.String())
 	// A wait after a post or message reads that post's workspace, as a
 	// wait under a post does, unless the command names another.
 	if p.strs["--workspace"] == "" && !p.has("--under") &&

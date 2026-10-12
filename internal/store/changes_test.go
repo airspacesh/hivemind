@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -18,7 +19,8 @@ func readChanges(
 ) api.ChangesPage {
 	t.Helper()
 	page, err := store.Changes(context.Background(), everyAccess(store),
-		workspaceID(t, store, "general"), since, Filter{}, nil, limit)
+		workspaceID(t, store, "general"), since,
+		Filter{Items: api.PostsAndChat}, nil, limit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +246,7 @@ func TestChangesStayInTheirWorkspace(t *testing.T) {
 
 	page, err := store.Changes(context.Background(),
 		accessTo(t, store, "general"), workspaceID(t, store, "general"),
-		0, Filter{}, nil, 10)
+		0, Filter{Items: api.PostsAndChat}, nil, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,17 +350,29 @@ func TestFilteredChangesShowEachMatchOnceAtAnyLimitAndSpan(t *testing.T) {
 			[]string{}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			for limit := 1; limit <= 3; limit++ {
-				for span := int64(1); span <= latest+1; span++ {
-					got, cursor := readAllMatching(t, store, 0,
-						test.filter, test.exclude, limit, span)
-					if !reflect.DeepEqual(got, test.want) {
-						t.Fatalf("limit %d span %d read %v, want %v",
-							limit, span, got, test.want)
-					}
-					if cursor != latest {
-						t.Fatalf("limit %d span %d ended at %d, want the "+
-							"latest revision %d", limit, span, cursor, latest)
+			for _, items := range []api.Items{api.PostsAndChat,
+				api.PostsOnly, api.ChatOnly} {
+				want := slices.DeleteFunc(slices.Clone(test.want),
+					func(id string) bool {
+						isMessage := strings.Contains(id, "-m")
+						return isMessage && !items.HasChat() ||
+							!isMessage && !items.HasPosts()
+					})
+				filter := test.filter
+				filter.Items = items
+				for limit := 1; limit <= 3; limit++ {
+					for span := int64(1); span <= latest+1; span++ {
+						got, cursor := readAllMatching(t, store, 0,
+							filter, test.exclude, limit, span)
+						if !reflect.DeepEqual(got, want) {
+							t.Fatalf("%v, limit %d span %d read %v, "+
+								"want %v", items, limit, span, got, want)
+						}
+						if cursor != latest {
+							t.Fatalf("%v, limit %d span %d ended at %d, "+
+								"want the latest revision %d", items, limit,
+								span, cursor, latest)
+						}
 					}
 				}
 			}
@@ -368,7 +382,8 @@ func TestFilteredChangesShowEachMatchOnceAtAnyLimitAndSpan(t *testing.T) {
 
 func TestChangesCursorPassesWhatDoesNotMatch(t *testing.T) {
 	store := openTestStore(t)
-	duck := Filter{Project: []FieldCond{{Value: "duck"}}}
+	duck := Filter{Items: api.PostsAndChat,
+		Project: []FieldCond{{Value: "duck"}}}
 	post := addTo(t, store, "general", api.AddPostRequest{
 		Project: "heron", Subject: "not a duck"})
 	mustPostMessage(t, store, post.Ref, "still not")
@@ -394,7 +409,8 @@ func TestChangesCursorPassesWhatDoesNotMatch(t *testing.T) {
 
 func TestChangesCursorAtAFullPageIsItsLastMatch(t *testing.T) {
 	store := openTestStore(t)
-	duck := Filter{Project: []FieldCond{{Value: "duck"}}}
+	duck := Filter{Items: api.PostsAndChat,
+		Project: []FieldCond{{Value: "duck"}}}
 	addTo(t, store, "general", api.AddPostRequest{
 		Project: "duck", Subject: "first"})
 	first := latestRevision(t, store)
@@ -443,7 +459,8 @@ func TestExcludedOriginKeysMatchExactly(t *testing.T) {
 		{OriginKey{},
 			[]string{"e1", "e1-m1", "e1-m2", "e1-m3", "e1-m4", "e1-m5"}},
 	} {
-		got, _ := readAllMatching(t, store, 0, Filter{}, &test.exclude, 10,
+		got, _ := readAllMatching(t, store, 0,
+			Filter{Items: api.PostsAndChat}, &test.exclude, 10,
 			revisionsPerRead)
 		if !reflect.DeepEqual(got, test.want) {
 			t.Fatalf("excluding %+v read %v, want %v", test.exclude, got,
@@ -472,8 +489,9 @@ func TestChangesUnderAPostKeepToItsSubtree(t *testing.T) {
 		{other.Ref, []string{"e4", "e4-m1"}},
 	} {
 		under := store.mustKey(test.under)
-		got, _ := readAllMatching(t, store, 0, Filter{Under: &under}, nil,
-			10, revisionsPerRead)
+		got, _ := readAllMatching(t, store, 0,
+			Filter{Items: api.PostsAndChat, Under: &under}, nil, 10,
+			revisionsPerRead)
 		if !reflect.DeepEqual(got, test.want) {
 			t.Fatalf("under %s read %v, want %v", test.under, got, test.want)
 		}
@@ -527,8 +545,8 @@ func TestFilteredChangesReadDuringWritesMissNone(t *testing.T) {
 				"after %d changes read", len(read))
 		}
 		var ids []string
-		ids, cursor = readAllMatching(t, store, cursor, Filter{}, exclude, 2,
-			3)
+		ids, cursor = readAllMatching(t, store, cursor,
+			Filter{Items: api.PostsAndChat}, exclude, 2, 3)
 		for _, id := range ids {
 			read[id]++
 		}

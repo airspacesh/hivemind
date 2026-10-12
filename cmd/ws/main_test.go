@@ -613,19 +613,37 @@ Cursor: @93
 	}
 
 	sent := queries()
-	if sent[0].Has("include-chat") || sent[1].Get("include-chat") != "true" {
+	if sent[0].Get("items") != "posts" ||
+		sent[1].Get("items") != "posts-and-chat" {
 		t.Fatalf("recent sent %v and search %v, want chat in search only",
 			sent[0], sent[1])
 	}
 
-	for command, header := range map[string]string{
-		"recent": "Newest 1 post:\n",
-		"search": "Newest 1 post or message:\n",
+	for _, listing := range []struct {
+		args   []string
+		items  string
+		header string
+	}{
+		{[]string{"recent"}, "posts", "Newest 1 post:\n"},
+		{[]string{"recent", "--include-chat"}, "posts-and-chat",
+			"Newest 1 post or message:\n"},
+		{[]string{"recent", "--exclude-posts", "--include-chat"}, "chat",
+			"Newest 1 message:\n"},
+		{[]string{"search"}, "posts-and-chat",
+			"Newest 1 post or message:\n"},
+		{[]string{"search", "--exclude-chat"}, "posts", "Newest 1 post:\n"},
+		{[]string{"search", "--exclude-posts"}, "chat",
+			"Newest 1 message:\n"},
 	} {
-		got = ws(t, config, command, "-n", "1", "--id-only")
-		if !strings.HasPrefix(got.stderr, header) {
-			t.Errorf("%s -n 1 said %q on stderr, want %q", command,
-				got.stderr, header)
+		got = ws(t, config, append(listing.args, "-n", "1", "--id-only")...)
+		sent := queries()
+		if items := sent[len(sent)-1].Get("items"); items != listing.items {
+			t.Errorf("%v sent items %q, want %q", listing.args, items,
+				listing.items)
+		}
+		if !strings.HasPrefix(got.stderr, listing.header) {
+			t.Errorf("%v said %q on stderr, want %q", listing.args,
+				got.stderr, listing.header)
 		}
 	}
 }
@@ -680,7 +698,7 @@ func TestFooterAsksForTheNextPage(t *testing.T) {
 	env := []string{"WORKSTREAM_CONFIG=" + config, "TZ=Asia/Singapore"}
 	for _, after := range []string{"2026-10-09T04:00:00.25Z", "2h"} {
 		first := runBinary(t, wsBinary, env, "search", "duck's pond",
-			"--posts-only", "--after", after, "--no-project", "x", "-n",
+			"--exclude-chat", "--after", after, "--no-project", "x", "-n",
 			"1", "--include-superseded")
 		lines := strings.Split(strings.TrimSpace(first.stdout), "\n")
 		footer, ok := strings.CutPrefix(lines[len(lines)-1], "Next: ws ")

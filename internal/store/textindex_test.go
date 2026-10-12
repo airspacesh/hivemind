@@ -95,7 +95,7 @@ func TestTextIndexKeepsGlobSemantics(t *testing.T) {
 				WHERE m.workspace_id = e.workspace_id
 					AND m.post_id = e.id AND lower(m.body) GLOB ?2
 			)`, func(conditions []FieldCond) Filter {
-			return Filter{Content: conditions, IncludeChat: true}
+			return Filter{Content: conditions, Items: api.PostsAndChat}
 		}},
 		{"subject", `e.subject_lower GLOB ?2`,
 			func(conditions []FieldCond) Filter {
@@ -154,7 +154,7 @@ func TestTextIndexFollowsEdits(t *testing.T) {
 		"ducks": true, "pond": true, "swan": true,
 	} {
 		result := runSearch(t, store, Filter{
-			Content: []FieldCond{{Value: text}}, IncludeChat: true,
+			Content: []FieldCond{{Value: text}}, Items: api.PostsAndChat,
 		})
 		if got := len(result.Matches) == 1; got != found {
 			t.Errorf("search for %q found the post: %v, want %v", text,
@@ -211,7 +211,7 @@ func TestTextIndexForgetsDeletedText(t *testing.T) {
 	addFiller(t, store)
 	for _, text := range []string{"heron", "egret", "swan", secret} {
 		result := runSearch(t, store, Filter{
-			Content: []FieldCond{{Value: text}}, IncludeChat: true,
+			Content: []FieldCond{{Value: text}}, Items: api.PostsAndChat,
 		})
 		if len(result.Matches) == 0 {
 			t.Fatalf("before the delete, a search for %q found nothing",
@@ -224,7 +224,7 @@ func TestTextIndexForgetsDeletedText(t *testing.T) {
 
 	for _, text := range []string{"heron", "egret", "swan", secret} {
 		result := runSearch(t, store, Filter{
-			Content: []FieldCond{{Value: text}}, IncludeChat: true,
+			Content: []FieldCond{{Value: text}}, Items: api.PostsAndChat,
 		})
 		if len(result.Matches) != 0 {
 			t.Errorf("a search for %q still finds the deleted text", text)
@@ -260,7 +260,7 @@ func TestSearchPagesBackThroughTheIndex(t *testing.T) {
 	before := Span{}
 	for i, ref := range want {
 		page := runSearch(t, store, Filter{
-			Content: []FieldCond{{Value: "heron"}}, IncludeChat: true,
+			Content: []FieldCond{{Value: "heron"}}, Items: api.PostsAndChat,
 			Limit: 1, Changed: before,
 		})
 		assertMatches(t, page, ref)

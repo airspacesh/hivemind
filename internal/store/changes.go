@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/airspacesh/workstream/internal/api"
 )
@@ -97,11 +98,12 @@ type changeKey struct {
 
 // readChangeKeys reads the changes of a workspace after the revision
 // since and up to through that match a filter, leaving out those whose
-// origin has the key exclude, at most limit of them, oldest first. A
-// post's change matches as the post, and a message's as a message in
-// its chat. The changes to posts the reader cannot read, and to their
-// chats, are left out, so a post made private drops out of the feed of
-// everyone else.
+// origin has the key exclude, at most limit of them, oldest first. The
+// filter's Items says whether to read the changes to posts, to messages,
+// or to both. A post's change matches as the post, and a message's as a
+// message in its chat. The changes to posts the reader cannot read, and
+// to their chats, are left out, so a post made private drops out of the
+// feed of everyone else.
 func (v view) readChangeKeys(
 	ctx context.Context,
 	workspace int64,
@@ -135,24 +137,31 @@ func (v view) readChangeKeys(
 
 	// CROSS JOIN keeps SQLite reading the messages in revision order,
 	// rather than reading posts first for a filter on them.
-	query := `
-		SELECT revision, post_id, number FROM (
-			SELECT e.revision, e.id AS post_id, 0 AS number
-			FROM posts AS e` + postWhere.sql() + `
-			ORDER BY e.revision LIMIT ?
-		)
-		UNION ALL
-		SELECT revision, post_id, number FROM (
-			SELECT m.revision, m.post_id, m.id AS number
-			FROM post_messages AS m CROSS JOIN posts AS e
-				ON e.workspace_id = m.workspace_id AND e.id = m.post_id` +
-		messageWhere.sql() + `
-			ORDER BY m.revision LIMIT ?
-		)
-		ORDER BY revision LIMIT ?`
-	args := append(append(append(postWhere.args, limit),
-		messageWhere.args...), limit, limit)
-	rows, err := v.tx.QueryContext(ctx, query, args...)
+	var selects []string
+	var args []any
+	if filter.Items.HasPosts() {
+		selects = append(selects, `
+			SELECT revision, post_id, number FROM (
+				SELECT e.revision, e.id AS post_id, 0 AS number
+				FROM posts AS e`+postWhere.sql()+`
+				ORDER BY e.revision LIMIT ?
+			)`)
+		args = append(append(args, postWhere.args...), limit)
+	}
+	if filter.Items.HasChat() {
+		selects = append(selects, `
+			SELECT revision, post_id, number FROM (
+				SELECT m.revision, m.post_id, m.id AS number
+				FROM post_messages AS m CROSS JOIN posts AS e
+					ON e.workspace_id = m.workspace_id
+					AND e.id = m.post_id`+messageWhere.sql()+`
+				ORDER BY m.revision LIMIT ?
+			)`)
+		args = append(append(args, messageWhere.args...), limit)
+	}
+	query := strings.Join(selects, " UNION ALL ") +
+		` ORDER BY revision LIMIT ?`
+	rows, err := v.tx.QueryContext(ctx, query, append(args, limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("reading changes: %w", err)
 	}
@@ -173,7 +182,7 @@ func (v view) readChangeKeys(
 // Changes returns up to limit changes in a workspace after the
 // revision since that match a filter, oldest first, leaving out those
 // whose origin has the key exclude, when there is one. The filter's
-// conditions and Under apply, and its other fields are ignored.
+// conditions, Under and Items apply, and its other fields are ignored.
 //
 // The page's cursor is the highest revision the read checked. Every
 // change up to it is in the page or did not match, so a read from the

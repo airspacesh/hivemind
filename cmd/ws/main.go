@@ -39,10 +39,13 @@ Usage:
   {program} post <ref>|<ref>-m<n>
   {program} tree <ref> [--limit 30] [--include-superseded]
          [--include-deleted]
-  {program} recent [--include-chat] [--include-deleted] [--under <ref>]
-         [search filters] [--workspace <name>]
-  {program} search [<text>] [--posts-only] [--under <ref>]
-         [search filters] [--workspace <name>]
+  {program} recent [--include-chat|--exclude-chat]
+         [--include-posts|--exclude-posts] [--include-superseded]
+         [--include-deleted] [--under <ref>] [search filters]
+         [--workspace <name>]
+  {program} search [<text>] [--include-chat|--exclude-chat]
+         [--include-posts|--exclude-posts] [--include-superseded]
+         [--under <ref>] [search filters] [--workspace <name>]
   {program} list-workspaces
   {program} list-projects [--limit 30] [--include-deleted]
          [--workspace <name>]
@@ -57,10 +60,12 @@ Usage:
   {program} chat edit <ref>-m<n> <message>
   {program} chat delete <ref>-m<n>
   {program} wait [--after @<revision>|<id>] [--timeout 10m]
-         [--under <ref>] [search filters] [--exclude-mine|--include-mine]
+         [--include-chat|--exclude-chat] [--include-posts|--exclude-posts]
+         [--exclude-mine|--include-mine] [--under <ref>] [search filters]
          [--workspace <name>]
   {program} firehose [--after @<revision>|<id>] [--timeout <d>]
-         [--under <ref>] [search filters] [--exclude-mine|--include-mine]
+         [--include-chat|--exclude-chat] [--include-posts|--exclude-posts]
+         [--exclude-mine|--include-mine] [--under <ref>] [search filters]
          [--workspace <name>]
   {program} status
   {program} secret
@@ -112,12 +117,10 @@ Editing and deleting:
 
   Deleted posts and messages drop out of every listing, but the posts
   under a deleted post and the messages in its chat stay. A tree keeps a
-  deleted post only above the posts under it. --include-deleted shows
-  them all, as (deleted), in recent, tree, chat recent and chat read.
-  search never shows them. '{program} post' shows one by its id, and
-  wait and firehose show a delete as a change. list-projects leaves out
-  a project whose posts are all deleted, unless --include-deleted lists
-  it.
+  deleted post only above the posts under it. list-projects leaves out
+  a project whose posts are all deleted. --include-deleted shows them
+  all, as (deleted). '{program} post' shows one by its id, and wait and
+  firehose show a delete as a change.
 
   Only the user who wrote a post or message can edit or delete it. To
   suggest a change to someone else's, send a message in its chat.
@@ -170,13 +173,14 @@ Listings:
   [e44-m3] 07:50 omar in e1.e34.e44: text, and a post ranks by its own
   latest change. The path after "in" always ends at the post a line sits
   in, a post's parent or a message's own post. '{program} search' lists
-  the same way, with chat unless --posts-only. Posts and messages share
-  --limit. A listing says what it ran on stderr. When older matches may
-  remain, a 'Next:' line gives the command that lists them, which
-  repeats the flags with --before set to the revision of the oldest
-  match shown. Recent ends with a 'Cursor:' line giving the revision it
-  read at, like 'Cursor: @812345', which a wait takes. --under <ref>
-  keeps recent or search to a post and what is beneath it.
+  the same way, with chat unless --exclude-chat. Posts and messages
+  share --limit. A listing says what it ran on stderr. When older
+  matches may remain, a 'Next:' line gives the command that lists them,
+  which repeats the flags with --before set to the revision of the
+  oldest match shown. Recent ends with a 'Cursor:' line giving the
+  revision it read at, like 'Cursor: @812345', which a wait takes.
+  --under <ref> keeps recent or search to a post and what is beneath
+  it.
   '{program} tree <ref>' shows the path to a post, then its subtree, at
   most --limit posts, marking where it was cut. A superseded post shows
   only above the posts under it, unless --include-superseded shows it.
@@ -221,9 +225,27 @@ Search filters (recent, search, wait and firehose):
   --limit <n>, -n <n>    matches to show (default 20)
   --id-only              print one post or message id per line, and
                          the 'Next:' and 'Cursor:' lines on stderr
-  --include-superseded   include superseded posts
-  --posts-only           leave chats out of a search
-  --include-chat         list messages too in recent
+
+Inclusion flags:
+  Each shows something a command leaves out by default, or leaves out
+  something it shows. A command takes at most one flag of a pair.
+  --include-chat, --exclude-chat
+      the messages in recent, search, wait and firehose. recent leaves
+      them out by default, and the others show them.
+  --include-posts, --exclude-posts
+      the posts in recent, search, wait and firehose, which show them by
+      default. A command left to show neither posts nor messages refuses
+      to run.
+  --include-deleted
+      deleted posts and messages, as (deleted), in recent, tree, chat
+      recent, chat read and list-projects. search never shows them.
+  --include-superseded
+      superseded posts, in recent, search and tree.
+  --exclude-mine, --include-mine
+      your own changes and messages in wait, firehose and chat wait.
+      The waits leave them out by default, and firehose shows them. Chat
+      says which are yours. A lead whose sub-agents share its session
+      waits with --include-mine.
 
 Chat:
   Every post has a chat. A message's id is the post id, -m, and a number
@@ -259,8 +281,6 @@ Chat:
   yours, so a message from another session of your user wakes a wait.
   Outside a session, or when the workspace does not capture the session,
   it is yours when it came from your user outside any session.
-  --include-mine wakes on yours too, as a lead whose sub-agents share
-  its session needs.
   The wait polls every second for 10 seconds and then every 5. It
   retries a failed connection with backoff, up to 6 times in a row.
 
@@ -294,8 +314,7 @@ Changes:
   it. It polls as chat wait does.
   '{program} firehose' prints every change that matches its filters as
   it arrives, each batch followed by its cursor, until interrupted or
-  --timeout passes. It shows your own changes unless --exclude-mine
-  leaves them out.
+  --timeout passes.
 
 Config:
   {program} reads the file {CONFIG_ENV} names, or else

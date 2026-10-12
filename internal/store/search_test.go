@@ -347,12 +347,13 @@ func TestSearchMatchesChatMessages(t *testing.T) {
 		messageRef(pond.Ref, 3), messageRef(pond.Ref, 1),
 		sighting.Ref.String()}
 
-	result := runSearch(t, store, Filter{Content: heron, IncludeChat: true})
+	result := runSearch(t, store, Filter{Content: heron,
+		Items: api.PostsAndChat})
 	assertMatches(t, result, chatMatches...)
 	before := Span{}
 	for i, want := range chatMatches {
-		page := runSearch(t, store, Filter{Content: heron, IncludeChat: true,
-			Limit: 1, Changed: before})
+		page := runSearch(t, store, Filter{Content: heron,
+			Items: api.PostsAndChat, Limit: 1, Changed: before})
 		assertMatches(t, page, want)
 		if page.More != (i < len(chatMatches)-1) {
 			t.Fatalf("more after %s = %v", want, page.More)
@@ -365,14 +366,14 @@ func TestSearchMatchesChatMessages(t *testing.T) {
 
 	// The other filters apply to the post a message is in.
 	sightings := runSearch(t, store, Filter{Content: heron,
-		Subject: []FieldCond{{Value: "sighting"}}, IncludeChat: true})
+		Subject: []FieldCond{{Value: "sighting"}}, Items: api.PostsAndChat})
 	assertPostRefs(t, sightings, sighting.Ref)
 
 	// Excluding text matches every message and post without it. With
 	// chat, a post ranks by its own change, not by its chat.
 	without := runSearch(t, store, Filter{
-		Content:     []FieldCond{{Negate: true, Value: "heron"}},
-		IncludeChat: true,
+		Content: []FieldCond{{Negate: true, Value: "heron"}},
+		Items:   api.PostsAndChat,
 	})
 	assertMatches(t, without, messageRef(quiet.Ref, 1),
 		messageRef(pond.Ref, 2), quiet.Ref.String(), pond.Ref.String())
@@ -385,7 +386,7 @@ func TestSearchMatchesChatMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertMatches(t, runSearch(t, store, Filter{Content: heron,
-		IncludeChat: true}), chatMatches...)
+		Items: api.PostsAndChat}), chatMatches...)
 }
 
 // A message matches when it matches every text filter, required and
@@ -401,12 +402,12 @@ func TestSearchMatchesEachMessageOnItsOwn(t *testing.T) {
 
 	result := runSearch(t, store, Filter{Content: []FieldCond{
 		{Value: "heron"}, {Value: "egret"},
-	}, IncludeChat: true})
+	}, Items: api.PostsAndChat})
 	assertMatches(t, result, messageRef(both.Ref, 1))
 
 	result = runSearch(t, store, Filter{Content: []FieldCond{
 		{Value: "heron"}, {Negate: true, Value: "egret"},
-	}, IncludeChat: true})
+	}, Items: api.PostsAndChat})
 	assertMatches(t, result, messageRef(both.Ref, 2),
 		messageRef(split.Ref, 1))
 }
@@ -441,24 +442,24 @@ func TestSearchMatchesMessagesByOrigin(t *testing.T) {
 		want   []string
 	}{
 		{"text and origin match the same message",
-			Filter{Content: hook, OriginUser: ines, IncludeChat: true},
+			Filter{Content: hook, OriginUser: ines, Items: api.PostsAndChat},
 			[]string{messageRef(garden.Ref, 1), messageRef(release.Ref, 2),
 				design.Ref.String()}},
 		{"an origin alone",
-			Filter{OriginUser: ines, IncludeChat: true},
+			Filter{OriginUser: ines, Items: api.PostsAndChat},
 			[]string{messageRef(garden.Ref, 1), messageRef(release.Ref, 3),
 				messageRef(release.Ref, 2), cats.Ref.String(),
 				design.Ref.String()}},
 		{"the other filters apply to a message's post",
 			Filter{OriginUser: ines, Project: []FieldCond{{Value: "build"}},
-				IncludeChat: true},
+				Items: api.PostsAndChat},
 			[]string{messageRef(release.Ref, 3), messageRef(release.Ref, 2),
 				design.Ref.String()}},
 		{"an excluded origin excludes messages too",
-			Filter{Content: hook, OriginUser: notInes, IncludeChat: true},
+			Filter{Content: hook, OriginUser: notInes, Items: api.PostsAndChat},
 			[]string{messageRef(cats.Ref, 1), messageRef(release.Ref, 1)}},
 		{"an excluded origin alone",
-			Filter{OriginUser: notInes, IncludeChat: true},
+			Filter{OriginUser: notInes, Items: api.PostsAndChat},
 			[]string{messageRef(cats.Ref, 1), messageRef(release.Ref, 1),
 				garden.Ref.String(), release.Ref.String()}},
 		{"posts only",
@@ -482,9 +483,9 @@ func TestSearchMatchesMessagesByOriginInPostsTheIndexFinds(t *testing.T) {
 	addFiller(t, store)
 
 	result := runSearch(t, store, Filter{
-		Subject:     []FieldCond{{Value: "heron"}},
-		OriginUser:  []FieldCond{{Value: "ines"}},
-		IncludeChat: true,
+		Subject:    []FieldCond{{Value: "heron"}},
+		OriginUser: []FieldCond{{Value: "ines"}},
+		Items:      api.PostsAndChat,
 	})
 	assertMatches(t, result, messageRef(heron.Ref, 1))
 }
@@ -519,7 +520,8 @@ func TestOriginUserIndexKeepsGlobSemantics(t *testing.T) {
 		t.Run(pattern, func(t *testing.T) {
 			want := globMatches(t, store, matches, lowerASCII(pattern))
 			result := runSearch(t, store, Filter{
-				OriginUser: []FieldCond{{Value: pattern}}, IncludeChat: true,
+				OriginUser: []FieldCond{{Value: pattern}},
+				Items:      api.PostsAndChat,
 			})
 			var got []int64
 			for _, match := range result.Matches {
@@ -536,15 +538,15 @@ func TestOriginUserIndexKeepsGlobSemantics(t *testing.T) {
 	// A message must match the text and the origin, so ken's chat has no
 	// match from ken, though both indexes find it.
 	result := runSearch(t, store, Filter{
-		Content:     []FieldCond{{Value: "quack"}},
-		OriginUser:  []FieldCond{{Value: "ines"}},
-		IncludeChat: true,
+		Content:    []FieldCond{{Value: "quack"}},
+		OriginUser: []FieldCond{{Value: "ines"}},
+		Items:      api.PostsAndChat,
 	})
 	assertMatches(t, result, messageRef(chat.Ref, 1))
 	result = runSearch(t, store, Filter{
-		Content:     []FieldCond{{Value: "quack"}},
-		OriginUser:  []FieldCond{{Value: "ken"}},
-		IncludeChat: true,
+		Content:    []FieldCond{{Value: "quack"}},
+		OriginUser: []FieldCond{{Value: "ken"}},
+		Items:      api.PostsAndChat,
 	})
 	assertMatches(t, result)
 }
@@ -603,18 +605,19 @@ func TestSearchKeepsToASpan(t *testing.T) {
 		want   []string
 	}{
 		{"after",
-			Filter{Changed: Span{After: day(2, 15)}, IncludeChat: true},
+			Filter{Changed: Span{After: day(2, 15)}, Items: api.PostsAndChat},
 			[]string{recent.Ref.String(), late}},
 		{"before leaves out its own instant",
-			Filter{Changed: Span{Before: day(3, 1)}, IncludeChat: true},
+			Filter{Changed: Span{Before: day(3, 1)}, Items: api.PostsAndChat},
 			[]string{early, mid.Ref.String(), old.Ref.String()}},
 		{"after takes in its own instant",
 			Filter{Changed: Span{After: day(3, 1), Before: day(3, 2)},
-				IncludeChat: true},
+				Items: api.PostsAndChat},
 			[]string{late}},
 		{"with an origin",
 			Filter{Changed: Span{After: day(1, 10)},
-				OriginUser: []FieldCond{{Value: "ken"}}, IncludeChat: true},
+				OriginUser: []FieldCond{{Value: "ken"}},
+				Items:      api.PostsAndChat},
 			[]string{early}},
 		{"posts only",
 			Filter{Changed: Span{After: day(2, 15)}},
@@ -653,7 +656,7 @@ func TestSearchUnderASubtreeInABigWorkspace(t *testing.T) {
 		want   []string
 	}{
 		{"text",
-			Filter{Under: &under, Content: heron, IncludeChat: true},
+			Filter{Under: &under, Content: heron, Items: api.PostsAndChat},
 			[]string{messageRef(child.Ref, 1), grandchild.Ref.String(),
 				root.Ref.String()}},
 		{"posts only",
@@ -661,11 +664,11 @@ func TestSearchUnderASubtreeInABigWorkspace(t *testing.T) {
 			[]string{root.Ref.String(), grandchild.Ref.String()}},
 		{"origin",
 			Filter{Under: &under, OriginUser: []FieldCond{{Value: "ines"}},
-				IncludeChat: true},
+				Items: api.PostsAndChat},
 			[]string{messageRef(child.Ref, 1)}},
 		{"nothing matches",
 			Filter{Under: &under, OriginHost: []FieldCond{{Value: "h"}},
-				IncludeChat: true},
+				Items: api.PostsAndChat},
 			nil},
 	}
 	run := func(t *testing.T) {

@@ -313,12 +313,12 @@ func TestUnreadablePostsShowNoTextOverHTTP(t *testing.T) {
 			"/api/posts/"+post+"/tree?include-superseded=true",
 			"/api/posts/"+post+"/messages",
 			"/api/workspaces/general/posts?include-superseded=true&"+
-				"include-chat=true&under="+post)
+				"items=posts-and-chat&under="+post)
 	}
 	paths = append(paths,
 		"/api/workspaces/general/posts?include-superseded=true",
 		"/api/workspaces/general/posts?include-superseded=true&"+
-			"include-chat=true",
+			"items=posts-and-chat",
 		"/api/workspaces/general/projects",
 		"/api/workspaces/general/messages")
 	for _, path := range paths {
@@ -707,7 +707,7 @@ func TestLinksOfAPrivatePostShowOnlyToItsOwnerOverHTTP(t *testing.T) {
 		"/api/posts/e1/tree",
 		"/api/workspaces/general/posts",
 		"/api/workspaces/general/posts?include-superseded=true&" +
-			"include-deleted=true&include-chat=true",
+			"include-deleted=true&items=posts-and-chat",
 		"/api/workspaces/general/changes?after=@0",
 		"/api/workspaces/general/messages",
 		"/api/workspaces/general/projects",

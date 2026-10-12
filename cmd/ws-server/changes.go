@@ -42,6 +42,10 @@ func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
+	if filter.Items, err = queryItems(query, api.PostsAndChat); err != nil {
+		writeBadRequest(w, err.Error())
+		return
+	}
 	exclude, err := excludedOrigin(query)
 	if err != nil {
 		writeBadRequest(w, err.Error())

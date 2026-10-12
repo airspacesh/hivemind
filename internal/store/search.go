@@ -50,9 +50,9 @@ type Filter struct {
 	Changed   Span
 	Revisions RevisionSpan
 
-	// IncludeChat makes a listing match the messages in the chats of
-	// posts as well as the posts.
-	IncludeChat bool
+	// Items says whether a listing or the changes feed holds posts, the
+	// messages in their chats, or both.
+	Items api.Items
 	// Under limits the search to a post and its descendants, when set.
 	Under             *Key
 	IncludeSuperseded bool
@@ -629,7 +629,7 @@ func (v view) findIndexedCandidates(
 			postLimit = min(limit, costLimit)
 		}
 		others, othersFound, err := v.readLookup(ctx, workspace, lookup,
-			filter.IncludeChat, postLimit, limit)
+			filter.Items.HasChat(), postLimit, limit)
 		if err != nil {
 			return candidateSet{}, false, err
 		}
@@ -671,12 +671,12 @@ func (v view) messagesByPostOrder(
 	return messages, rows.Err()
 }
 
-// A listing shows the newest posts of a workspace that match a filter.
-// Without chat, each post ranks by the latest change to it or its chat.
-// With chat, it shows the newest matching messages too, each ranked by
-// its posting, and each post ranks by its own latest change. Every change
-// takes the next revision on the server, so matches rank by revision,
-// which no two share, and a page ends at an exact one.
+// A listing shows the newest posts of a workspace that match a filter,
+// the newest messages, or both. Without chat, each post ranks by the
+// latest change to it or its chat. With chat, each message ranks by its
+// posting, and each post by its own latest change. Every change takes
+// the next revision on the server, so matches rank by revision, which no
+// two share, and a page ends at an exact one.
 
 // candidateLimit bounds the posts, and the messages, a listing reads by
 // key when the indexes narrow it to those. Past it, matches are common
@@ -773,7 +773,7 @@ func (v view) newestPosts(
 	count int,
 ) ([]match, error) {
 	revision, at := `e.activity_revision`, `e.activity_utc`
-	if filter.IncludeChat {
+	if filter.Items.HasChat() {
 		revision, at = `e.revision`, `e.modified_utc`
 	}
 	where.addRanks(revision, at, filter)
@@ -916,7 +916,7 @@ func (v view) readPage(
 		byPostOrder[postOrder] = &messages[i]
 	}
 	newMessages := map[int64]int{}
-	if !filter.IncludeChat && len(matches) > 0 {
+	if !filter.Items.HasChat() && len(matches) > 0 {
 		oldest := matches[len(matches)-1].revision
 		if newMessages, err = v.messagesSince(ctx, workspace, ids,
 			oldest, filter.IncludeDeleted); err != nil {
@@ -940,9 +940,9 @@ func (v view) readPage(
 }
 
 // Search lists a page of the newest posts of a workspace that match a
-// filter, and when it includes chat, of the newest messages as well. A
-// post matches when it meets every filter itself, and a message as
-// buildMessageWhere has it.
+// filter, of the newest messages, or of both, as the filter's Items
+// says. A post matches when it meets every filter itself, and a message
+// as buildMessageWhere has it.
 func (s *Store) Search(
 	ctx context.Context,
 	access Access,
@@ -986,22 +986,26 @@ func (s *Store) Search(
 	}
 	// A page of matches and one more, to tell whether more follow.
 	count := filter.Limit + 1
-	matches, err := v.newestPosts(ctx, workspace, filter, postWhere,
-		candidates, count)
-	if err != nil {
-		return api.MatchPage{}, err
+	var matches []match
+	if filter.Items.HasPosts() {
+		posts, err := v.newestPosts(ctx, workspace, filter, postWhere,
+			candidates, count)
+		if err != nil {
+			return api.MatchPage{}, err
+		}
+		matches = append(matches, posts...)
 	}
-	if filter.IncludeChat {
+	if filter.Items.HasChat() {
 		messages, err := v.newestMessages(ctx, workspace, filter,
 			messageWhere, candidates, count)
 		if err != nil {
 			return api.MatchPage{}, err
 		}
 		matches = append(matches, messages...)
-		slices.SortFunc(matches, func(a, b match) int {
-			return cmp.Compare(b.revision, a.revision)
-		})
 	}
+	slices.SortFunc(matches, func(a, b match) int {
+		return cmp.Compare(b.revision, a.revision)
+	})
 
 	page, err := v.readPage(ctx, workspace,
 		matches[:min(filter.Limit, len(matches))], filter)

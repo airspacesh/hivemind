@@ -31,7 +31,7 @@ var searchQueryParameters = map[string]bool{
 	"limit":              true,
 	"include-superseded": true,
 	"include-deleted":    true,
-	"include-chat":       true,
+	"items":              true,
 	"under":              true,
 	"after":              true,
 	"before":             true,
@@ -41,6 +41,7 @@ var searchQueryParameters = map[string]bool{
 // besides its conditions.
 var changesQueryParameters = map[string]bool{
 	"after":                  true,
+	"items":                  true,
 	"limit":                  true,
 	"under":                  true,
 	"exclude-user":           true,
@@ -220,7 +221,7 @@ func searchFilter(query url.Values) (store.Filter, error) {
 	if err != nil {
 		return store.Filter{}, err
 	}
-	includeChat, err := queryFlag(query, "include-chat")
+	items, err := queryItems(query, api.PostsOnly)
 	if err != nil {
 		return store.Filter{}, err
 	}
@@ -237,7 +238,7 @@ func searchFilter(query url.Values) (store.Filter, error) {
 		Before: before.Revision}
 	filter.IncludeSuperseded = includeSuperseded
 	filter.IncludeDeleted = includeDeleted
-	filter.IncludeChat = includeChat
+	filter.Items = items
 	filter.Limit = int(limit)
 	return filter, nil
 }

@@ -474,7 +474,7 @@ check_equal "recent counts the messages posted since its oldest match" \
 check_equal "recent with chat shares the limit with messages" \
     "[$chat-m4] $(id -un) in $chat: Woken
 [$race-m27] $(id -un) in $race: Within the hour
-Next: ws recent --before @R --workspace general --limit 2 --include-chat --project chat (more older matches)
+Next: ws recent --before @R --workspace general --limit 2 --project chat --include-chat (more older matches)
 Cursor: @R" \
     "$(ws recent --project chat --include-chat -n 2 | untimed)"
 check "search shows the matching messages" \
@@ -793,6 +793,14 @@ check_equal "a wait from a chat read's last message shows what came after" \
 [$chat-m8] $(id -un) in $chat: After the write" \
     "$(ws wait --after "$last_read" --include-mine --timeout 1s |
         grep '^\[' | untimed)"
+check_equal "a wait without chat shows only the posts" \
+    "[$written] $(id -un): Written" \
+    "$(ws wait --after "$last_read" --include-mine --exclude-chat \
+        --timeout 1s | grep '^\[' | untimed)"
+check_equal "a wait without posts shows only the messages" \
+    "[$chat-m8] $(id -un) in $chat: After the write" \
+    "$(ws wait --after "$last_read" --include-mine --exclude-posts \
+        --timeout 1s | grep '^\[' | untimed)"
 check_equal "a wait from a written post shows only what came after" \
     "[$chat-m8] $(id -un) in $chat: After the write" \
     "$(ws wait --after "$written" --include-mine --timeout 1s |

@@ -320,13 +320,13 @@ type listingCase struct {
 	under                  int64
 	includeSuperseded      bool
 	includeDeleted         bool
-	includeChat            bool
+	items                  api.Items
 }
 
 func (c listingCase) filter(workspace int64) Filter {
 	filter := Filter{Changed: c.span, Revisions: c.revisions,
 		IncludeSuperseded: c.includeSuperseded,
-		IncludeDeleted:    c.includeDeleted, IncludeChat: c.includeChat}
+		IncludeDeleted:    c.includeDeleted, Items: c.items}
 	if c.project != "" {
 		filter.Project = []FieldCond{{Value: c.project}}
 	}
@@ -398,16 +398,17 @@ func referenceListing(
 	var matches []referenceMatch
 	for _, e := range posts {
 		revision, at := e.activityRevision, e.activity
-		if c.includeChat {
+		if c.items.HasChat() {
 			revision, at = e.revision, e.modified
 		}
-		if listed(e) && (c.includeDeleted || !e.deleted) &&
+		if c.items.HasPosts() && listed(e) &&
+			(c.includeDeleted || !e.deleted) &&
 			matched(e.text, e.user) && inSpans(revision, at) {
 			matches = append(matches, referenceMatch{revision, e.id, 0})
 		}
 	}
 	for _, m := range messages {
-		if c.includeChat && listed(posts[m.post]) &&
+		if c.items.HasChat() && listed(posts[m.post]) &&
 			(c.includeDeleted || !m.deleted) &&
 			matched(m.text, m.user) && inSpans(m.revision, m.created) {
 			matches = append(matches,
@@ -427,7 +428,7 @@ func referenceNewMessages(
 	messages []forestMessage, page []referenceMatch, c listingCase,
 ) map[int64]int {
 	counts := map[int64]int{}
-	if c.includeChat || len(page) == 0 {
+	if c.items.HasChat() || len(page) == 0 {
 		return counts
 	}
 	onPage := map[int64]bool{}
@@ -591,11 +592,12 @@ func TestListingMatchesTheReference(t *testing.T) {
 		} {
 			for _, under := range append([]int64{0}, unders...) {
 				for _, span := range spans {
-					for flags := range 4 {
+					for flags := range 6 {
 						c := base
 						c.under, c.span = under, span
-						c.includeSuperseded = flags&1 != 0
-						c.includeChat = flags&2 != 0
+						c.includeSuperseded = flags%2 != 0
+						c.items = []api.Items{api.PostsOnly,
+							api.ChatOnly, api.PostsAndChat}[flags/2]
 						c.includeDeleted = i%2 != 0
 						checkListingPage(t, store, workspace, posts,
 							messages, c, 500)
@@ -620,7 +622,8 @@ func TestListingMatchesTheReference(t *testing.T) {
 // those that kept their rank throughout.
 func TestPagingBackListsEachMatchOnceWhileWritesLand(t *testing.T) {
 	for seed := int64(1); seed <= 4; seed++ {
-		for _, includeChat := range []bool{false, true} {
+		for _, items := range []api.Items{api.PostsOnly, api.ChatOnly,
+			api.PostsAndChat} {
 			store := openTestStore(t)
 			writer := newForestWriter(t, store,
 				rand.New(rand.NewSource(seed)))
@@ -632,8 +635,7 @@ func TestPagingBackListsEachMatchOnceWhileWritesLand(t *testing.T) {
 				writer.write()
 			}
 			workspace := workspaceID(t, store, "general")
-			first := listingCase{includeChat: includeChat,
-				span: Span{Before: before}}
+			first := listingCase{items: items, span: Span{Before: before}}
 			if seed%2 == 0 {
 				first.project = "a"
 			}
@@ -669,8 +671,8 @@ func TestPagingBackListsEachMatchOnceWhileWritesLand(t *testing.T) {
 				kept := slices.Contains(atEnd, m)
 				m.revision = 0
 				if kept && !listed[m] {
-					t.Fatalf("seed %d, chat %v: e%d message %d was skipped",
-						seed, includeChat, m.post, m.postOrder)
+					t.Fatalf("seed %d, %v: e%d message %d was skipped",
+						seed, items, m.post, m.postOrder)
 				}
 			}
 		}
@@ -705,12 +707,12 @@ func TestListingRanksEachPostByItsOwnActivity(t *testing.T) {
 
 	// With chat, the message is a match of its own, and the post ranks
 	// by its own change.
-	withChat := runSearch(t, store, Filter{Limit: 2, IncludeChat: true})
+	withChat := runSearch(t, store, Filter{Limit: 2, Items: api.PostsAndChat})
 	assertMatches(t, withChat, messageRef(grandchild.Ref, 1),
 		other.Ref.String())
 
 	byInes := runSearch(t, store, Filter{
-		OriginUser: []FieldCond{{Value: "ines"}}, IncludeChat: true})
+		OriginUser: []FieldCond{{Value: "ines"}}, Items: api.PostsAndChat})
 	assertPostRefs(t, byInes, child.Ref)
 }
 

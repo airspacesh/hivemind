@@ -502,7 +502,7 @@ func TestReadsProceedWhileAWriteIsOpen(t *testing.T) {
 	reads := map[string]func(context.Context) error{
 		"changes": func(ctx context.Context) error {
 			_, err := store.Changes(ctx, access, key.Workspace, 0,
-				Filter{}, exclude, 10)
+				Filter{Items: api.PostsAndChat}, exclude, 10)
 			return err
 		},
 		"latest revision": func(ctx context.Context) error {
@@ -527,7 +527,7 @@ func TestReadsProceedWhileAWriteIsOpen(t *testing.T) {
 		},
 		"search": func(ctx context.Context) error {
 			_, err := store.Search(ctx, access, key.Workspace,
-				Filter{Limit: 10, IncludeChat: true})
+				Filter{Limit: 10, Items: api.PostsAndChat})
 			return err
 		},
 		"detail": func(ctx context.Context) error {

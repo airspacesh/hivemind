@@ -2,7 +2,10 @@
 // the ws-server HTTP API.
 package api
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 const MaxResponseBytes = 64 << 20
 
@@ -306,6 +309,49 @@ type MatchPage struct {
 	Matches  []Match `json:"matches"`
 	More     bool    `json:"more"`
 	Revision int64   `json:"revision"`
+}
+
+// Items says what a listing or the changes feed holds: posts, the
+// messages in their chats, or both. Its text is the value of the items
+// query parameter.
+type Items int
+
+const (
+	PostsOnly Items = iota
+	ChatOnly
+	PostsAndChat
+)
+
+// itemsText is the text of each Items.
+var itemsText = map[Items]string{
+	PostsOnly:    "posts",
+	ChatOnly:     "chat",
+	PostsAndChat: "posts-and-chat",
+}
+
+func (i Items) String() string {
+	return itemsText[i]
+}
+
+// ParseItems reads Items as String writes them.
+func ParseItems(text string) (Items, error) {
+	for items, written := range itemsText {
+		if written == text {
+			return items, nil
+		}
+	}
+	return 0, fmt.Errorf("items must be posts, chat or posts-and-chat, "+
+		"not %q", text)
+}
+
+// HasPosts reports whether the items hold posts.
+func (i Items) HasPosts() bool {
+	return i != ChatOnly
+}
+
+// HasChat reports whether the items hold messages.
+func (i Items) HasChat() bool {
+	return i != PostsOnly
 }
 
 // SearchFields name what a search condition can match. Each is a query

@@ -139,7 +139,7 @@ func TestProtectedPostsStayOutOfListings(t *testing.T) {
 	}
 
 	listing, err := w.store.Search(ctx, open, root.Workspace,
-		Filter{Limit: 20, IncludeChat: true})
+		Filter{Limit: 20, Items: api.PostsAndChat})
 	if err != nil {
 		t.Fatal(err)
 	}
