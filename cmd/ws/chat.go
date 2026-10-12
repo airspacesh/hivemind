@@ -167,7 +167,7 @@ func chatReadArgs(p *parsedArgs, before *api.Bound) string {
 	if before != nil {
 		text = " --before " + boundArg(*before)
 	}
-	return text + conditionArgs(p) + includeDeleted.arg(p)
+	return text + conditionArgs(p) + deletedToggle.arg(p)
 }
 
 // emptyChat is what a read of the chat of post from after says when it
@@ -221,20 +221,20 @@ func (c *client) numberBefore(
 
 func cmdChatSend(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs:  []string{"--after", "--request-id"},
-		bools: includeDeleted.flags(), passUnknown: true,
+		strs:    []string{"--after", "--request-id"},
+		toggles: []toggle{deletedToggle}, passUnknown: true,
 	})
 	if err != nil {
 		return err
 	}
 	if len(p.pos) != 2 {
 		usage := usageError("chat send <ref> <message> " +
-			"[--after <bound>] [--include-deleted]")
+			"[--after <bound>] [--include-deleted|--exclude-deleted]")
 		for _, arg := range p.pos {
 			if strings.HasPrefix(arg, "--") {
 				return fmt.Errorf("%s looks like a flag, but chat send "+
-					"has only --after, --include-deleted and --request-id"+
-					"\n%w", arg, usage)
+					"has only --after, --include-deleted, "+
+					"--exclude-deleted and --request-id\n%w", arg, usage)
 			}
 		}
 		return usage
@@ -288,15 +288,15 @@ func cmdChatSend(c *client, args []string) error {
 	from := chatCursor(ref, start)
 	latest := url.Values{"latest": {fmt.Sprint(sendShownLimit)},
 		"after": {from.String()}}
-	includeDeleted.addTo(p, latest)
+	deletedToggle.addTo(p, latest)
 	page, err := c.chatPage(t, ref, latest)
 	if err != nil {
 		return fmt.Errorf("reading the chat after the send: %w", err)
 	}
-	printEarlier("", ref, from, page.Earlier, includeDeleted.arg(p))
+	printEarlier("", ref, from, page.Earlier, deletedToggle.arg(p))
 	cursor := api.MessageRef{Post: ref, Number: start}
 	printChatPage(ref, page, from,
-		fmt.Sprintf("No messages after %s.", cursor), includeDeleted.arg(p))
+		fmt.Sprintf("No messages after %s.", cursor), deletedToggle.arg(p))
 	return nil
 }
 
@@ -356,9 +356,10 @@ func cmdChatDelete(c *client, args []string) error {
 
 func cmdChatRecent(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs:   []string{"--limit", "--workspace", "--after", "--before"},
-		bools:  includeDeleted.flags(),
-		repeat: filterFlags(api.MessageFields...),
+		strs: []string{"--limit", "--workspace", "--after",
+			"--before"},
+		toggles: []toggle{deletedToggle},
+		repeat:  filterFlags(api.MessageFields...),
 	})
 	if err != nil {
 		return err
@@ -366,8 +367,8 @@ func cmdChatRecent(c *client, args []string) error {
 	if len(p.pos) > 1 || (len(p.pos) == 1 && p.has("--workspace")) {
 		return usageError("chat recent [<ref>|--workspace <name>] " +
 			"[--after <bound>] [--before <bound>] [--limit <n>] " +
-			"[--include-deleted] [--content <pattern>]... " +
-			"[--origin-user <pattern>]...")
+			"[--include-deleted|--exclude-deleted] " +
+			"[--content <pattern>]... [--origin-user <pattern>]...")
 	}
 	limit := 20
 	if p.has("--limit") {
@@ -400,7 +401,7 @@ func cmdChatRecent(c *client, args []string) error {
 		}
 		query.Set("limit", fmt.Sprint(limit))
 		addChatBounds(query, bounds["--after"], bounds["--before"])
-		includeDeleted.addTo(p, query)
+		deletedToggle.addTo(p, query)
 		var overview api.ChatOverview
 		path := workspacePath(t, "/messages?"+query.Encode())
 		if err := c.do(t, "GET", path, nil, &overview); err != nil {
@@ -435,7 +436,7 @@ func cmdChatRecent(c *client, args []string) error {
 	}
 	query.Set("latest", fmt.Sprint(limit))
 	addChatBounds(query, after, before)
-	includeDeleted.addTo(p, query)
+	deletedToggle.addTo(p, query)
 	page, err := c.chatPage(t, ref, query)
 	if err != nil {
 		return err
@@ -468,16 +469,17 @@ func parseTimeout(
 
 func cmdChatRead(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs:   []string{"--after", "--before", "--limit"},
-		bools:  includeDeleted.flags(),
-		repeat: filterFlags(api.MessageFields...),
+		strs:    []string{"--after", "--before", "--limit"},
+		toggles: []toggle{deletedToggle},
+		repeat:  filterFlags(api.MessageFields...),
 	})
 	if err != nil {
 		return err
 	}
 	if len(p.pos) != 1 {
 		return usageError("chat read <ref> [--after <bound>] " +
-			"[--before <bound>] [--limit <n>] [--include-deleted] " +
+			"[--before <bound>] [--limit <n>] " +
+			"[--include-deleted|--exclude-deleted] " +
 			"[--content <pattern>]... [--origin-user <pattern>]...")
 	}
 	ref, err := api.ParseRef(p.pos[0])
@@ -508,7 +510,7 @@ func cmdChatRead(c *client, args []string) error {
 		}
 		query.Set("limit", fmt.Sprint(limit))
 	}
-	includeDeleted.addTo(p, query)
+	deletedToggle.addTo(p, query)
 
 	page, err := c.chatPage(t, ref, query)
 	if err != nil {
@@ -525,16 +527,16 @@ func cmdChatRead(c *client, args []string) error {
 
 func cmdChatWait(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs:   []string{"--after", "--timeout"},
-		bools:  append(mineToggle.flags(), includeDeleted.flags()...),
-		repeat: filterFlags(api.MessageFields...),
+		strs:    []string{"--after", "--timeout"},
+		toggles: []toggle{mineToggle, deletedToggle},
+		repeat:  filterFlags(api.MessageFields...),
 	})
 	if err != nil {
 		return err
 	}
 	if len(p.pos) != 1 {
 		return usageError("chat wait <ref> [--after <bound>] " +
-			"[--timeout <d>] [--include-deleted] " +
+			"[--timeout <d>] [--include-deleted|--exclude-deleted] " +
 			"[--content <pattern>]... [--origin-user <pattern>]... " +
 			"[--exclude-mine|--include-mine]")
 	}
@@ -546,15 +548,12 @@ func cmdChatWait(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	exclude, err := mineToggle.isOn(p, true)
-	if err != nil {
-		return err
-	}
+	exclude := mineToggle.isOn(p, true)
 	query, err := searchQuery(p)
 	if err != nil {
 		return err
 	}
-	includeDeleted.addTo(p, query)
+	deletedToggle.addTo(p, query)
 
 	t, err := c.resolve(ref)
 	if err != nil {
@@ -605,7 +604,7 @@ func cmdChatWait(c *client, args []string) error {
 	if page.Remaining > 0 {
 		last := api.MessageRef{Post: ref, Number: page.Cursor}
 		fmt.Printf("Next: %s (more messages to check)\n",
-			chatWaitCommand(last, filterArgs(p)+includeDeleted.arg(p)))
+			chatWaitCommand(last, filterArgs(p)+deletedToggle.arg(p)))
 		return nil
 	}
 	printChatCursor(ref, page, after)

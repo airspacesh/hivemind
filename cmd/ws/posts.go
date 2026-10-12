@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"os/user"
-	"slices"
 	"strings"
 	"time"
 
@@ -594,16 +593,16 @@ func cmdPost(c *client, args []string) error {
 
 func cmdTree(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs: []string{"--limit"},
-		bools: slices.Concat(includeSuperseded.flags(),
-			includeDeleted.flags()),
+		strs:    []string{"--limit"},
+		toggles: []toggle{supersededToggle, deletedToggle},
 	})
 	if err != nil {
 		return err
 	}
 	if len(p.pos) != 1 {
-		return usageError("tree <ref> [--limit <n>] [--include-superseded] " +
-			"[--include-deleted]")
+		return usageError("tree <ref> [--limit <n>] " +
+			"[--include-superseded|--exclude-superseded] " +
+			"[--include-deleted|--exclude-deleted]")
 	}
 	ref, err := api.ParseRef(p.pos[0])
 	if err != nil {
@@ -617,8 +616,8 @@ func cmdTree(c *client, args []string) error {
 		}
 		query.Set("limit", fmt.Sprint(limit))
 	}
-	includeSuperseded.addTo(p, query)
-	includeDeleted.addTo(p, query)
+	supersededToggle.addTo(p, query)
+	deletedToggle.addTo(p, query)
 
 	t, err := c.resolve(ref)
 	if err != nil {
@@ -713,10 +712,10 @@ func listingHeader(p *parsedArgs, limit int, items api.Items) string {
 	if matching != "" {
 		text += " matching" + matching
 	}
-	if includeSuperseded.isOn(p) {
+	if supersededToggle.isOn(p, false) {
 		text += ", superseded included"
 	}
-	if includeDeleted.isOn(p) {
+	if deletedToggle.isOn(p, false) {
 		text += ", deleted included"
 	}
 	return text + ":"
@@ -740,7 +739,7 @@ func olderCommand(
 	if p.has("--limit") {
 		text += " --limit " + shellQuote(p.strs["--limit"])
 	}
-	return text + includeSuperseded.arg(p) + includeDeleted.arg(p) +
+	return text + supersededToggle.arg(p) + deletedToggle.arg(p) +
 		filterArgs(p)
 }
 
@@ -758,9 +757,10 @@ func cmdListing(c *client, command string, args []string) error {
 			return fmt.Errorf("give at most one <text> (got %d)",
 				len(p.pos))
 		}
-		if includeDeleted.isOn(p) {
+		if p.has(deletedToggle.on) || p.has(deletedToggle.off) {
 			return fmt.Errorf("search never lists deleted posts or "+
-				"messages, so it takes no %s", includeDeleted.flag)
+				"messages, so it takes no %s or %s", deletedToggle.on,
+				deletedToggle.off)
 		}
 	case "recent":
 		if len(p.pos) != 0 {
@@ -806,8 +806,8 @@ func cmdListing(c *client, command string, args []string) error {
 		}
 	}
 	query.Set("limit", fmt.Sprint(limit))
-	includeSuperseded.addTo(p, query)
-	includeDeleted.addTo(p, query)
+	supersededToggle.addTo(p, query)
+	deletedToggle.addTo(p, query)
 	query.Set("items", items.String())
 
 	t, err := c.boundedTarget(p, bounds...)
@@ -848,16 +848,17 @@ func cmdListing(c *client, command string, args []string) error {
 
 func cmdListProjects(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs:  []string{"--limit", "--workspace"},
-		bools: includeDeleted.flags(),
+		strs:    []string{"--limit", "--workspace"},
+		toggles: []toggle{deletedToggle},
 	})
 	if err != nil {
 		return err
 	}
 	if len(p.pos) != 0 {
-		return usageError("list-projects [--limit 30] [--include-deleted] " +
-			"[--workspace <name>]")
+		return usageError("list-projects [--limit 30] " +
+			"[--include-deleted|--exclude-deleted] [--workspace <name>]")
 	}
+
 	limit := 30
 	if p.has("--limit") {
 		if limit, err = parsePositive("--limit", p.strs["--limit"]); err != nil {
@@ -869,7 +870,7 @@ func cmdListProjects(c *client, args []string) error {
 		return err
 	}
 	query := url.Values{"limit": {fmt.Sprint(limit)}}
-	includeDeleted.addTo(p, query)
+	deletedToggle.addTo(p, query)
 	result, err := c.projects(targetOf(workspace), query)
 	if err != nil {
 		return err
@@ -887,7 +888,7 @@ func cmdListProjects(c *client, args []string) error {
 	if more > 0 {
 		fmt.Printf("Next: %s list-projects --limit %d%s --workspace %s "+
 			"(%d more %s)\n", programName, result.Count,
-			includeDeleted.arg(p), shellQuote(workspace.name), more, noun)
+			deletedToggle.arg(p), shellQuote(workspace.name), more, noun)
 	}
 	return nil
 }

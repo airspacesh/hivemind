@@ -696,6 +696,9 @@ check "a listing with deleted posts shows a deleted message as deleted" \
 check "the next page keeps deleted posts" "--include-deleted" \
     "$(ws recent --project owners --include-deleted -n 1 2>/dev/null |
         grep '^Next:')"
+check_equal "--exclude-deleted lists as the default does" "$owners" \
+    "$(ws recent --project owners --include-chat --exclude-deleted |
+        untimed)"
 check_equal "a chat leaves out deleted messages, but its cursor passes them" \
     "[$gadwall-m1] $(id -un): Before
 [$gadwall-m3] $(id -un): After

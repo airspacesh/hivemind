@@ -92,9 +92,9 @@ func (c *client) parseChangesArgs(
 	command string, args []string, timeout time.Duration, mine bool,
 ) (changesArgs, error) {
 	p, err := parseArgs(args, flagSpec{
-		strs:   []string{"--after", "--timeout", "--workspace", "--under"},
-		bools:  append(mineToggle.flags(), itemFlags...),
-		repeat: searchFilterFlags(),
+		strs:    []string{"--after", "--timeout", "--workspace", "--under"},
+		toggles: append([]toggle{mineToggle}, itemToggles...),
+		repeat:  searchFilterFlags(),
 	})
 	if err != nil {
 		return changesArgs{}, err
@@ -118,10 +118,7 @@ func (c *client) parseChangesArgs(
 	if parsed.timeout, err = parseTimeout(p, timeout); err != nil {
 		return changesArgs{}, err
 	}
-	exclude, err := mineToggle.isOn(p, mine)
-	if err != nil {
-		return changesArgs{}, err
-	}
+	exclude := mineToggle.isOn(p, mine)
 	items, err := readItems(p, command, true)
 	if err != nil {
 		return changesArgs{}, err

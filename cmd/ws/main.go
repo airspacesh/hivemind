@@ -37,29 +37,33 @@ Usage:
          [--unlink <name>[=<ref>]]... [--private|--public]
   {program} delete <ref>
   {program} post <ref>|<ref>-m<n>
-  {program} tree <ref> [--limit 30] [--include-superseded]
-         [--include-deleted]
+  {program} tree <ref> [--limit 30]
+         [--include-superseded|--exclude-superseded]
+         [--include-deleted|--exclude-deleted]
   {program} recent [--after <bound>] [--before <bound>]
          [--include-chat|--exclude-chat] [--include-posts|--exclude-posts]
-         [--include-superseded] [--include-deleted] [--under <ref>]
+         [--include-superseded|--exclude-superseded]
+         [--include-deleted|--exclude-deleted] [--under <ref>]
          [search filters] [--workspace <name>]
   {program} search [<text>] [--after <bound>] [--before <bound>]
          [--include-chat|--exclude-chat] [--include-posts|--exclude-posts]
-         [--include-superseded] [--under <ref>] [search filters]
-         [--workspace <name>]
+         [--include-superseded|--exclude-superseded] [--under <ref>]
+         [search filters] [--workspace <name>]
   {program} list-workspaces
-  {program} list-projects [--limit 30] [--include-deleted]
-         [--workspace <name>]
+  {program} list-projects [--limit 30]
+         [--include-deleted|--exclude-deleted] [--workspace <name>]
   {program} chat send <ref> <message> [--after <bound>]
-         [--include-deleted]
+         [--include-deleted|--exclude-deleted]
   {program} chat recent [<ref>|--workspace <name>] [--after <bound>]
-         [--before <bound>] [--limit 20] [--include-deleted]
+         [--before <bound>] [--limit 20]
+         [--include-deleted|--exclude-deleted]
          [--content <pattern>]... [--origin-user <pattern>]...
   {program} chat read <ref> [--after <bound>] [--before <bound>]
-         [--limit 20] [--include-deleted]
+         [--limit 20] [--include-deleted|--exclude-deleted]
          [--content <pattern>]... [--origin-user <pattern>]...
   {program} chat wait <ref> [--after <bound>] [--timeout 10m]
-         [--include-deleted] [--exclude-mine|--include-mine]
+         [--include-deleted|--exclude-deleted]
+         [--exclude-mine|--include-mine]
          [--content <pattern>]... [--origin-user <pattern>]...
   {program} chat edit <ref>-m<n> <message>
   {program} chat delete <ref>-m<n>
@@ -232,12 +236,13 @@ Inclusion flags:
       the posts in recent, search, wait and firehose, which show them by
       default. A command left to show neither posts nor messages refuses
       to run.
-  --include-deleted
+  --include-deleted, --exclude-deleted
       deleted posts and messages, as (deleted), in recent, tree,
-      list-projects, chat send, chat recent, chat read and chat wait.
-      search never shows them.
-  --include-superseded
-      superseded posts, in recent, search and tree.
+      list-projects, chat send, chat recent, chat read and chat wait,
+      which leave them out by default. search never shows them.
+  --include-superseded, --exclude-superseded
+      superseded posts, in recent, search and tree, which leave them out
+      by default.
   --exclude-mine, --include-mine
       your own changes and messages in wait, firehose and chat wait.
       The waits leave them out by default, and firehose shows them. Chat

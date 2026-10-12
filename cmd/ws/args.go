@@ -20,6 +20,8 @@ type flagSpec struct {
 	strs   []string // flags taking a value
 	bools  []string // flags taking no value
 	repeat []string // repeatable flags taking a value
+	// toggles are pairs of flags taking no value, at most one of each.
+	toggles []toggle
 	// passUnknown keeps an unknown flag as a positional argument, so
 	// free text that starts with - needs no --.
 	passUnknown bool
@@ -72,7 +74,10 @@ func parseArgs(args []string, spec flagSpec) (*parsedArgs, error) {
 			name = long
 		}
 		switch {
-		case slices.Contains(spec.bools, name):
+		case slices.Contains(spec.bools, name) ||
+			slices.ContainsFunc(spec.toggles, func(t toggle) bool {
+				return name == t.on || name == t.off
+			}):
 			if hasValue {
 				return nil, fmt.Errorf("%s does not take a value", name)
 			}
@@ -110,6 +115,11 @@ func parseArgs(args []string, spec flagSpec) (*parsedArgs, error) {
 			return nil, fmt.Errorf("unknown flag: %s", typed)
 		}
 	}
+	for _, t := range spec.toggles {
+		if p.has(t.on) && p.has(t.off) {
+			return nil, fmt.Errorf("give one of %s and %s", t.on, t.off)
+		}
+	}
 	return p, nil
 }
 
@@ -140,69 +150,42 @@ type toggle struct {
 	on, off string
 }
 
-// inclusion is a flag that shows what a command leaves out by default,
-// like --include-deleted, and passes on to a query as the parameter of
-// its name.
-type inclusion struct {
-	flag string
-}
-
 // The inclusion flags. The help documents them together, under
 // Inclusion flags.
 var (
-	chatToggle        = toggle{on: "--include-chat", off: "--exclude-chat"}
-	postsToggle       = toggle{on: "--include-posts", off: "--exclude-posts"}
-	mineToggle        = toggle{on: "--exclude-mine", off: "--include-mine"}
-	includeDeleted    = inclusion{flag: "--include-deleted"}
-	includeSuperseded = inclusion{flag: "--include-superseded"}
+	chatToggle       = toggle{on: "--include-chat", off: "--exclude-chat"}
+	postsToggle      = toggle{on: "--include-posts", off: "--exclude-posts"}
+	mineToggle       = toggle{on: "--exclude-mine", off: "--include-mine"}
+	deletedToggle    = toggle{on: "--include-deleted", off: "--exclude-deleted"}
+	supersededToggle = toggle{on: "--include-superseded",
+		off: "--exclude-superseded"}
 )
 
-func (t toggle) flags() []string {
-	return []string{t.on, t.off}
-}
-
-func (f inclusion) flags() []string {
-	return []string{f.flag}
-}
-
-func (f inclusion) isOn(p *parsedArgs) bool {
-	return p.bools[f.flag]
-}
-
-// addTo passes the flag on to a query, when a command was given it.
-func (f inclusion) addTo(p *parsedArgs, query url.Values) {
-	if f.isOn(p) {
-		query.Set(strings.TrimPrefix(f.flag, "--"), "true")
-	}
-}
-
-// arg repeats the flag, after a space, when a command was given it, so
-// a command it suggests does the same.
-func (f inclusion) arg(p *parsedArgs) string {
-	if f.isOn(p) {
-		return " " + f.flag
-	}
-	return ""
-}
-
 // isOn reads whether a command's toggle is on, given its default.
-func (t toggle) isOn(p *parsedArgs, byDefault bool) (bool, error) {
+func (t toggle) isOn(p *parsedArgs, byDefault bool) bool {
 	switch {
-	case p.has(t.on) && p.has(t.off):
-		return false, fmt.Errorf("give one of %s and %s", t.on, t.off)
 	case p.has(t.on):
-		return true, nil
+		return true
 	case p.has(t.off):
-		return false, nil
+		return false
 	default:
-		return byDefault, nil
+		return byDefault
+	}
+}
+
+// addTo passes the toggle on to a query, as the parameter its on flag
+// names, when a command was given that flag. Without it, the server
+// leaves the thing out.
+func (t toggle) addTo(p *parsedArgs, query url.Values) {
+	if p.has(t.on) {
+		query.Set(strings.TrimPrefix(t.on, "--"), "true")
 	}
 }
 
 // arg repeats the flag of the toggle a command was given, after a
 // space, so a command it suggests does the same.
 func (t toggle) arg(p *parsedArgs) string {
-	for _, flag := range t.flags() {
+	for _, flag := range []string{t.on, t.off} {
 		if p.has(flag) {
 			return " " + flag
 		}
@@ -210,9 +193,9 @@ func (t toggle) arg(p *parsedArgs) string {
 	return ""
 }
 
-// itemFlags are the flags that choose whether a listing or wait holds
-// posts, messages, or both.
-var itemFlags = append(postsToggle.flags(), chatToggle.flags()...)
+// itemToggles are the toggles that choose whether a listing or wait
+// holds posts, messages, or both.
+var itemToggles = []toggle{postsToggle, chatToggle}
 
 // readItems reads whether a listing or wait holds posts, messages, or
 // both, given whether the command holds messages by default. Posts it
@@ -220,14 +203,8 @@ var itemFlags = append(postsToggle.flags(), chatToggle.flags()...)
 func readItems(
 	p *parsedArgs, command string, chatByDefault bool,
 ) (api.Items, error) {
-	posts, err := postsToggle.isOn(p, true)
-	if err != nil {
-		return 0, err
-	}
-	chat, err := chatToggle.isOn(p, chatByDefault)
-	if err != nil {
-		return 0, err
-	}
+	posts := postsToggle.isOn(p, true)
+	chat := chatToggle.isOn(p, chatByDefault)
 	switch {
 	case posts && chat:
 		return api.PostsAndChat, nil
@@ -255,8 +232,9 @@ func searchFlagSpec() flagSpec {
 	return flagSpec{
 		strs: []string{"--limit", "--under", "--workspace", "--after",
 			"--before"},
-		bools: slices.Concat([]string{"--id-only"},
-			includeSuperseded.flags(), includeDeleted.flags(), itemFlags),
+		bools: []string{"--id-only"},
+		toggles: append([]toggle{supersededToggle, deletedToggle},
+			itemToggles...),
 		repeat: searchFilterFlags(),
 	}
 }
