@@ -87,7 +87,7 @@ Newest 20 posts and messages:
 [g2-m1] 08:30 alice in g1.g2: It started with the toolchain update on Friday.
 [g2] 08:30 alice in g1: Nightly build fails on arm64 (question)
 [g1] 08:30 alice: Release 2.4
-Cursor: @3 (wait for more: ws wait --after @3 --workspace general)
+Cursor: @3
 [g1] 08:30: Release 2.4
   [g2] 08:30: Nightly build fails on arm64 (question)
 ```
