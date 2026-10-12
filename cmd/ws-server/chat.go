@@ -18,7 +18,7 @@ func (h *handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return
 	}
-	_, post, ok := h.pathPost(w, r)
+	access, post, ok := h.pathPost(w, r)
 	if !ok {
 		return
 	}
@@ -30,7 +30,8 @@ func (h *handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	message, created, err := h.store.PostMessage(r.Context(), post, request)
+	message, created, err := h.store.PostMessage(r.Context(), access, post,
+		request)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -79,7 +80,7 @@ func (h *handler) editMessage(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return
 	}
-	_, post, number, ok := h.pathMessage(w, r)
+	access, post, number, ok := h.pathMessage(w, r)
 	if !ok {
 		return
 	}
@@ -92,7 +93,7 @@ func (h *handler) editMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	message, _, err := h.store.EditMessage(
-		r.Context(), post, number, request)
+		r.Context(), access, post, number, request)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -104,7 +105,7 @@ func (h *handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return
 	}
-	_, post, number, ok := h.pathMessage(w, r)
+	access, post, number, ok := h.pathMessage(w, r)
 	if !ok {
 		return
 	}
@@ -116,8 +117,8 @@ func (h *handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	message, err := h.store.DeleteMessage(r.Context(), post, number,
-		request)
+	message, err := h.store.DeleteMessage(r.Context(), access, post,
+		number, request)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -167,17 +168,18 @@ func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	_, post, ok := h.pathPost(w, r)
+	access, post, ok := h.pathPost(w, r)
 	if !ok {
 		return
 	}
 
 	var page api.ChatPage
 	if hasLatest {
-		page, err = h.store.LatestMessages(r.Context(), post, int(latest))
+		page, err = h.store.LatestMessages(r.Context(), access, post,
+			int(latest))
 	} else {
-		page, err = h.store.Messages(r.Context(), post, after, filter,
-			exclude, int(limit))
+		page, err = h.store.Messages(r.Context(), access, post, after,
+			filter, exclude, int(limit))
 	}
 	if err != nil {
 		writeStoreError(w, err)
@@ -207,7 +209,8 @@ func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	overview, err := h.store.Overview(r.Context(), workspace.ID, int(limit))
+	overview, err := h.store.Overview(r.Context(), access, workspace.ID,
+		int(limit))
 	if err != nil {
 		writeStoreError(w, err)
 		return

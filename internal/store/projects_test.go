@@ -29,7 +29,7 @@ func listProjects(
 	t *testing.T, store *Store, workspace string, limit int, now time.Time,
 ) api.ProjectsResponse {
 	t.Helper()
-	response, err := store.Projects(context.Background(),
+	response, err := store.Projects(context.Background(), everyAccess(store),
 		workspaceID(t, store, workspace), limit, now)
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +41,7 @@ func readProject(
 	t *testing.T, store *Store, name string, now time.Time,
 ) api.ProjectsResponse {
 	t.Helper()
-	response, err := store.Project(context.Background(),
+	response, err := store.Project(context.Background(), everyAccess(store),
 		workspaceID(t, store, "general"), name, now)
 	if err != nil {
 		t.Fatal(err)

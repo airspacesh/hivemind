@@ -206,14 +206,19 @@ func (r PostMessageRequest) Validate() error {
 	return r.Origin.Validate()
 }
 
-func validateEditor(user string) error {
-	if user == "" {
-		return fmt.Errorf("an edit needs the user making it")
-	}
+// ValidateUser checks the user a request names, which may be empty.
+func ValidateUser(user string) error {
 	if err := checkOneLine("user", user); err != nil {
 		return err
 	}
 	return checkLen("user", user, MaxOriginUserLen)
+}
+
+func validateEditor(user string) error {
+	if user == "" {
+		return fmt.Errorf("an edit needs the user making it")
+	}
+	return ValidateUser(user)
 }
 
 func (r EditMessageRequest) Validate() error {
@@ -300,6 +305,9 @@ func (r AddPostRequest) Validate() error {
 	if err := validateLinks(r.Links); err != nil {
 		return err
 	}
+	if r.Private && r.Origin.User == "" {
+		return fmt.Errorf("a private post needs the user who owns it")
+	}
 	if err := validateRequestID(r.RequestID); err != nil {
 		return err
 	}
@@ -308,9 +316,10 @@ func (r AddPostRequest) Validate() error {
 
 func (r EditPostRequest) Validate() error {
 	if !r.ChangesContent() && len(r.AddLinks) == 0 &&
-		len(r.RemoveLinks) == 0 && len(r.RemoveLinkNames) == 0 {
+		len(r.RemoveLinks) == 0 && len(r.RemoveLinkNames) == 0 &&
+		r.Private == nil {
 		return fmt.Errorf("nothing to edit: provide project, subject, " +
-			"body, metadata, or links")
+			"body, metadata, links, or whether it is private")
 	}
 	if err := validateLinks(r.AddLinks); err != nil {
 		return err

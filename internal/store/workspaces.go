@@ -26,15 +26,20 @@ type Key struct {
 	ID        int64
 }
 
-// Access is the set of workspaces a request can read, and so write.
-// Every post outside it is unreadable. It shows as its bare ref in a
-// link or an ancestor path, and nowhere else.
+// Access is the set of workspaces a request can read, and so write,
+// and the user it reads as. Every post outside the workspaces is
+// unreadable. It shows as its bare ref in a link or an ancestor path,
+// and nowhere else. A post private to another user is unreadable
+// everywhere, as if it did not exist. The user is the one the client
+// names, unchecked, so a private post is kept out of other users' way
+// rather than kept secret.
 type Access struct {
+	user       string
 	workspaces []int64
 }
 
-func NewAccess(workspaces ...int64) Access {
-	return Access{workspaces: slices.Clone(workspaces)}
+func NewAccess(user string, workspaces ...int64) Access {
+	return Access{user: user, workspaces: slices.Clone(workspaces)}
 }
 
 func (a Access) CanRead(workspace int64) bool {

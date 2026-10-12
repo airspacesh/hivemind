@@ -66,9 +66,14 @@ INSERT INTO revision_counter (only_row, revision) VALUES (1, 0)`
 // revision of the change that set activity_utc, and posted_revision the
 // revision of the change that added the post, which later changes leave
 // alone. deleted is 1 once a delete has cleared the subject and body,
-// and 0 before. request_id is the id the client gave the request that
-// added the post, or empty, and request_digest the requestDigest of what
-// that request asked for.
+// and 0 before. private is 1 while the post's owner keeps it private.
+// private_to names the owner of the nearest post at or above it that is
+// private, who alone can read it, or is empty when everyone can. Every
+// write that makes a post private or public, adds one, or moves one
+// keeps it current, so a read filters on it without walking up the
+// tree. request_id is the id the client gave the request that added the
+// post, or empty, and request_digest the requestDigest of what that
+// request asked for.
 const createPosts = `
 CREATE TABLE posts (
 	workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
@@ -89,6 +94,8 @@ CREATE TABLE posts (
 	body_lower TEXT COLLATE BINARY
 		GENERATED ALWAYS AS (lower(body)) STORED,
 	deleted INTEGER NOT NULL DEFAULT 0,
+	private INTEGER NOT NULL DEFAULT 0,
+	private_to TEXT NOT NULL DEFAULT '',
 	origin_user TEXT NOT NULL DEFAULT '',
 	origin_user_lower TEXT COLLATE BINARY
 		GENERATED ALWAYS AS (lower(origin_user)) STORED,

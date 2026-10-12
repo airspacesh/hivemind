@@ -142,7 +142,7 @@ func TestTextIndexFollowsEdits(t *testing.T) {
 		}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.EditMessage(ctx, store.mustKey(post.Ref),
+	if _, _, err := store.EditMessage(ctx, everyAccess(store), store.mustKey(post.Ref),
 		message.Number, ownEdit("Saw a swan")); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestTextIndexForgetsOverwrittenText(t *testing.T) {
 		}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.EditMessage(ctx, store.mustKey(post.Ref),
+	if _, _, err := store.EditMessage(ctx, everyAccess(store), store.mustKey(post.Ref),
 		message.Number, ownEdit("Egret")); err != nil {
 		t.Fatal(err)
 	}

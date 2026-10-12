@@ -99,7 +99,9 @@ type changeKey struct {
 // since and up to through that match a filter, leaving out those whose
 // origin has the key exclude, at most limit of them, oldest first. A
 // post's change matches as the post, and a message's as a message in
-// its chat.
+// its chat. The changes to posts the reader cannot read, and to their
+// chats, are left out, so a post made private drops out of the feed of
+// everyone else.
 func (v view) readChangeKeys(
 	ctx context.Context,
 	workspace int64,
@@ -115,8 +117,9 @@ func (v view) readChangeKeys(
 	postWhere.addUnder(filter.Under)
 	postWhere.excludeOrigin("e", exclude)
 	postWhere.clauses = append(postWhere.clauses, `e.workspace_id = ?`,
-		`e.revision > ?`, `e.revision <= ?`)
-	postWhere.args = append(postWhere.args, workspace, since, through)
+		`e.revision > ?`, `e.revision <= ?`, visibleClause("e"))
+	postWhere.args = append(postWhere.args, workspace, since, through,
+		v.access.user)
 
 	messageWhere, err := buildMessageWhere(filter)
 	if err != nil {
@@ -125,8 +128,10 @@ func (v view) readChangeKeys(
 	messageWhere.addUnder(filter.Under)
 	messageWhere.excludeOrigin("m", exclude)
 	messageWhere.clauses = append(messageWhere.clauses,
-		`m.workspace_id = ?`, `m.revision > ?`, `m.revision <= ?`)
-	messageWhere.args = append(messageWhere.args, workspace, since, through)
+		`m.workspace_id = ?`, `m.revision > ?`, `m.revision <= ?`,
+		visibleClause("e"))
+	messageWhere.args = append(messageWhere.args, workspace, since, through,
+		v.access.user)
 
 	// CROSS JOIN keeps SQLite reading the messages in revision order,
 	// rather than reading posts first for a filter on them.

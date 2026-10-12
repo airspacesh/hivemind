@@ -128,7 +128,7 @@ func (w *forestWriter) write() {
 			return
 		}
 		if choice == 7 {
-			if _, err := w.store.DeleteMessage(ctx, messageKey,
+			if _, err := w.store.DeleteMessage(ctx, everyAccess(w.store), messageKey,
 				message.Number, api.DeleteRequest{
 					User: message.Origin.User}); err != nil {
 				w.t.Fatal(err)
@@ -136,7 +136,7 @@ func (w *forestWriter) write() {
 			w.deleted[message.Ref().String()] = true
 			return
 		}
-		if _, _, err := w.store.EditMessage(ctx, messageKey,
+		if _, _, err := w.store.EditMessage(ctx, everyAccess(w.store), messageKey,
 			message.Number, api.EditMessageRequest{
 				Body: fmt.Sprintf("edited %d %s", w.writes, w.word()),
 				User: message.Origin.User,
@@ -144,7 +144,7 @@ func (w *forestWriter) write() {
 			w.t.Fatal(err)
 		}
 	default:
-		message, _, err := w.store.PostMessage(ctx, key, api.PostMessageRequest{
+		message, _, err := w.store.PostMessage(ctx, everyAccess(w.store), key, api.PostMessageRequest{
 			Body:   w.word(),
 			Origin: api.Origin{User: []string{"ines", "omar"}[w.random.Intn(2)]},
 		})
@@ -250,7 +250,7 @@ func readForest(
 				SELECT target_id FROM post_links
 				WHERE source_workspace_id = e.workspace_id
 					AND source_id = e.id AND name = 'parent'), 0)
-		FROM posts AS e WHERE e.workspace_id = ?`, workspace)
+		FROM posts AS e WHERE e.workspace_id = ?`, "", workspace)
 	if err != nil {
 		t.Fatal(err)
 	}

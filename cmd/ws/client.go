@@ -305,6 +305,7 @@ func (c *client) do(t target, method, path string, body, out any) error {
 		return err
 	}
 	request.Header.Set(version.APIHeader, strconv.Itoa(version.API))
+	request.Header.Set(api.UserHeader, currentUser())
 	if t.secret != "" {
 		request.Header.Set("Authorization", "Bearer "+t.secret)
 	}

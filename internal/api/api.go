@@ -6,6 +6,11 @@ import "time"
 
 const MaxResponseBytes = 64 << 20
 
+// UserHeader carries the user a request reads as, who can read the
+// posts private to them as well as the public ones. The server takes
+// the client's word for it.
+const UserHeader = "Workstream-User"
+
 // ProjectKey is reserved as a metadata key, since every post has a
 // project field, and a pair of that name would read as a second one.
 const ProjectKey = "project"
@@ -50,19 +55,24 @@ type Origin struct {
 
 // Post is a post with its own fields. A deleted post has no subject,
 // body or metadata, and cannot be edited. Revision is the revision of
-// the post's own latest change, which set Modified.
+// the post's own latest change, which set Modified. Private says the
+// post's owner made it private. PrivateTo names the user who alone can
+// read the post, the owner of the nearest private post at or above it,
+// or is empty when everyone can.
 type Post struct {
-	Ref      Ref               `json:"ref"`
-	Created  time.Time         `json:"created"`
-	Modified time.Time         `json:"modified"`
-	Revision int64             `json:"revision"`
-	Project  string            `json:"project"`
-	Subject  string            `json:"subject"`
-	Body     string            `json:"body,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
-	Origin   Origin            `json:"origin"`
-	Links    []Link            `json:"links,omitempty"`
-	Deleted  bool              `json:"deleted,omitempty"`
+	Ref       Ref               `json:"ref"`
+	Created   time.Time         `json:"created"`
+	Modified  time.Time         `json:"modified"`
+	Revision  int64             `json:"revision"`
+	Project   string            `json:"project"`
+	Subject   string            `json:"subject"`
+	Body      string            `json:"body,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+	Origin    Origin            `json:"origin"`
+	Links     []Link            `json:"links,omitempty"`
+	Deleted   bool              `json:"deleted,omitempty"`
+	Private   bool              `json:"private,omitempty"`
+	PrivateTo string            `json:"private_to,omitempty"`
 	// SupersededBy lists the posts that supersede this one.
 	SupersededBy []Ref `json:"superseded_by,omitempty"`
 }
@@ -73,6 +83,7 @@ type PostRef struct {
 	Ref          Ref    `json:"ref"`
 	Subject      string `json:"subject,omitempty"`
 	Deleted      bool   `json:"deleted,omitempty"`
+	PrivateTo    string `json:"private_to,omitempty"`
 	SupersededBy []Ref  `json:"superseded_by,omitempty"`
 }
 
@@ -224,6 +235,7 @@ type ChangesPage struct {
 
 // AddPostRequest may carry a request id, which the client makes up so
 // that the server adds a post at most once for it, in one workspace.
+// Private makes the post private to the user of its origin.
 type AddPostRequest struct {
 	Project   string            `json:"project"`
 	Subject   string            `json:"subject"`
@@ -231,6 +243,7 @@ type AddPostRequest struct {
 	Metadata  map[string]string `json:"metadata,omitempty"`
 	Origin    Origin            `json:"origin"`
 	Links     []Link            `json:"links,omitempty"`
+	Private   bool              `json:"private,omitempty"`
 	RequestID string            `json:"request_id,omitempty"`
 }
 
@@ -250,6 +263,8 @@ type EditPostRequest struct {
 	// removes every link of a name, and is fine when there are none.
 	RemoveLinks     []Link   `json:"remove_links,omitempty"`
 	RemoveLinkNames []string `json:"remove_link_names,omitempty"`
+	// Private makes the post private when true, and public when false.
+	Private *bool `json:"private,omitempty"`
 	// User is the user making the edit, who must be the user that
 	// wrote the post.
 	User string `json:"user"`

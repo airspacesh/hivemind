@@ -115,6 +115,20 @@ func repeatCommand(
 	return text
 }
 
+// printWhoCanRead says who alone can read a post a write left
+// private, and when public says so if asked to.
+func printWhoCanRead(post api.Post, public bool) {
+	switch {
+	case post.Private:
+		fmt.Printf("Only %s can read it.\n", post.PrivateTo)
+	case post.PrivateTo != "":
+		fmt.Printf("Only %s can read it, as a post above it is private.\n",
+			post.PrivateTo)
+	case public:
+		fmt.Println("Everyone can read it.")
+	}
+}
+
 // explainNotOwner adds the next step to an edit or delete refused
 // because another user posted what it changes.
 func explainNotOwner(err error, post api.Ref) error {
@@ -328,7 +342,7 @@ func cmdAdd(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
 		strs: []string{"--project", "--body", "--parent", "--workspace",
 			"--request-id"},
-		bools: []string{"--no-recent"},
+		bools: []string{"--no-recent", "--private"},
 		repeat: append([]string{"--meta", "--supersedes", "--link"},
 			shorthandFlags()...),
 	})
@@ -338,8 +352,8 @@ func cmdAdd(c *client, args []string) error {
 	if len(p.pos) != 1 {
 		return usageError("add <subject> --project <p> " +
 			"[--body <b>] [--meta <key>=<value>]... [--parent <ref>] " +
-			"[--supersedes <ref>]... [--link <name>=<ref>]... [--no-recent] " +
-			"[--workspace <name>]")
+			"[--supersedes <ref>]... [--link <name>=<ref>]... [--private] " +
+			"[--no-recent] [--workspace <name>]")
 	}
 	metadata, err := collectMetadata(p)
 	if err != nil {
@@ -376,6 +390,7 @@ func cmdAdd(c *client, args []string) error {
 		Metadata:  metadata,
 		Origin:    origin,
 		Links:     links,
+		Private:   p.bools["--private"],
 		RequestID: id,
 	}
 	if err := request.Validate(); err != nil {
@@ -391,6 +406,7 @@ func cmdAdd(c *client, args []string) error {
 			repeatCommand("add", args, p, id))
 	}
 	fmt.Printf("Added post [%s].\n", post.Ref)
+	printWhoCanRead(post, false)
 	if err := c.noticeNewProject(t, request.Project); err != nil {
 		return fmt.Errorf("the post was added, but listing projects "+
 			"failed: %w", err)
@@ -408,7 +424,7 @@ func cmdAdd(c *client, args []string) error {
 func cmdEdit(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
 		strs:  []string{"--project", "--subject", "--body", "--parent"},
-		bools: []string{"--no-recent"},
+		bools: []string{"--no-recent", "--private", "--public"},
 		repeat: append(
 			[]string{"--meta", "--supersedes", "--link", "--unlink"},
 			shorthandFlags()...),
@@ -421,7 +437,7 @@ func cmdEdit(c *client, args []string) error {
 			"[--body <b>] [--meta <key>=<value>]... " +
 			"[--parent <ref>|\"\"] [--supersedes <ref>]... " +
 			"[--link <name>=<ref>]... [--unlink <name>[=<ref>]]... " +
-			"[--no-recent]")
+			"[--private|--public] [--no-recent]")
 	}
 	ref, err := api.ParseRef(p.pos[0])
 	if err != nil {
@@ -446,6 +462,13 @@ func cmdEdit(c *client, args []string) error {
 	if p.has("--body") {
 		body := p.strs["--body"]
 		request.Body = &body
+	}
+	if p.bools["--private"] && p.bools["--public"] {
+		return fmt.Errorf("give --private or --public, not both")
+	}
+	if p.bools["--private"] || p.bools["--public"] {
+		private := p.bools["--private"]
+		request.Private = &private
 	}
 	metadata, err := collectMetadata(p)
 	if err != nil {
@@ -487,6 +510,7 @@ func cmdEdit(c *client, args []string) error {
 			programName+" post "+ref.String())
 	}
 	fmt.Printf("Edited post [%s].\n", post.Ref)
+	printWhoCanRead(post, request.Private != nil)
 	if p.bools["--no-recent"] {
 		return nil
 	}

@@ -25,12 +25,16 @@ var acyclicLinks = map[string]bool{
 	api.SupersedesLink: true,
 }
 
-// supersededClause is true for a post e that another post supersedes.
-const supersededClause = `EXISTS (
-	SELECT 1 FROM post_links AS superseding
+// supersededClause is true for a post e that another post the reader
+// can read supersedes. It takes the reader's user as its one argument.
+var supersededClause = `EXISTS (
+	SELECT 1 FROM post_links AS superseding CROSS JOIN posts AS successor
+		ON successor.workspace_id = superseding.source_workspace_id
+		AND successor.id = superseding.source_id
 	WHERE superseding.target_workspace_id = e.workspace_id
 		AND superseding.target_id = e.id
 		AND superseding.name = 'supersedes'
+		AND ` + visibleClause("successor") + `
 )`
 
 // reaches reports whether following name links out from start arrives
@@ -204,6 +208,7 @@ func (v view) writeLinks(
 
 // readLinks reads (name, workspace, id) rows into links, leaving out
 // posts in workspaces the config no longer names, which have no ref.
+// The query leaves out the posts the reader cannot read.
 func (v view) readLinks(
 	ctx context.Context, query string, args ...any,
 ) ([]api.Link, error) {
@@ -228,10 +233,14 @@ func (v view) readLinks(
 
 func (v view) linksFrom(ctx context.Context, key Key) ([]api.Link, error) {
 	links, err := v.readLinks(ctx, `
-		SELECT name, target_workspace_id, target_id FROM post_links
-		WHERE source_workspace_id = ? AND source_id = ?
-		ORDER BY name, target_workspace_id, target_id`,
-		key.Workspace, key.ID,
+		SELECT l.name, l.target_workspace_id, l.target_id
+		FROM post_links AS l CROSS JOIN posts AS other
+			ON other.workspace_id = l.target_workspace_id
+			AND other.id = l.target_id
+		WHERE l.source_workspace_id = ? AND l.source_id = ?
+			AND `+visibleClause("other")+`
+		ORDER BY l.name, l.target_workspace_id, l.target_id`,
+		key.Workspace, key.ID, v.access.user,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("reading links: %w", err)
@@ -241,10 +250,14 @@ func (v view) linksFrom(ctx context.Context, key Key) ([]api.Link, error) {
 
 func (v view) linksTo(ctx context.Context, key Key) ([]api.Link, error) {
 	links, err := v.readLinks(ctx, `
-		SELECT name, source_workspace_id, source_id FROM post_links
-		WHERE target_workspace_id = ? AND target_id = ?
-		ORDER BY name, source_workspace_id, source_id`,
-		key.Workspace, key.ID,
+		SELECT l.name, l.source_workspace_id, l.source_id
+		FROM post_links AS l CROSS JOIN posts AS other
+			ON other.workspace_id = l.source_workspace_id
+			AND other.id = l.source_id
+		WHERE l.target_workspace_id = ? AND l.target_id = ?
+			AND `+visibleClause("other")+`
+		ORDER BY l.name, l.source_workspace_id, l.source_id`,
+		key.Workspace, key.ID, v.access.user,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("reading backlinks: %w", err)
@@ -256,10 +269,14 @@ func (v view) supersedersOf(
 	ctx context.Context, key Key,
 ) ([]api.Ref, error) {
 	links, err := v.readLinks(ctx, `
-		SELECT name, source_workspace_id, source_id FROM post_links
-		WHERE target_workspace_id = ? AND target_id = ? AND name = ?
-		ORDER BY source_workspace_id, source_id`,
-		key.Workspace, key.ID, api.SupersedesLink,
+		SELECT l.name, l.source_workspace_id, l.source_id
+		FROM post_links AS l CROSS JOIN posts AS other
+			ON other.workspace_id = l.source_workspace_id
+			AND other.id = l.source_id
+		WHERE l.target_workspace_id = ? AND l.target_id = ? AND l.name = ?
+			AND `+visibleClause("other")+`
+		ORDER BY l.source_workspace_id, l.source_id`,
+		key.Workspace, key.ID, api.SupersedesLink, v.access.user,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("reading superseding posts: %w", err)
@@ -272,16 +289,20 @@ func (v view) supersedersOf(
 }
 
 // postRef describes a post by its ref, and by its subject, whether it
-// is deleted, and its superseders when the request can read it.
+// is deleted, who alone can read it, and its superseders when the
+// request can read its workspace. Every post the request meets a ref
+// to, an ancestor of a post it can read or the post of a message it
+// can read, is one the reader can read too.
 func (v view) postRef(ctx context.Context, key Key) (api.PostRef, error) {
 	described := api.PostRef{Ref: v.store.mustRef(key)}
 	if !v.access.CanRead(key.Workspace) {
 		return described, nil
 	}
 	if err := v.tx.QueryRowContext(ctx, `
-		SELECT subject, deleted FROM posts
+		SELECT subject, deleted, private_to FROM posts
 		WHERE workspace_id = ? AND id = ?`, key.Workspace, key.ID,
-	).Scan(&described.Subject, &described.Deleted); err != nil {
+	).Scan(&described.Subject, &described.Deleted,
+		&described.PrivateTo); err != nil {
 		return api.PostRef{}, fmt.Errorf("reading %s: %w",
 			described.Ref, err)
 	}
@@ -369,8 +390,8 @@ func (s *Store) Detail(
 			ON e.workspace_id = l.source_workspace_id AND e.id = l.source_id
 		WHERE l.target_workspace_id = ? AND l.target_id = ?
 			AND l.name = 'parent' AND NOT e.deleted
-			AND NOT `+supersededClause,
-		key.Workspace, key.ID,
+			AND NOT `+supersededClause+` AND `+visibleClause("e"),
+		key.Workspace, key.ID, v.access.user, v.access.user,
 	).Scan(&detail.Children); err != nil {
 		return api.PostDetail{}, fmt.Errorf("counting children: %w", err)
 	}

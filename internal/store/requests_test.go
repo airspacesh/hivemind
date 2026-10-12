@@ -71,7 +71,7 @@ func TestRepeatedRequestReturnsTheMessageItSent(t *testing.T) {
 	pond := mustAdd(t, store, "pond", "", nil)
 	lake := mustAdd(t, store, "lake", "", nil)
 	send := func(post api.Ref, body, id string) (api.Message, bool, error) {
-		return store.PostMessage(ctx, store.mustKey(post),
+		return store.PostMessage(ctx, everyAccess(store), store.mustKey(post),
 			api.PostMessageRequest{Body: body, RequestID: id,
 				Origin: api.Origin{User: testUser}})
 	}
@@ -95,7 +95,7 @@ func TestRepeatedRequestReturnsTheMessageItSent(t *testing.T) {
 	}
 
 	// A repeat matches the request, not the message's current text.
-	edited, _, err := store.EditMessage(ctx, store.mustKey(pond.Ref),
+	edited, _, err := store.EditMessage(ctx, everyAccess(store), store.mustKey(pond.Ref),
 		first.Number, ownEdit("quack quack"))
 	if err != nil {
 		t.Fatal(err)

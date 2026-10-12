@@ -23,7 +23,7 @@ func mustDeleteMessage(
 	t *testing.T, store *Store, ref api.MessageRef,
 ) api.Message {
 	t.Helper()
-	message, err := store.DeleteMessage(context.Background(),
+	message, err := store.DeleteMessage(context.Background(), everyAccess(store),
 		store.mustKey(ref.Post), ref.Number,
 		api.DeleteRequest{User: testUser})
 	if err != nil {
@@ -95,7 +95,7 @@ func TestDeleteMessageKeepsItsPlace(t *testing.T) {
 	store := openTestStore(t)
 	post := mustAdd(t, store, "topic", "", nil)
 	mustPostMessage(t, store, post.Ref, "first")
-	message, _, err := store.PostMessage(context.Background(),
+	message, _, err := store.PostMessage(context.Background(), everyAccess(store),
 		store.mustKey(post.Ref), api.PostMessageRequest{Body: "secret",
 			Origin: api.Origin{User: testUser, Host: "nest", Dir: "/pond",
 				ClaudeSession: "s1"}})
@@ -161,7 +161,7 @@ func TestNobodyCanEditWhatIsDeleted(t *testing.T) {
 	}
 
 	for _, body := range []string{"back", ""} {
-		_, _, err := store.EditMessage(ctx, key, message.Number,
+		_, _, err := store.EditMessage(ctx, everyAccess(store), key, message.Number,
 			api.EditMessageRequest{Body: body, User: testUser})
 		var refused *DeletedError
 		if !errors.As(err, &refused) {

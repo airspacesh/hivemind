@@ -268,10 +268,10 @@ func (h *handler) projects(w http.ResponseWriter, r *http.Request) {
 
 	var projects api.ProjectsResponse
 	if query.Has("name") {
-		projects, err = h.store.Project(r.Context(), workspace.ID,
+		projects, err = h.store.Project(r.Context(), access, workspace.ID,
 			query.Get("name"), time.Now())
 	} else {
-		projects, err = h.store.Projects(r.Context(), workspace.ID,
+		projects, err = h.store.Projects(r.Context(), access, workspace.ID,
 			int(limit), time.Now())
 	}
 	if err != nil {

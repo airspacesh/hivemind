@@ -750,6 +750,18 @@ func (builder *whereBuilder) addRanks(
 	builder.addSpan(timeColumn, filter.Changed)
 }
 
+// addVisible keeps a listing to the posts e the reader can read, and
+// unless the filter includes superseded posts, to those no post the
+// reader can read supersedes.
+func (v view) addVisible(where *whereBuilder, filter Filter) {
+	where.clauses = append(where.clauses, visibleClause("e"))
+	where.args = append(where.args, v.access.user)
+	if !filter.IncludeSuperseded {
+		where.clauses = append(where.clauses, `NOT `+supersededClause)
+		where.args = append(where.args, v.access.user)
+	}
+}
+
 // newestPosts reads the count newest posts of a workspace that match a
 // filter, from among the candidates when they are given.
 func (v view) newestPosts(
@@ -767,9 +779,7 @@ func (v view) newestPosts(
 	where.addRanks(revision, at, filter)
 	where.clauses = append(where.clauses, `e.workspace_id = ?`)
 	where.args = append(where.args, workspace)
-	if !filter.IncludeSuperseded {
-		where.clauses = append(where.clauses, `NOT `+supersededClause)
-	}
+	v.addVisible(&where, filter)
 	if !filter.IncludeDeleted {
 		where.clauses = append(where.clauses, `NOT e.deleted`)
 	}
@@ -801,9 +811,7 @@ func (v view) newestMessages(
 	where.addRanks(`m.posted_revision`, `m.created_utc`, filter)
 	where.clauses = append(where.clauses, `m.workspace_id = ?`)
 	where.args = append(where.args, workspace)
-	if !filter.IncludeSuperseded {
-		where.clauses = append(where.clauses, `NOT `+supersededClause)
-	}
+	v.addVisible(&where, filter)
 	if !filter.IncludeDeleted {
 		where.clauses = append(where.clauses, `NOT m.deleted`)
 	}

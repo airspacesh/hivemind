@@ -138,9 +138,9 @@ func (v view) requestedMessage(
 // message. Writes are serialised through the store's one connection, so
 // no other message can take the same number or request id.
 func (s *Store) PostMessage(
-	ctx context.Context, post Key, req api.PostMessageRequest,
+	ctx context.Context, access Access, post Key, req api.PostMessageRequest,
 ) (api.Message, bool, error) {
-	v, err := s.begin(ctx, NewAccess(post.Workspace), false)
+	v, err := s.begin(ctx, access, false)
 	if err != nil {
 		return api.Message{}, false, fmt.Errorf("posting message: %w", err)
 	}
@@ -231,13 +231,21 @@ func overwriteMessage(
 // nothing, so repeating an edit is harmless. Only the user who posted
 // the message can edit it, and nobody can edit a deleted message.
 func (s *Store) EditMessage(
-	ctx context.Context, post Key, number int64, req api.EditMessageRequest,
+	ctx context.Context,
+	access Access,
+	post Key,
+	number int64,
+	req api.EditMessageRequest,
 ) (api.Message, bool, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	v, err := s.begin(ctx, access, false)
 	if err != nil {
 		return api.Message{}, false, fmt.Errorf("editing message: %w", err)
 	}
+	tx := v.tx
 	defer tx.Rollback()
+	if err := v.checkPostExists(ctx, post); err != nil {
+		return api.Message{}, false, err
+	}
 	message, err := s.getMessage(ctx, tx, post, number)
 	if err != nil {
 		return api.Message{}, false, err
@@ -274,13 +282,21 @@ func (s *Store) EditMessage(
 // the chat. Deleting a deleted message changes nothing. Only the user
 // who posted the message can delete it.
 func (s *Store) DeleteMessage(
-	ctx context.Context, post Key, number int64, req api.DeleteRequest,
+	ctx context.Context,
+	access Access,
+	post Key,
+	number int64,
+	req api.DeleteRequest,
 ) (api.Message, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	v, err := s.begin(ctx, access, false)
 	if err != nil {
 		return api.Message{}, fmt.Errorf("deleting message: %w", err)
 	}
+	tx := v.tx
 	defer tx.Rollback()
+	if err := v.checkPostExists(ctx, post); err != nil {
+		return api.Message{}, err
+	}
 	message, err := s.getMessage(ctx, tx, post, number)
 	if err != nil {
 		return api.Message{}, err
@@ -380,6 +396,7 @@ func (s *Store) readChatPage(
 // from the cursor misses none, even when the page is empty.
 func (s *Store) Messages(
 	ctx context.Context,
+	access Access,
 	post Key,
 	after api.ChatBound,
 	filter Filter,
@@ -396,12 +413,12 @@ func (s *Store) Messages(
 		`m.post_id = ?`, `m.id > ?`)
 	where.args = append(where.args, post.Workspace, post.ID, after.Number)
 
-	tx, err := s.reads.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	v, err := s.begin(ctx, access, true)
 	if err != nil {
 		return api.ChatPage{}, fmt.Errorf("reading chat: %w", err)
 	}
+	tx := v.tx
 	defer tx.Rollback()
-	v := view{store: s, tx: tx}
 	if err := v.checkPostExists(ctx, post); err != nil {
 		return api.ChatPage{}, err
 	}
@@ -416,14 +433,14 @@ func (s *Store) Messages(
 // LatestMessages returns the newest count messages of a post's chat,
 // oldest first.
 func (s *Store) LatestMessages(
-	ctx context.Context, post Key, count int,
+	ctx context.Context, access Access, post Key, count int,
 ) (api.ChatPage, error) {
-	tx, err := s.reads.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	v, err := s.begin(ctx, access, true)
 	if err != nil {
 		return api.ChatPage{}, fmt.Errorf("reading chat: %w", err)
 	}
+	tx := v.tx
 	defer tx.Rollback()
-	v := view{store: s, tx: tx}
 	if err := v.checkPostExists(ctx, post); err != nil {
 		return api.ChatPage{}, err
 	}
@@ -434,13 +451,14 @@ func (s *Store) LatestMessages(
 		post.Workspace, post.ID, count)
 }
 
-// Overview returns the newest limit messages across a workspace,
-// grouped by post. Posts come in order of their newest message, the
-// most recent last, and each post's messages oldest first.
+// Overview returns the newest limit messages across a workspace in the
+// chats of posts the reader can read, grouped by post. Posts come in
+// order of their newest message, the most recent last, and each post's
+// messages oldest first.
 func (s *Store) Overview(
-	ctx context.Context, workspace int64, limit int,
+	ctx context.Context, access Access, workspace int64, limit int,
 ) (api.ChatOverview, error) {
-	v, err := s.begin(ctx, NewAccess(workspace), true)
+	v, err := s.begin(ctx, access, true)
 	if err != nil {
 		return api.ChatOverview{}, fmt.Errorf("reading chats: %w", err)
 	}
@@ -450,10 +468,15 @@ func (s *Store) Overview(
 		return api.ChatOverview{}, err
 	}
 
+	// CROSS JOIN keeps SQLite reading the messages newest first, each
+	// joined to its post.
 	rows, err := v.tx.QueryContext(ctx, `
-		SELECT `+messageColumns+` FROM post_messages AS m
-		WHERE m.workspace_id = ?
-		ORDER BY m.posted_revision DESC LIMIT ?`, workspace, limit,
+		SELECT `+messageColumns+`
+		FROM post_messages AS m CROSS JOIN posts AS e
+			ON e.workspace_id = m.workspace_id AND e.id = m.post_id
+		WHERE m.workspace_id = ? AND `+visibleClause("e")+`
+		ORDER BY m.posted_revision DESC LIMIT ?`,
+		workspace, v.access.user, limit,
 	)
 	if err != nil {
 		return api.ChatOverview{}, fmt.Errorf("reading chats: %w", err)

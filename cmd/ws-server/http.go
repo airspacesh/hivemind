@@ -67,6 +67,7 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	message := "internal server error"
 	var notOwner *store.NotOwnerError
 	var deleted *store.DeletedError
+	var shared *store.SharedError
 	switch {
 	case errors.Is(err, store.ErrInvalidFilter),
 		errors.Is(err, store.ErrInvalidTreeLimit),
@@ -103,6 +104,9 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	case errors.As(err, &deleted):
 		status, code, message = http.StatusConflict,
 			api.CodeDeleted, err.Error()
+	case errors.As(err, &shared):
+		status, code, message = http.StatusConflict,
+			api.CodeConflict, err.Error()
 	case errors.Is(err, context.DeadlineExceeded), store.IsBusy(err):
 		status, code, message = http.StatusServiceUnavailable,
 			api.CodeUnavailable, "server is busy or the request timed out"
@@ -179,11 +183,25 @@ func newServerWorkspaces(
 }
 
 // access finds the workspaces a request can read, which are the open
-// ones and any whose secret its one credential presents. A credential
-// that matches no workspace is refused, since it is surely a mistake.
+// ones and any whose secret its one credential presents, and the user
+// it reads as. A credential that matches no workspace is refused, since
+// it is surely a mistake.
 func (h *handler) access(
 	w http.ResponseWriter, r *http.Request,
 ) (store.Access, bool) {
+	users := r.Header.Values(api.UserHeader)
+	if len(users) > 1 {
+		writeBadRequest(w, api.UserHeader+" must be given at most once")
+		return store.Access{}, false
+	}
+	user := ""
+	if len(users) == 1 {
+		user = users[0]
+	}
+	if err := api.ValidateUser(user); err != nil {
+		writeBadRequest(w, err.Error())
+		return store.Access{}, false
+	}
 	values := r.Header.Values("Authorization")
 	if len(values) > 1 {
 		writeBadRequest(w, "a request carries at most one credential")
@@ -212,7 +230,7 @@ func (h *handler) access(
 			"on this server")
 		return store.Access{}, false
 	}
-	return store.NewAccess(readable...), true
+	return store.NewAccess(user, readable...), true
 }
 
 func writeNeedsSecret(w http.ResponseWriter, workspace string) {

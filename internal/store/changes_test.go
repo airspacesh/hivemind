@@ -91,7 +91,7 @@ func TestChangesListAChangeAgainOnlyWhenItChangesAfterTheCursor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, _, err := store.EditMessage(ctx, store.mustKey(seen.Ref),
+	if _, _, err := store.EditMessage(ctx, everyAccess(store), store.mustKey(seen.Ref),
 		message.Number, ownEdit("edited")); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestRefusedEditsTakeNoRevision(t *testing.T) {
 			Subject: &subject, User: "heron"}); err == nil {
 		t.Fatal("another user edited the post")
 	}
-	if _, _, err := store.EditMessage(ctx, store.mustKey(post.Ref),
+	if _, _, err := store.EditMessage(ctx, everyAccess(store), store.mustKey(post.Ref),
 		message.Number, api.EditMessageRequest{
 			Body: "taken", User: "heron"}); err == nil {
 		t.Fatal("another user edited the message")
@@ -182,7 +182,7 @@ func TestChangesReadDuringWritesMissNone(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, _, err := store.PostMessage(ctx, store.mustKey(post.Ref),
+			if _, _, err := store.PostMessage(ctx, everyAccess(store), store.mustKey(post.Ref),
 				api.PostMessageRequest{Body: "hi"}); err != nil {
 				t.Errorf("posting: %v", err)
 			}
@@ -496,7 +496,7 @@ func TestFilteredChangesReadDuringWritesMissNone(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, _, err := store.PostMessage(ctx, store.mustKey(post.Ref),
+			if _, _, err := store.PostMessage(ctx, everyAccess(store), store.mustKey(post.Ref),
 				api.PostMessageRequest{Body: "hi", Origin: origin}); err != nil {
 				t.Errorf("posting: %v", err)
 			}
@@ -530,7 +530,7 @@ func TestFilteredChangesReadDuringWritesMissNone(t *testing.T) {
 		}
 	}
 
-	page, err := store.Messages(ctx, store.mustKey(post.Ref),
+	page, err := store.Messages(ctx, everyAccess(store), store.mustKey(post.Ref),
 		api.ChatBound{}, Filter{}, exclude, messages)
 	if err != nil {
 		t.Fatal(err)
@@ -566,16 +566,16 @@ func TestReadsAndWritesGiveARevisionToReadChangesAfter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chat, err := store.Messages(ctx, key, api.ChatBound{}, Filter{}, nil,
+	chat, err := store.Messages(ctx, everyAccess(store), key, api.ChatBound{}, Filter{}, nil,
 		20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	latest, err := store.LatestMessages(ctx, key, 20)
+	latest, err := store.LatestMessages(ctx, everyAccess(store), key, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	overview, err := store.Overview(ctx, general, 20)
+	overview, err := store.Overview(ctx, everyAccess(store), general, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,7 +625,7 @@ func TestChangesAfterAPostedRevisionMissNothingAfterIt(t *testing.T) {
 
 	other := mustAdd(t, store, "other", "", nil)
 	mustPostMessage(t, store, other.Ref, "elsewhere")
-	if _, _, err := store.EditMessage(ctx, store.mustKey(earlier.Ref),
+	if _, _, err := store.EditMessage(ctx, everyAccess(store), store.mustKey(earlier.Ref),
 		old.Number, ownEdit("old, edited")); err != nil {
 		t.Fatal(err)
 	}

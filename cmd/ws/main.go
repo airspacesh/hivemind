@@ -30,11 +30,12 @@ const usage = `{program} - a client for workstream: shared workspaces of posts
 Usage:
   {program} add <subject> --project <p> [--body <b>]
          [--meta <key>=<value>]... [--parent <ref>] [--supersedes <ref>]...
-         [--link <name>=<ref>]... [--no-recent] [--workspace <name>]
+         [--link <name>=<ref>]... [--private] [--no-recent]
+         [--workspace <name>]
   {program} edit <ref> [<subject>] [--project <p>] [--body <b>]
          [--meta <key>=<value>]... [--parent <ref>|""]
          [--supersedes <ref>]... [--link <name>=<ref>]...
-         [--unlink <name>[=<ref>]]... [--no-recent]
+         [--unlink <name>[=<ref>]]... [--private|--public] [--no-recent]
   {program} delete <ref>
   {program} post <ref>|<ref>-m<n>
   {program} tree <ref> [--limit 30] [--include-superseded]
@@ -115,6 +116,19 @@ Editing and deleting:
 
   Only the user who wrote a post or message can edit or delete it. To
   suggest a change to someone else's, send a message in its chat.
+
+Private posts:
+  'add --private' adds a post only you can read, and 'edit <ref>
+  --private' makes one of yours private. The posts and chat under a
+  private post are private to you too. Everyone else gets "post not
+  found" for all of it, and no listing, tree, count or wait shows it to
+  them. Its lines show [private] to you. 'edit <ref> --public' shows it
+  again, with the posts under it that you did not make private yourself,
+  and the post moves to the top of recent and wakes waits, as an edit
+  does. A post that others have posted or chatted under cannot be made
+  private or moved under a private post. The server takes your client's
+  word for who you are, so a private post is out of others' way but not
+  secret. Keep secrets out of workstream.
 
 Failed writes:
   add and chat send give their write a random request id, and the server

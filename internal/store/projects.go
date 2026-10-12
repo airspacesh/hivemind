@@ -31,9 +31,15 @@ const projectNames = `
 
 // Projects lists a workspace's most recently active projects, at most
 // limit of them, with their posts created in the recentWindow before
-// now. The counts leave out deleted posts, but a delete is activity.
+// now. It counts only the posts the reader can read that are not
+// deleted, but a delete is activity. It leaves out a project with no
+// post the reader can read.
 func (s *Store) Projects(
-	ctx context.Context, workspace int64, limit int, now time.Time,
+	ctx context.Context,
+	access Access,
+	workspace int64,
+	limit int,
+	now time.Time,
 ) (api.ProjectsResponse, error) {
 	if limit < 1 || limit > MaxProjectLimit {
 		return api.ProjectsResponse{}, fmt.Errorf(
@@ -42,16 +48,22 @@ func (s *Store) Projects(
 	}
 	since := now.Add(-recentWindow)
 	rows, err := s.reads.QueryContext(ctx, projectNames+`
-		SELECT project, (
-			SELECT max(activity_utc) FROM posts
-			WHERE workspace_id = ?1 AND project = names.project
-		) AS latest, (
-			SELECT count(*) FROM posts
-			WHERE workspace_id = ?1 AND project = names.project
-				AND created_utc >= ?2 AND NOT deleted
+		SELECT project, latest, recent FROM (
+			SELECT project, (
+				SELECT max(activity_utc) FROM posts
+				WHERE workspace_id = ?1 AND project = names.project
+					AND private_to IN ('', ?3)
+			) AS latest, (
+				SELECT count(*) FROM posts
+				WHERE workspace_id = ?1 AND project = names.project
+					AND created_utc >= ?2 AND NOT deleted
+					AND private_to IN ('', ?3)
+			) AS recent
+			FROM names WHERE project IS NOT NULL
 		)
-		FROM names WHERE project IS NOT NULL
+		WHERE latest IS NOT NULL
 		ORDER BY latest DESC, project`, workspace, formatTime(since),
+		access.user,
 	)
 	if err != nil {
 		return api.ProjectsResponse{}, fmt.Errorf("listing projects: %w", err)
@@ -89,7 +101,11 @@ func (s *Store) Projects(
 // its count of every post that is not deleted. It reads only that
 // project's posts.
 func (s *Store) Project(
-	ctx context.Context, workspace int64, name string, now time.Time,
+	ctx context.Context,
+	access Access,
+	workspace int64,
+	name string,
+	now time.Time,
 ) (api.ProjectsResponse, error) {
 	since := now.Add(-recentWindow)
 	var latest sql.NullString
@@ -98,13 +114,17 @@ func (s *Store) Project(
 		SELECT max(activity_utc), (
 			SELECT count(*) FROM posts
 			WHERE workspace_id = ?1 AND project = ?2 AND NOT deleted
+				AND private_to IN ('', ?4)
 		), (
 			SELECT count(*) FROM posts
 			WHERE workspace_id = ?1 AND project = ?2
 				AND created_utc >= ?3 AND NOT deleted
+				AND private_to IN ('', ?4)
 		)
-		FROM posts WHERE workspace_id = ?1 AND project = ?2`,
-		workspace, name, formatTime(since),
+		FROM posts
+		WHERE workspace_id = ?1 AND project = ?2
+			AND private_to IN ('', ?4)`,
+		workspace, name, formatTime(since), access.user,
 	).Scan(&latest, &posts, &recent); err != nil {
 		return api.ProjectsResponse{}, fmt.Errorf(
 			"reading project %q: %w", name, err)

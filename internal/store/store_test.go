@@ -77,7 +77,7 @@ func accessTo(t *testing.T, store *Store, names ...string) Access {
 	for _, name := range names {
 		ids = append(ids, workspaceID(t, store, name))
 	}
-	return NewAccess(ids...)
+	return NewAccess("", ids...)
 }
 
 func everyAccess(store *Store) Access {
@@ -85,7 +85,12 @@ func everyAccess(store *Store) Access {
 	for _, workspace := range store.Workspaces() {
 		ids = append(ids, workspace.ID)
 	}
-	return NewAccess(ids...)
+	return NewAccess("", ids...)
+}
+
+// accessAs can read every workspace, as user.
+func accessAs(store *Store, user string) Access {
+	return NewAccess(user, everyAccess(store).workspaces...)
 }
 
 // testUser posts the posts and messages of tests that name no other
@@ -100,8 +105,9 @@ func addTo(
 	if req.Origin.User == "" {
 		req.Origin.User = testUser
 	}
-	post, _, err := store.Add(context.Background(), everyAccess(store),
-		workspaceID(t, store, workspace), req)
+	post, _, err := store.Add(context.Background(),
+		accessAs(store, req.Origin.User), workspaceID(t, store, workspace),
+		req)
 	if err != nil {
 		t.Fatalf("adding post: %v", err)
 	}
@@ -504,16 +510,16 @@ func TestReadsProceedWhileAWriteIsOpen(t *testing.T) {
 			return err
 		},
 		"chat": func(ctx context.Context) error {
-			_, err := store.Messages(ctx, key, api.ChatBound{}, Filter{},
+			_, err := store.Messages(ctx, everyAccess(store), key, api.ChatBound{}, Filter{},
 				exclude, 10)
 			return err
 		},
 		"latest chat": func(ctx context.Context) error {
-			_, err := store.LatestMessages(ctx, key, 10)
+			_, err := store.LatestMessages(ctx, everyAccess(store), key, 10)
 			return err
 		},
 		"chat overview": func(ctx context.Context) error {
-			_, err := store.Overview(ctx, key.Workspace, 10)
+			_, err := store.Overview(ctx, everyAccess(store), key.Workspace, 10)
 			return err
 		},
 		"search": func(ctx context.Context) error {
@@ -530,7 +536,7 @@ func TestReadsProceedWhileAWriteIsOpen(t *testing.T) {
 			return err
 		},
 		"projects": func(ctx context.Context) error {
-			_, err := store.Projects(ctx, key.Workspace, 10, time.Now())
+			_, err := store.Projects(ctx, everyAccess(store), key.Workspace, 10, time.Now())
 			return err
 		},
 		"ping": store.Ping,
@@ -557,7 +563,7 @@ func TestWriteAbandonedWhileWaitingNeverCommits(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(),
 		100*time.Millisecond)
 	defer cancel()
-	_, _, err := store.PostMessage(ctx, key,
+	_, _, err := store.PostMessage(ctx, everyAccess(store), key,
 		api.PostMessageRequest{Body: "abandoned"})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("post error = %v, want context.DeadlineExceeded", err)

@@ -65,6 +65,15 @@ func headedSubject(subject string, deleted bool) string {
 	return ": " + oneLine(subject)
 }
 
+// privateLabel marks a post that only one user can read, its owner or
+// the owner of a private post above it, who is the reader.
+func privateLabel(privateTo string) string {
+	if privateTo == "" {
+		return ""
+	}
+	return " [private]"
+}
+
 func joinRefs(refs []api.Ref) string {
 	names := make([]string, len(refs))
 	for i, ref := range refs {
@@ -131,13 +140,14 @@ func lineHead(
 }
 
 // printPostLine prints a post on one line, with a time, its author, the
-// path to it, and a suffix such as a count.
+// path to it, whether it is private, and a suffix such as a count.
 func printPostLine(
 	post api.Post, ancestors []api.PostRef, at time.Time, layout string,
 	suffix string,
 ) {
-	fmt.Printf("%s%s%s%s\n",
+	fmt.Printf("%s%s%s%s%s\n",
 		lineHead(post.Ref, at, layout, post.Origin.User, ancestors),
+		privateLabel(post.PrivateTo),
 		headedSubject(post.Subject, post.Deleted),
 		supersededLabel(post.SupersededBy), suffix)
 }
@@ -233,7 +243,8 @@ func printBacklinks(backlinks []api.Link) {
 
 func printPostDetail(d api.PostDetail) {
 	post := d.Post
-	fmt.Printf("[%s] %s\n", post.Ref, subjectLine(post.Subject, post.Deleted))
+	fmt.Printf("[%s]%s %s\n", post.Ref, privateLabel(post.PrivateTo),
+		subjectLine(post.Subject, post.Deleted))
 	if len(post.SupersededBy) > 0 {
 		fmt.Println("Superseded by " + joinRefs(post.SupersededBy))
 	}
@@ -247,6 +258,13 @@ func printPostDetail(d api.PostDetail) {
 	}
 	if !d.Activity.Equal(post.Modified) {
 		fmt.Println("Subtree activity: " + localTimeDetail(d.Activity))
+	}
+	switch {
+	case post.Private:
+		fmt.Printf("Private: only %s can read it\n", post.PrivateTo)
+	case post.PrivateTo != "":
+		fmt.Printf("Private: only %s can read it, as a post above it is "+
+			"private\n", post.PrivateTo)
 	}
 	printOrigin(post.Origin)
 	if len(d.Ancestors) > 0 {
@@ -326,8 +344,9 @@ func printTree(tree api.TreeResponse, root api.Ref) {
 	var printFrom func(post api.TreePost, depth int)
 	printFrom = func(post api.TreePost, depth int) {
 		indent := strings.Repeat("  ", depth)
-		fmt.Printf("%s[%s] %s%s%s\n", indent, post.Ref,
+		fmt.Printf("%s[%s] %s%s%s%s\n", indent, post.Ref,
 			post.Modified.Local().Format(layout),
+			privateLabel(post.PrivateTo),
 			headedSubject(post.Subject, post.Deleted),
 			supersededLabel(post.SupersededBy))
 		if post.MoreBelow > 0 {
@@ -465,7 +484,7 @@ func printChatPage(
 
 // printChatHeader names the post a run of chat messages belongs to.
 func printChatHeader(post api.PostRef) {
-	fmt.Printf("[%s] %s%s\n", post.Ref,
+	fmt.Printf("[%s]%s %s%s\n", post.Ref, privateLabel(post.PrivateTo),
 		subjectLine(post.Subject, post.Deleted),
 		supersededLabel(post.SupersededBy))
 }

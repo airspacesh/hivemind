@@ -34,8 +34,9 @@ type treeFacts struct {
 }
 
 // readTreeFacts reads the latest activity anywhere in a post's subtree,
-// and how many current posts are under it. Superseded and deleted posts
-// count towards activity but not towards descendants.
+// and how many current posts are under it, among the posts the reader
+// can read. Superseded and deleted posts count towards activity but not
+// towards descendants.
 func (v view) readTreeFacts(ctx context.Context, key Key) (treeFacts, error) {
 	var facts treeFacts
 	var activity string
@@ -46,8 +47,10 @@ func (v view) readTreeFacts(ctx context.Context, key Key) (treeFacts, error) {
 				AND NOT e.deleted AND NOT `+supersededClause+`), 0)
 		FROM subtree JOIN posts AS e
 			ON e.workspace_id = subtree.workspace_id
-			AND e.id = subtree.id`,
-		key.Workspace, key.ID, key.Workspace, key.ID,
+			AND e.id = subtree.id
+		WHERE `+visibleClause("e"),
+		key.Workspace, key.ID, key.Workspace, key.ID, v.access.user,
+		v.access.user,
 	).Scan(&activity, &facts.descendants)
 	if err != nil {
 		return treeFacts{}, fmt.Errorf("reading the subtree of %s: %w",
@@ -92,8 +95,9 @@ type treeNode struct {
 	shown bool
 }
 
-// readSubtree reads the subtree under root, each node's
-// children oldest first.
+// readSubtree reads the subtree under root that the reader can read,
+// each node's children oldest first. A post the reader cannot read has
+// only such posts under it, so the subtree stays whole.
 func (v view) readSubtree(ctx context.Context, root Key) (*treeNode, error) {
 	rows, err := v.tx.QueryContext(ctx, `
 		WITH RECURSIVE `+subtreeCTE("subtree")+`
@@ -104,8 +108,9 @@ func (v view) readSubtree(ctx context.Context, root Key) (*treeNode, error) {
 			AND e.id = subtree.id
 		LEFT JOIN post_links AS p
 			ON p.source_workspace_id = e.workspace_id
-			AND p.source_id = e.id AND p.name = 'parent'`,
-		root.Workspace, root.ID,
+			AND p.source_id = e.id AND p.name = 'parent'
+		WHERE `+visibleClause("e"),
+		root.Workspace, root.ID, v.access.user, v.access.user,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("reading tree: %w", err)

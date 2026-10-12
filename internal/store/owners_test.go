@@ -92,11 +92,11 @@ func TestOnlyThePosterCanEditOrDeleteAMessage(t *testing.T) {
 	// The post's own poster cannot edit its chat either, even with text
 	// that would change nothing.
 	for _, body := range []string{"a different answer", "the answer"} {
-		_, _, err := store.EditMessage(ctx, key, message.Number,
+		_, _, err := store.EditMessage(ctx, everyAccess(store), key, message.Number,
 			api.EditMessageRequest{Body: body, User: "bob"})
 		assertNotOwner(t, err, refusal)
 	}
-	_, err := store.DeleteMessage(ctx, key, message.Number,
+	_, err := store.DeleteMessage(ctx, everyAccess(store), key, message.Number,
 		api.DeleteRequest{User: "bob"})
 	assertNotOwner(t, err, refusal)
 	if got := readChat(t, store, topic.Ref, 0, 20); got.Messages[0].Body !=
@@ -105,7 +105,7 @@ func TestOnlyThePosterCanEditOrDeleteAMessage(t *testing.T) {
 			got.Messages)
 	}
 
-	edited, changed, err := store.EditMessage(ctx, key, message.Number,
+	edited, changed, err := store.EditMessage(ctx, everyAccess(store), key, message.Number,
 		api.EditMessageRequest{Body: "Retracted", User: "alice"})
 	if err != nil || !changed || edited.Body != "Retracted" {
 		t.Fatalf("the poster's own edit = %+v, %v, %v", edited, changed,
@@ -136,10 +136,10 @@ func TestNobodyCanEditOrDeleteWhatRecordsNoUser(t *testing.T) {
 		_, err = store.Delete(ctx, everyAccess(store), key,
 			api.DeleteRequest{User: user})
 		assertNotOwner(t, err, postRefusal)
-		_, _, err = store.EditMessage(ctx, key, message.Number,
+		_, _, err = store.EditMessage(ctx, everyAccess(store), key, message.Number,
 			api.EditMessageRequest{Body: "claimed", User: user})
 		assertNotOwner(t, err, messageRefusal)
-		_, err = store.DeleteMessage(ctx, key, message.Number,
+		_, err = store.DeleteMessage(ctx, everyAccess(store), key, message.Number,
 			api.DeleteRequest{User: user})
 		assertNotOwner(t, err, messageRefusal)
 	}

@@ -34,7 +34,16 @@ func (s *Store) begin(
 
 const postColumns = `e.workspace_id, e.id, e.created_utc,
 	e.modified_utc, e.revision, e.project, e.subject, e.body, e.deleted,
-	e.origin_user, e.origin_host, e.origin_dir, e.origin_claude_session`
+	e.private, e.private_to, e.origin_user, e.origin_host, e.origin_dir,
+	e.origin_claude_session`
+
+// visibleClause is true for a post, by its alias, that the reader can
+// read: one private to nobody, or to the reader. It takes the reader's
+// user as its one argument. A residual check on the row, it leaves the
+// indexes a query reads by to the query's other terms.
+func visibleClause(alias string) string {
+	return alias + `.private_to IN ('', ?)`
+}
 
 type rowScanner interface {
 	Scan(...any) error
@@ -47,7 +56,7 @@ func (v view) scanPost(row rowScanner) (api.Post, error) {
 	var created, modified string
 	err := row.Scan(&key.Workspace, &key.ID, &created, &modified,
 		&post.Revision, &post.Project, &post.Subject, &post.Body, &post.Deleted,
-		&post.Origin.User, &post.Origin.Host,
+		&post.Private, &post.PrivateTo, &post.Origin.User, &post.Origin.Host,
 		&post.Origin.Dir, &post.Origin.ClaudeSession)
 	if err != nil {
 		return api.Post{}, err
@@ -62,12 +71,15 @@ func (v view) scanPost(row rowScanner) (api.Post, error) {
 	return post, nil
 }
 
+// checkPostExists refuses a post that does not exist, or that the
+// reader cannot read.
 func (v view) checkPostExists(ctx context.Context, key Key) error {
 	var exists bool
 	if err := v.tx.QueryRowContext(ctx, `
 		SELECT EXISTS (
-			SELECT 1 FROM posts WHERE workspace_id = ? AND id = ?
-		)`, key.Workspace, key.ID,
+			SELECT 1 FROM posts AS e
+			WHERE e.workspace_id = ? AND e.id = ? AND `+visibleClause("e")+`
+		)`, key.Workspace, key.ID, v.access.user,
 	).Scan(&exists); err != nil {
 		return fmt.Errorf("checking post: %w", err)
 	}
@@ -103,7 +115,8 @@ func (v view) metadataFor(
 func (v view) getPost(ctx context.Context, key Key) (api.Post, error) {
 	row := v.tx.QueryRowContext(ctx, `
 		SELECT `+postColumns+` FROM posts AS e
-		WHERE e.workspace_id = ? AND e.id = ?`, key.Workspace, key.ID,
+		WHERE e.workspace_id = ? AND e.id = ? AND `+visibleClause("e"),
+		key.Workspace, key.ID, v.access.user,
 	)
 	post, err := v.scanPost(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -259,6 +272,11 @@ func (s *Store) Add(
 	if err := v.writeLinks(ctx, key, nil, nil, req.Links); err != nil {
 		return api.Post{}, false, err
 	}
+	added := postState{owner: req.Origin.User}
+	if _, err := v.writeVisibility(ctx, key, added,
+		&req.Private); err != nil {
+		return api.Post{}, false, err
+	}
 	post, err := v.getPost(ctx, key)
 	if err != nil {
 		return api.Post{}, false, fmt.Errorf("reading new post: %w", err)
@@ -340,23 +358,169 @@ func (e *DeletedError) Error() string {
 	return e.deleted + " was deleted, so it cannot be edited"
 }
 
-// editState reads what decides whether a post can be changed: the user
-// who posted it, and whether it is deleted.
-func (v view) editState(
-	ctx context.Context, key Key,
-) (owner string, deleted bool, err error) {
-	err = v.tx.QueryRowContext(ctx, `
-		SELECT origin_user, deleted FROM posts
-		WHERE workspace_id = ? AND id = ?`, key.Workspace, key.ID,
-	).Scan(&owner, &deleted)
+// postState is what decides whether a post can be changed, and how a
+// change to its visibility goes: the user who posted it, whether it is
+// deleted, whether its owner made it private, and who alone can read
+// it, as the private_to column has it.
+type postState struct {
+	owner     string
+	deleted   bool
+	private   bool
+	privateTo string
+}
+
+// readPostState reads the state of a post the reader can read.
+func (v view) readPostState(ctx context.Context, key Key) (postState, error) {
+	var state postState
+	err := v.tx.QueryRowContext(ctx, `
+		SELECT e.origin_user, e.deleted, e.private, e.private_to
+		FROM posts AS e
+		WHERE e.workspace_id = ? AND e.id = ? AND `+visibleClause("e"),
+		key.Workspace, key.ID, v.access.user,
+	).Scan(&state.owner, &state.deleted, &state.private, &state.privateTo)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, fmt.Errorf("%w: %s", ErrPostNotFound,
+		return postState{}, fmt.Errorf("%w: %s", ErrPostNotFound,
 			v.store.mustRef(key))
 	}
 	if err != nil {
-		return "", false, fmt.Errorf("reading post state: %w", err)
+		return postState{}, fmt.Errorf("reading post state: %w", err)
 	}
-	return owner, deleted, nil
+	return state, nil
+}
+
+// SharedError refuses to make a post private, directly or by moving it
+// under a private post, when other users have posted or chatted under
+// it, since what they wrote would vanish for them.
+type SharedError struct {
+	post string
+}
+
+func (e *SharedError) Error() string {
+	return "others have posted under " + e.post + ", so it cannot be " +
+		"made private"
+}
+
+// othersPostedUnder reports whether anyone but owner wrote a post or a
+// message anywhere in a post's subtree, the post itself included.
+func (v view) othersPostedUnder(
+	ctx context.Context, key Key, owner string,
+) (bool, error) {
+	var found bool
+	err := v.tx.QueryRowContext(ctx, `
+		WITH RECURSIVE `+subtreeCTE("subtree")+`
+		SELECT EXISTS (
+			SELECT 1 FROM subtree CROSS JOIN posts AS e
+				ON e.workspace_id = subtree.workspace_id
+				AND e.id = subtree.id
+			WHERE e.origin_user <> ?
+		) OR EXISTS (
+			SELECT 1 FROM subtree `+eachChat+`
+				ON m.workspace_id = subtree.workspace_id
+				AND m.post_id = subtree.id
+			WHERE m.origin_user <> ?
+		)`, key.Workspace, key.ID, owner, owner,
+	).Scan(&found)
+	if err != nil {
+		return false, fmt.Errorf("checking who posted under %s: %w",
+			v.store.mustRef(key), err)
+	}
+	return found, nil
+}
+
+// parentPrivateTo reads who alone can read a post's parent, or nothing
+// for a post with no parent.
+func (v view) parentPrivateTo(ctx context.Context, key Key) (string, error) {
+	var privateTo string
+	err := v.tx.QueryRowContext(ctx, `
+		SELECT p.private_to FROM post_links AS l CROSS JOIN posts AS p
+			ON p.workspace_id = l.target_workspace_id AND p.id = l.target_id
+		WHERE l.source_workspace_id = ? AND l.source_id = ?
+			AND l.name = 'parent'`, key.Workspace, key.ID,
+	).Scan(&privateTo)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading the parent of %s: %w",
+			v.store.mustRef(key), err)
+	}
+	return privateTo, nil
+}
+
+// setPrivateTo sets who alone can read a post, and the posts under it
+// that take their visibility from it. It stops at each post its owner
+// made private, which with everything under it keeps its own.
+func (v view) setPrivateTo(
+	ctx context.Context, key Key, privateTo string,
+) error {
+	if _, err := v.tx.ExecContext(ctx, `
+		WITH RECURSIVE inheriting(workspace_id, id) AS (
+			SELECT ?, ?
+			UNION ALL
+			SELECT l.source_workspace_id, l.source_id
+			FROM inheriting JOIN post_links AS l
+				ON l.target_workspace_id = inheriting.workspace_id
+				AND l.target_id = inheriting.id AND l.name = 'parent'
+			JOIN posts AS child
+				ON child.workspace_id = l.source_workspace_id
+				AND child.id = l.source_id
+			WHERE NOT child.private
+		)
+		UPDATE posts SET private_to = ?
+		FROM inheriting
+		WHERE posts.workspace_id = inheriting.workspace_id
+			AND posts.id = inheriting.id`,
+		key.Workspace, key.ID, privateTo,
+	); err != nil {
+		return fmt.Errorf("setting who can read %s: %w",
+			v.store.mustRef(key), err)
+	}
+	return nil
+}
+
+// writeVisibility makes a post private or public, when private is set,
+// and brings who alone can read it and the posts under it in line with
+// its own flag and its parent. It reports whether the post's
+// visibility changed, either way.
+func (v view) writeVisibility(
+	ctx context.Context, key Key, state postState, private *bool,
+) (bool, error) {
+	made := state.private
+	if private != nil {
+		made = *private
+	}
+	privateTo := state.owner
+	if !made {
+		var err error
+		if privateTo, err = v.parentPrivateTo(ctx, key); err != nil {
+			return false, err
+		}
+	}
+
+	if made != state.private {
+		if _, err := v.tx.ExecContext(ctx, `
+			UPDATE posts SET private = ? WHERE workspace_id = ? AND id = ?`,
+			made, key.Workspace, key.ID,
+		); err != nil {
+			return false, fmt.Errorf("making post private: %w", err)
+		}
+	}
+	if privateTo == state.privateTo {
+		return made != state.private, nil
+	}
+	if privateTo != "" {
+		shared, err := v.othersPostedUnder(ctx, key, privateTo)
+		if err != nil {
+			return false, err
+		}
+		if shared {
+			return false, &SharedError{post: v.store.mustRef(key).String()}
+		}
+	}
+	if err := v.setPrivateTo(ctx, key, privateTo); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Edit overwrites a post's fields and changes its metadata and links.
@@ -369,7 +533,8 @@ func (s *Store) Edit(
 	req api.EditPostRequest,
 ) (api.Post, error) {
 	if !req.ChangesContent() && len(req.AddLinks) == 0 &&
-		len(req.RemoveLinks) == 0 && len(req.RemoveLinkNames) == 0 {
+		len(req.RemoveLinks) == 0 && len(req.RemoveLinkNames) == 0 &&
+		req.Private == nil {
 		return api.Post{}, errors.New("nothing to edit")
 	}
 	v, err := s.begin(ctx, access, false)
@@ -378,21 +543,16 @@ func (s *Store) Edit(
 	}
 	defer v.tx.Rollback()
 
-	owner, deleted, err := v.editState(ctx, key)
+	state, err := v.readPostState(ctx, key)
 	if err != nil {
 		return api.Post{}, err
 	}
 	ref := v.store.mustRef(key)
-	if err := checkEditor(ref, owner, req.User); err != nil {
+	if err := checkEditor(ref, state.owner, req.User); err != nil {
 		return api.Post{}, err
 	}
-	if deleted {
+	if state.deleted {
 		return api.Post{}, &DeletedError{deleted: ref.String()}
-	}
-	if req.ChangesContent() {
-		if err := v.editContent(ctx, key, req); err != nil {
-			return api.Post{}, err
-		}
 	}
 	if len(req.Metadata) > 0 {
 		if err := v.writeMetadata(ctx, key, req.Metadata); err != nil {
@@ -402,6 +562,20 @@ func (s *Store) Edit(
 	if err := v.writeLinks(ctx, key, req.RemoveLinkNames,
 		req.RemoveLinks, req.AddLinks); err != nil {
 		return api.Post{}, err
+	}
+	// A post that becomes public, or private, changes for its readers,
+	// as an edit of its content does, so it moves to the top of the
+	// listings and shows in the changes feed. A move into or out of a
+	// private tree counts too.
+	visibilityChanged, err := v.writeVisibility(ctx, key, state,
+		req.Private)
+	if err != nil {
+		return api.Post{}, err
+	}
+	if req.ChangesContent() || visibilityChanged {
+		if err := v.editContent(ctx, key, req); err != nil {
+			return api.Post{}, err
+		}
 	}
 
 	post, err := v.getPost(ctx, key)
@@ -428,15 +602,15 @@ func (s *Store) Delete(
 	}
 	defer v.tx.Rollback()
 
-	owner, deleted, err := v.editState(ctx, key)
+	state, err := v.readPostState(ctx, key)
 	if err != nil {
 		return api.Post{}, err
 	}
-	if err := checkEditor(v.store.mustRef(key), owner,
+	if err := checkEditor(v.store.mustRef(key), state.owner,
 		req.User); err != nil {
 		return api.Post{}, err
 	}
-	if deleted {
+	if state.deleted {
 		return v.getPost(ctx, key)
 	}
 
