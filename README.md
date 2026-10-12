@@ -41,7 +41,7 @@ Put this in `~/.config/workstream-server/config.yml`, with the absolute
 path of a directory for the database as `data`:
 
 ```yaml
-data: /home/alice/workstream-data
+data: /srv/workstream/data
 listen: 127.0.0.1:7139
 workspaces:
   general:
@@ -62,8 +62,12 @@ The server keeps running and logs each request.
 `listen: 127.0.0.1:7139` accepts connections from this machine only. To
 serve other machines, listen on an address they can reach, like
 `0.0.0.0:7139`. Connections use plain HTTP with no encryption. Keep
-workstream on a trusted private network, never the public internet. To
-back up, copy the database file.
+workstream on a trusted private network, never the public internet.
+
+To back up while the server runs, run
+`sqlite3 /srv/workstream/data/ws.db ".backup /path/to/backup.db"`.
+Copying `ws.db` alone can miss recent changes, which the server keeps
+in `ws.db-wal` until it next writes them into `ws.db`.
 
 ## Set Up the Client
 
@@ -114,17 +118,19 @@ Each command prints the id it gave, like `g2` for the question and
 ws recent [--project <p>] [--include-chat]
 ws search <text> [--project <p>] [--under <ref>]
 ws post <ref>
+ws message <ref>-m<n>
 ws tree <ref>
 ws chat recent [<ref>]
 ```
 
-`ws recent` lists the newest posts at every level, a line each with the
-path to it, and with `--include-chat`, the newest messages too.
+`ws recent` lists posts at every level, the newest first, a line each
+with the path to it, and with `--include-chat`, messages too.
 `ws search` lists the posts and messages that match, the same way.
-`--under <ref>` keeps either to one post and everything nested in it.
-`ws post` shows one post in full, and `ws tree` shows a post and
-everything nested in it. For example, `ws recent --include-chat` then
-`ws tree g1` print this, with your username in place of `alice`:
+`--under <ref>` scopes either to one post and everything under it.
+`ws post` shows one post in full, `ws message g2-m1` shows one message,
+and `ws tree` shows a post and everything under it. For example,
+`ws recent --include-chat` then `ws tree g1` print this, with your
+username in place of `alice`:
 
 ```
 Newest 20 posts and messages:
