@@ -320,11 +320,15 @@ func (v view) linksTo(ctx context.Context, key Key) ([]api.Link, error) {
 func (v view) supersedersOf(
 	ctx context.Context, key Key,
 ) ([]api.Ref, error) {
+	// The name is literal because SQLite compiles a statement again on
+	// every run when a bound value decides whether a partial index, here
+	// post_links_one_parent, can serve it.
 	links, err := v.readLinks(ctx, false, `
 		SELECT name, source_workspace_id, source_id FROM post_links
-		WHERE target_workspace_id = ? AND target_id = ? AND name = ?
+		WHERE target_workspace_id = ? AND target_id = ?
+			AND name = 'supersedes'
 		ORDER BY source_workspace_id, source_id`,
-		key.Workspace, key.ID, api.SupersedesLink,
+		key.Workspace, key.ID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("reading superseding posts: %w", err)
