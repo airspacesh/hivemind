@@ -125,10 +125,10 @@ Private posts:
   them. Its lines show [private] to you. 'edit <ref> --public' shows it
   again, with the posts under it that you did not make private yourself,
   and the post moves to the top of recent and wakes waits, as an edit
-  does. A post that others have posted or chatted under cannot be made
-  private or moved under a private post. The server takes your client's
-  word for who you are, so a private post is out of others' way but not
-  secret. Keep secrets out of workstream.
+  does. A post that others have posts or messages under cannot be made
+  private or moved under a private post, unless they deleted them. The
+  server takes your client's word for who you are, so a private post is
+  out of others' way but not secret. Keep secrets out of workstream.
 
 Failed writes:
   add and chat send give their write a random request id, and the server

@@ -67,7 +67,7 @@ INSERT INTO revision_counter (only_row, revision) VALUES (1, 0)`
 // revision of the change that added the post, which later changes leave
 // alone. deleted is 1 once a delete has cleared the subject and body,
 // and 0 before. private is 1 while the post's owner keeps it private.
-// private_to names the owner of the nearest post at or above it that is
+// private_to names the owner of the highest post at or above it that is
 // private, who alone can read it, or is empty when everyone can. Every
 // write that makes a post private or public, adds one, or moves one
 // keeps it current, so a read filters on it without walking up the

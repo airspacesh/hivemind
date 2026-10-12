@@ -336,8 +336,8 @@ func TestAPostOthersPostedUnderCannotBeMadePrivate(t *testing.T) {
 
 	for _, ref := range []api.Ref{topic.Ref, mine.Ref, chatted.Ref} {
 		_, err := setPrivate(store, "alice", ref, true)
-		want := "others have posted under " + ref.String() +
-			", so it cannot be made private"
+		want := "others have posts or messages under " + ref.String() +
+			" that they have not deleted, so it cannot be made private"
 		var shared *SharedError
 		if !errors.As(err, &shared) || err.Error() != want {
 			t.Fatalf("making %s private = %v, want %q", ref, err, want)
@@ -349,6 +349,50 @@ func TestAPostOthersPostedUnderCannotBeMadePrivate(t *testing.T) {
 	_, err := setPrivate(store, "bob", topic.Ref, true)
 	assertNotOwner(t, err, "e1 was posted by alice, so only alice can "+
 		"edit or delete it")
+}
+
+// What others deleted under a post no longer keeps it public. It
+// becomes private with the post, even a post of theirs that they made
+// private, and goes back to them when the post is public again.
+func TestWhatOthersDeletedDoesNotKeepAPostPublic(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	bob := accessAs(store, "bob")
+	topic := addAsUnder(t, store, "alice", "topic", nil, false)
+	reply := addAsUnder(t, store, "bob", "reply", &topic.Ref, false)
+	draft := addAsUnder(t, store, "bob", "draft", &topic.Ref, true)
+	message := postAs(t, store, "bob", topic.Ref, "a question")
+	for _, ref := range []api.Ref{reply.Ref, draft.Ref} {
+		if _, err := store.Delete(ctx, bob, store.mustKey(ref),
+			api.DeleteRequest{User: "bob"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := setPrivate(store, "alice", topic.Ref, true); err == nil {
+		t.Fatal("alice made the topic private over bob's message")
+	}
+	if _, err := store.DeleteMessage(ctx, bob, store.mustKey(topic.Ref),
+		message.Number, api.DeleteRequest{User: "bob"}); err != nil {
+		t.Fatal(err)
+	}
+
+	mustSetPrivate(t, store, "alice", topic.Ref, true)
+	assertReaders(t, store, "bob", nil,
+		[]api.Ref{topic.Ref, reply.Ref, draft.Ref})
+	assertReaders(t, store, "alice",
+		[]api.Ref{topic.Ref, reply.Ref, draft.Ref}, nil)
+	_, err := store.MessageDetail(ctx, bob, store.mustKey(topic.Ref),
+		message.Number)
+	if !errors.Is(err, ErrPostNotFound) {
+		t.Fatalf("bob's read of his deleted message = %v, want post not "+
+			"found", err)
+	}
+
+	mustSetPrivate(t, store, "alice", topic.Ref, false)
+	assertReaders(t, store, "bob",
+		[]api.Ref{topic.Ref, reply.Ref, draft.Ref}, nil)
+	assertReaders(t, store, "alice", []api.Ref{topic.Ref, reply.Ref},
+		[]api.Ref{draft.Ref})
 }
 
 func TestMakingAPostPublicOrPrivateIsAChange(t *testing.T) {

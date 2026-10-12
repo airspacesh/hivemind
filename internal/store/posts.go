@@ -389,19 +389,21 @@ func (v view) readPostState(ctx context.Context, key Key) (postState, error) {
 }
 
 // SharedError refuses to make a post private, directly or by moving it
-// under a private post, when other users have posted or chatted under
-// it, since what they wrote would vanish for them.
+// under a private post, when other users have posts or messages under
+// it that they have not deleted, since what they wrote would vanish for
+// them.
 type SharedError struct {
 	post string
 }
 
 func (e *SharedError) Error() string {
-	return "others have posted under " + e.post + ", so it cannot be " +
-		"made private"
+	return "others have posts or messages under " + e.post + " that " +
+		"they have not deleted, so it cannot be made private"
 }
 
 // othersPostedUnder reports whether anyone but owner wrote a post or a
-// message anywhere in a post's subtree, the post itself included.
+// message anywhere in a post's subtree, the post itself included, that
+// is not deleted.
 func (v view) othersPostedUnder(
 	ctx context.Context, key Key, owner string,
 ) (bool, error) {
@@ -412,12 +414,12 @@ func (v view) othersPostedUnder(
 			SELECT 1 FROM subtree CROSS JOIN posts AS e
 				ON e.workspace_id = subtree.workspace_id
 				AND e.id = subtree.id
-			WHERE e.origin_user <> ?
+			WHERE e.origin_user <> ? AND NOT e.deleted
 		) OR EXISTS (
 			SELECT 1 FROM subtree `+eachChat+`
 				ON m.workspace_id = subtree.workspace_id
 				AND m.post_id = subtree.id
-			WHERE m.origin_user <> ?
+			WHERE m.origin_user <> ? AND NOT m.deleted
 		)`, key.Workspace, key.ID, owner, owner,
 	).Scan(&found)
 	if err != nil {
@@ -447,17 +449,20 @@ func (v view) parentPrivateTo(ctx context.Context, key Key) (string, error) {
 	return privateTo, nil
 }
 
-// setPrivateTo sets who alone can read a post, and the posts under it
-// that take their visibility from it. It stops at each post its owner
-// made private, which with everything under it keeps its own.
+// setPrivateTo sets who alone can read a post, and the posts under it,
+// each of which takes the owner of the highest private post at or above
+// it. The walk skips a post its owner made private whose reader stays
+// the same, since nothing under it changes either.
 func (v view) setPrivateTo(
 	ctx context.Context, key Key, privateTo string,
 ) error {
 	if _, err := v.tx.ExecContext(ctx, `
-		WITH RECURSIVE inheriting(workspace_id, id) AS (
-			SELECT ?, ?
+		WITH RECURSIVE inheriting(workspace_id, id, private_to) AS (
+			SELECT ?, ?, ?
 			UNION ALL
-			SELECT l.source_workspace_id, l.source_id
+			SELECT child.workspace_id, child.id,
+				CASE WHEN inheriting.private_to = '' AND child.private
+					THEN child.origin_user ELSE inheriting.private_to END
 			FROM inheriting JOIN post_links AS l
 				ON l.target_workspace_id = inheriting.workspace_id
 				AND l.target_id = inheriting.id AND l.name = 'parent'
@@ -465,8 +470,10 @@ func (v view) setPrivateTo(
 				ON child.workspace_id = l.source_workspace_id
 				AND child.id = l.source_id
 			WHERE NOT child.private
+				OR child.private_to <> CASE WHEN inheriting.private_to = ''
+					THEN child.origin_user ELSE inheriting.private_to END
 		)
-		UPDATE posts SET private_to = ?
+		UPDATE posts SET private_to = inheriting.private_to
 		FROM inheriting
 		WHERE posts.workspace_id = inheriting.workspace_id
 			AND posts.id = inheriting.id`,
@@ -489,12 +496,12 @@ func (v view) writeVisibility(
 	if private != nil {
 		isPrivate = *private
 	}
-	privateTo := state.owner
-	if !isPrivate {
-		var err error
-		if privateTo, err = v.parentPrivateTo(ctx, key); err != nil {
-			return false, err
-		}
+	privateTo, err := v.parentPrivateTo(ctx, key)
+	if err != nil {
+		return false, err
+	}
+	if privateTo == "" && isPrivate {
+		privateTo = state.owner
 	}
 
 	if isPrivate != state.private {

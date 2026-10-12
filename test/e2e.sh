@@ -598,11 +598,23 @@ check_equal "edit --public shows the post to everyone" \
 Everyone can read it." "$(ws edit "$draft" --public --no-recent)"
 check "another user reads a post made public, and what is under it" \
     '"subject":"Draft detail"' "$(read_as_heron "posts/$detail")"
-post_as_heron "posts/$draft/messages" \
-    '{"body":"Looks good","origin":{"user":"heron"}}'
+looks_good="$(curl -fsS -X POST -H "Workstream-API-Version: $api_version" \
+    --data '{"body":"Looks good","origin":{"user":"heron"}}' \
+    "$main_url/api/posts/$draft/messages" |
+    grep -o '"number":[0-9]*' | cut -d: -f2)"
 check "a post others chatted on cannot be made private" \
-    "others have posted under $draft, so it cannot be made private" \
+    "others have posts or messages under $draft that they have not deleted, so it cannot be made private" \
     "$(ws edit "$draft" --private 2>&1 || true)"
+curl -fsS -X DELETE -H "Workstream-API-Version: $api_version" \
+    --data '{"user":"heron"}' \
+    "$main_url/api/posts/$draft/messages/$looks_good" >/dev/null
+check_equal "a post whose other messages are deleted can be made private" \
+    "Edited post [$draft].
+Only $(id -un) can read it." "$(ws edit "$draft" --private --no-recent)"
+check "the other user then loses the deleted message too" \
+    '"code":"post_not_found"' \
+    "$(read_as_heron "posts/$draft/messages/$looks_good")"
+ws edit "$draft" --public --no-recent >/dev/null
 
 # A delete removes a post's text and metadata, or a message's text, and
 # keeps its place.
