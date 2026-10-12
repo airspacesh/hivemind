@@ -67,8 +67,8 @@ func TestDeleteClearsAPostButKeepsItsPlace(t *testing.T) {
 		t.Fatalf("deleted post has %d children and %d messages, want 1 "+
 			"and 1", detail.Children, detail.Messages)
 	}
-	if got := readTree(t, store, child.Ref, false, 10).Ancestors; len(got) !=
-		2 || got[1].Ref != post.Ref || !got[1].Deleted {
+	got := readTree(t, store, child.Ref, false, false, 10).Ancestors
+	if len(got) != 2 || got[1].Ref != post.Ref || !got[1].Deleted {
 		t.Fatalf("child's path is %+v, want it under the deleted post",
 			got)
 	}

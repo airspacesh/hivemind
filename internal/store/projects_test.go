@@ -149,3 +149,28 @@ func TestProjectsCountPostsCreatedInTheWindow(t *testing.T) {
 			limited.Count, limited.RecentPosts)
 	}
 }
+
+// The counts leave deleted posts out, but a delete is activity, so a
+// project whose every post is deleted still lists, with none.
+func TestProjectsLeaveDeletedPostsOutOfTheCounts(t *testing.T) {
+	store := openTestStore(t)
+	now := time.Now()
+	addToProject(t, store, "general", "pond")
+	mustDelete(t, store, addToProject(t, store, "general", "pond").Ref)
+	mustDelete(t, store, addToProject(t, store, "general", "nest").Ref)
+
+	all := listProjects(t, store, "general", 30, now)
+	if got := describeProjects(all); got != "nest 0, pond 1" ||
+		all.RecentPosts != 1 {
+		t.Fatalf("projects = %q with %d recent posts", got,
+			all.RecentPosts)
+	}
+	if got := describeProjects(readProject(t, store, "pond", now)); got !=
+		"pond 1/1" {
+		t.Fatalf("project pond = %q", got)
+	}
+	if got := describeProjects(readProject(t, store, "nest", now)); got !=
+		"nest 0/0" {
+		t.Fatalf("project nest = %q", got)
+	}
+}

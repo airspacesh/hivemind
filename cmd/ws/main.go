@@ -38,6 +38,7 @@ Usage:
   {program} delete <ref>
   {program} post <ref>|<ref>-m<n>
   {program} tree <ref> [--limit 30] [--include-superseded]
+         [--include-deleted]
   {program} recent [--include-chat] [--under <ref>] [search filters]
          [--workspace <name>]
   {program} search [<text>] [--posts-only] [--under <ref>]
@@ -103,11 +104,14 @@ Editing and deleting:
   listing out.
 
   '{program} delete <ref>' deletes a post. Its subject, body and
-  metadata are removed for good, and it shows as (deleted). Its id,
-  project, links, origin and chat stay, and the posts under it stay in
-  place. '{program} chat delete <ref>-m<n>' deletes a message. Its text
-  is removed for good, and it keeps its number and place. Deleting again
-  changes nothing. A deleted post or message cannot be edited.
+  metadata are removed for good. Its id, project, links, origin and chat
+  stay, and the posts under it stay in place. A message deleted with
+  '{program} chat delete <ref>-m<n>' loses its text for good, and keeps
+  its number and place. Deleting again changes nothing. A deleted post
+  or message cannot be edited. recent, search and tree leave deleted
+  posts and messages out, but not the posts under a deleted post or the
+  messages in its chat. '{program} post' and the chat commands show
+  them as (deleted), as do recent and tree with --include-deleted.
 
   Only the user who wrote a post or message can edit or delete it. To
   suggest a change to someone else's, send a message in its chat.
@@ -143,7 +147,8 @@ Listings:
   at, and the wait that shows what changes after it. --under <ref> keeps
   recent or search to a post and what is beneath it.
   '{program} tree <ref>' shows the path to a post, then its subtree, at
-  most --limit posts, marking where it was cut.
+  most --limit posts, marking where it was cut. The posts under a
+  deleted post take its place, unless --include-deleted shows it.
   '{program} list-projects' lists the --limit most recently active
   projects, each with the number of its posts created in the last 90
   days, and their share of the workspace's. When the limit leaves some
@@ -185,6 +190,7 @@ Search filters (recent, search, wait and firehose):
   --id-only              print one post or message id per line, and
                          the 'Next:' and 'Cursor:' lines on stderr
   --include-superseded   include superseded posts
+  --include-deleted      include deleted posts and messages in recent
   --posts-only           leave chats out of a search
   --include-chat         list messages too in recent
 

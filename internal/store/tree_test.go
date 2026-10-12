@@ -23,11 +23,11 @@ func addChild(
 
 func readTree(
 	t *testing.T, store *Store, root api.Ref, includeSuperseded bool,
-	limit int,
+	includeDeleted bool, limit int,
 ) api.TreeResponse {
 	t.Helper()
 	tree, err := store.Tree(context.Background(), everyAccess(store),
-		store.mustKey(root), includeSuperseded, limit)
+		store.mustKey(root), includeSuperseded, includeDeleted, limit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,6 +39,9 @@ func treeText(tree api.TreeResponse) string {
 	var lines []string
 	for _, post := range tree.Posts {
 		line := post.Subject
+		if post.Deleted {
+			line = "(deleted)"
+		}
 		if post.MoreBelow > 0 {
 			line += fmt.Sprintf(" (%d more below)", post.MoreBelow)
 		}
@@ -92,21 +95,52 @@ func TestTreeHidesSupersededLeavesAndOrdersOldestFirst(t *testing.T) {
 		}
 	}
 
-	if got := treeText(readTree(t, store, root.Ref, false, 30)); got !=
+	if got := treeText(readTree(t, store, root.Ref, false, false, 30)); got !=
 		"root, first, middle, under middle, fresh" {
 		t.Fatalf("tree = %q, want the stale leaf hidden", got)
 	}
-	if got := treeText(readTree(t, store, root.Ref, true, 30)); got !=
+	if got := treeText(readTree(t, store, root.Ref, true, false, 30)); got !=
 		"root, first, middle, under middle, stale, fresh" {
 		t.Fatalf("tree with superseded = %q", got)
 	}
-	if got := treeText(readTree(t, store, root.Ref, false, 2)); got !=
+	if got := treeText(readTree(t, store, root.Ref, false, false, 2)); got !=
 		"root (3 more under), first" {
 		t.Fatalf("cut tree = %q, want no count of the stale leaf", got)
 	}
-	subtree := readTree(t, store, middle.Ref, false, 30)
+	subtree := readTree(t, store, middle.Ref, false, false, 30)
 	if len(subtree.Ancestors) != 1 || subtree.Ancestors[0].Ref != root.Ref {
 		t.Fatalf("subtree path = %+v, want the root", subtree.Ancestors)
+	}
+}
+
+func TestTreeLiftsThePostsUnderADeletedPostIntoItsPlace(t *testing.T) {
+	store := openTestStore(t)
+	root := mustAdd(t, store, "root", "", nil)
+	addChild(t, store, "first", root.Ref)
+	gone := addChild(t, store, "gone", root.Ref)
+	addChild(t, store, "under gone", gone.Ref)
+	deeper := addChild(t, store, "deeper", gone.Ref)
+	addChild(t, store, "under deeper", deeper.Ref)
+	addChild(t, store, "last", root.Ref)
+	mustDelete(t, store, gone.Ref)
+	mustDelete(t, store, deeper.Ref)
+
+	if got := treeText(readTree(t, store, root.Ref, false, false, 30)); got !=
+		"root, first, under gone, under deeper, last" {
+		t.Fatalf("tree = %q, want the deleted posts left out", got)
+	}
+	if got := treeText(readTree(t, store, root.Ref, false, true, 30)); got !=
+		"root, first, (deleted), under gone, (deleted), under deeper, last" {
+		t.Fatalf("tree with deleted = %q", got)
+	}
+	if got := treeText(readTree(t, store, root.Ref, false, false, 3)); got !=
+		"root (2 more under), first, under gone" {
+		t.Fatalf("cut tree = %q, want no count of the deleted posts", got)
+	}
+	if got := treeText(readTree(t, store, gone.Ref, false, false, 30)); got !=
+		"(deleted), under gone, under deeper" {
+		t.Fatalf("tree of a deleted post = %q, want it and the posts "+
+			"under it", got)
 	}
 }
 
@@ -133,14 +167,14 @@ func TestTreeFillsLevelByLevelAndSaysWhereItCut(t *testing.T) {
 		{8, "root, a, a1, a1x, a2, b, c, c1"},
 		{30, "root, a, a1, a1x, a2, b, c, c1"},
 	} {
-		got := treeText(readTree(t, store, root.Ref, false, test.limit))
-		if got != test.want {
+		tree := readTree(t, store, root.Ref, false, false, test.limit)
+		if got := treeText(tree); got != test.want {
 			t.Fatalf("limit %d: tree = %q, want %q", test.limit, got,
 				test.want)
 		}
 	}
 	_, err := store.Tree(context.Background(), everyAccess(store),
-		store.mustKey(root.Ref), false, 0)
+		store.mustKey(root.Ref), false, false, 0)
 	if !errors.Is(err, ErrInvalidTreeLimit) {
 		t.Fatalf("a zero limit = %v", err)
 	}
@@ -173,8 +207,9 @@ func TestSearchUnderASubtree(t *testing.T) {
 	}
 }
 
-// Counts leave out superseded posts, as listings and trees do.
-func TestCountsLeaveOutSupersededPosts(t *testing.T) {
+// Counts leave out superseded and deleted posts, as listings and trees
+// do, but count the posts under a deleted one.
+func TestCountsLeaveOutSupersededAndDeletedPosts(t *testing.T) {
 	store := openTestStore(t)
 	question := mustAdd(t, store, "Why?", "", nil)
 	old := addChild(t, store, "old answer", question.Ref)
@@ -183,10 +218,13 @@ func TestCountsLeaveOutSupersededPosts(t *testing.T) {
 		Links: []api.Link{link(api.ParentLink, question.Ref),
 			link(api.SupersedesLink, old.Ref)},
 	})
+	wrong := addChild(t, store, "wrong answer", question.Ref)
+	addChild(t, store, "follow-up", wrong.Ref)
+	mustDelete(t, store, wrong.Ref)
 
 	detail := mustGet(t, store, question.Ref)
-	if detail.Children != 1 || detail.Descendants != 1 {
-		t.Fatalf("children %d, descendants %d, want 1 and 1",
+	if detail.Children != 1 || detail.Descendants != 2 {
+		t.Fatalf("children %d, descendants %d, want 1 and 2",
 			detail.Children, detail.Descendants)
 	}
 }

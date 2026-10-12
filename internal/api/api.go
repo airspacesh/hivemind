@@ -87,12 +87,13 @@ type ListedPost struct {
 	// time.
 	Activity time.Time `json:"activity"`
 	// Descendants counts the current posts under the post, leaving out
-	// superseded ones.
+	// superseded and deleted ones.
 	Descendants int `json:"descendants"`
 }
 
-// PostDetail adds the links that point at a post, how many current
-// posts are its children, and a summary of its chat.
+// PostDetail adds the links that point at a post, how many of its
+// children are neither superseded nor deleted, and a summary of its
+// chat.
 type PostDetail struct {
 	ListedPost
 	Backlinks []Link `json:"backlinks,omitempty"`
@@ -113,8 +114,10 @@ type TreePost struct {
 }
 
 // TreeResponse is a post's subtree with the path to it. Posts come
-// depth first, each post's children oldest first, and each post's
-// parent link places it in the tree.
+// depth first, each post's children oldest first. Each post sits under
+// the nearest of its ancestors in Posts, which is its parent unless the
+// tree leaves its deleted parent out, and then the posts under the
+// deleted post take its place.
 type TreeResponse struct {
 	Ancestors []PostRef  `json:"ancestors,omitempty"`
 	Posts     []TreePost `json:"posts"`

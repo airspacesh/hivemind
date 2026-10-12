@@ -56,7 +56,11 @@ type Filter struct {
 	// Under limits the search to a post and its descendants, when set.
 	Under             *Key
 	IncludeSuperseded bool
-	Limit             int
+	// IncludeDeleted keeps deleted posts and messages in a listing.
+	// Without it, the live posts under a deleted post and the live
+	// messages in its chat still match.
+	IncludeDeleted bool
+	Limit          int
 }
 
 // Span is the times from After, inclusive, to Before, exclusive. A
@@ -766,6 +770,9 @@ func (v view) newestPosts(
 	if !filter.IncludeSuperseded {
 		where.clauses = append(where.clauses, `NOT `+supersededClause)
 	}
+	if !filter.IncludeDeleted {
+		where.clauses = append(where.clauses, `NOT e.deleted`)
+	}
 
 	from, args := listingFrom(filter.Under)
 	if candidates != nil {
@@ -797,6 +804,9 @@ func (v view) newestMessages(
 	if !filter.IncludeSuperseded {
 		where.clauses = append(where.clauses, `NOT `+supersededClause)
 	}
+	if !filter.IncludeDeleted {
+		where.clauses = append(where.clauses, `NOT m.deleted`)
+	}
 
 	// Without a subtree, the messages are read newest first, each
 	// joined to its post. A subtree's posts are read first, then each
@@ -825,17 +835,19 @@ func (v view) newestMessages(
 }
 
 // messagesSince counts, for each of the given posts in a workspace, the
-// messages in its chat posted at or after a revision. It leaves out the
-// posts with none.
+// messages in its chat posted at or after a revision, deleted ones only
+// when includeDeleted is set. It leaves out the posts with none.
 func (v view) messagesSince(
 	ctx context.Context, workspace int64, ids []int64, revision int64,
+	includeDeleted bool,
 ) (map[int64]int, error) {
 	rows, err := v.tx.QueryContext(ctx, `
 		SELECT m.post_id, count(*)
 		FROM json_each(?) AS shown `+eachChat+`
 			ON m.workspace_id = ? AND m.post_id = shown.value
-		WHERE m.posted_revision >= ? GROUP BY m.post_id`,
-		idsJSON(ids), workspace, revision)
+		WHERE m.posted_revision >= ? AND (? OR NOT m.deleted)
+		GROUP BY m.post_id`,
+		idsJSON(ids), workspace, revision, includeDeleted)
 	if err != nil {
 		return nil, fmt.Errorf("counting new messages: %w", err)
 	}
@@ -854,12 +866,12 @@ func (v view) messagesSince(
 
 // readPage reads the posts and messages of a page of matches, and the
 // paths above them. Without chat, it counts each post's messages posted
-// since the page's oldest match.
+// since the page's oldest match, as the filter would list them.
 func (v view) readPage(
 	ctx context.Context,
 	workspace int64,
 	matches []match,
-	includeChat bool,
+	filter Filter,
 ) (api.MatchPage, error) {
 	posts := map[int64]api.Post{}
 	paths := map[int64][]api.PostRef{}
@@ -896,10 +908,10 @@ func (v view) readPage(
 		byPostOrder[postOrder] = &messages[i]
 	}
 	newMessages := map[int64]int{}
-	if !includeChat && len(matches) > 0 {
+	if !filter.IncludeChat && len(matches) > 0 {
 		oldest := matches[len(matches)-1].revision
 		if newMessages, err = v.messagesSince(ctx, workspace, ids,
-			oldest); err != nil {
+			oldest, filter.IncludeDeleted); err != nil {
 			return api.MatchPage{}, err
 		}
 	}
@@ -984,7 +996,7 @@ func (s *Store) Search(
 	}
 
 	page, err := v.readPage(ctx, workspace,
-		matches[:min(filter.Limit, len(matches))], filter.IncludeChat)
+		matches[:min(filter.Limit, len(matches))], filter)
 	if err != nil {
 		return api.MatchPage{}, err
 	}

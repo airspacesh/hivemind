@@ -218,7 +218,7 @@ type forestPost struct {
 	activityRevision    int64
 	modified, activity  string
 	project, text, user string
-	superseded          bool
+	superseded, deleted bool
 	parent              int64
 	// metadata holds the post's values lowered, by key.
 	metadata map[string]string
@@ -227,6 +227,7 @@ type forestPost struct {
 type forestMessage struct {
 	postOrder, post, number, revision int64
 	created, text, user               string
+	deleted                           bool
 }
 
 // referenceMatch is a match as the reference ranks it.
@@ -245,7 +246,7 @@ func readForest(
 		SELECT e.id, e.revision, e.activity_revision, e.modified_utc,
 			e.activity_utc, e.project_lower,
 			e.subject_lower || ' ' || e.body_lower, e.origin_user_lower,
-			`+supersededClause+`, coalesce((
+			`+supersededClause+`, e.deleted, coalesce((
 				SELECT target_id FROM post_links
 				WHERE source_workspace_id = e.workspace_id
 					AND source_id = e.id AND name = 'parent'), 0)
@@ -258,7 +259,7 @@ func readForest(
 		var e forestPost
 		if err := rows.Scan(&e.id, &e.revision, &e.activityRevision,
 			&e.modified, &e.activity, &e.project, &e.text, &e.user,
-			&e.superseded, &e.parent); err != nil {
+			&e.superseded, &e.deleted, &e.parent); err != nil {
 			t.Fatal(err)
 		}
 		e.metadata = map[string]string{}
@@ -284,7 +285,7 @@ func readForest(
 
 	rows, err = store.db.Query(`
 		SELECT post_order, post_id, id, posted_revision, created_utc,
-			lower(body), lower(origin_user)
+			lower(body), lower(origin_user), deleted
 		FROM post_messages WHERE workspace_id = ?`, workspace)
 	if err != nil {
 		t.Fatal(err)
@@ -294,7 +295,7 @@ func readForest(
 	for rows.Next() {
 		var m forestMessage
 		if err := rows.Scan(&m.postOrder, &m.post, &m.number, &m.revision,
-			&m.created, &m.text, &m.user); err != nil {
+			&m.created, &m.text, &m.user, &m.deleted); err != nil {
 			t.Fatal(err)
 		}
 		messages = append(messages, m)
@@ -315,12 +316,14 @@ type listingCase struct {
 	revisions              RevisionSpan
 	under                  int64
 	includeSuperseded      bool
+	includeDeleted         bool
 	includeChat            bool
 }
 
 func (c listingCase) filter(workspace int64) Filter {
 	filter := Filter{Changed: c.span, Revisions: c.revisions,
-		IncludeSuperseded: c.includeSuperseded, IncludeChat: c.includeChat}
+		IncludeSuperseded: c.includeSuperseded,
+		IncludeDeleted:    c.includeDeleted, IncludeChat: c.includeChat}
 	if c.project != "" {
 		filter.Project = []FieldCond{{Value: c.project}}
 	}
@@ -348,7 +351,8 @@ func (c listingCase) filter(workspace int64) Filter {
 
 // referenceListing is the listing worked out from every post and
 // message: those that match, by the revision each ranks by, newest
-// first.
+// first. A deleted post leaves out only itself, so the posts under it
+// and the messages in its chat still match.
 func referenceListing(
 	posts map[int64]forestPost, messages []forestMessage, c listingCase,
 ) []referenceMatch {
@@ -394,12 +398,14 @@ func referenceListing(
 		if c.includeChat {
 			revision, at = e.revision, e.modified
 		}
-		if listed(e) && matched(e.text, e.user) && inSpans(revision, at) {
+		if listed(e) && (c.includeDeleted || !e.deleted) &&
+			matched(e.text, e.user) && inSpans(revision, at) {
 			matches = append(matches, referenceMatch{revision, e.id, 0})
 		}
 	}
 	for _, m := range messages {
 		if c.includeChat && listed(posts[m.post]) &&
+			(c.includeDeleted || !m.deleted) &&
 			matched(m.text, m.user) && inSpans(m.revision, m.created) {
 			matches = append(matches,
 				referenceMatch{m.revision, m.post, m.postOrder})
@@ -413,7 +419,7 @@ func referenceListing(
 
 // referenceNewMessages counts, for each post a page without chat
 // matched, the messages in its chat posted since the page's oldest
-// match.
+// match that the listing would show.
 func referenceNewMessages(
 	messages []forestMessage, page []referenceMatch, c listingCase,
 ) map[int64]int {
@@ -426,7 +432,8 @@ func referenceNewMessages(
 		onPage[m.post] = true
 	}
 	for _, m := range messages {
-		if onPage[m.post] && m.revision >= page[len(page)-1].revision {
+		if onPage[m.post] && m.revision >= page[len(page)-1].revision &&
+			(c.includeDeleted || !m.deleted) {
 			counts[m.post]++
 		}
 	}
@@ -552,16 +559,25 @@ func TestListingMatchesTheReference(t *testing.T) {
 		scrambleTimes(t, store, random, seed%2 == 0)
 		workspace := workspaceID(t, store, "general")
 		posts, messages := readForest(t, store, workspace)
+		// A listing under a top-level post, and under a deleted post
+		// with posts under it, which it still lists.
 		var unders []int64
 		for id, e := range posts {
-			if e.parent == 0 && len(unders) < 2 {
+			if e.parent == 0 {
 				unders = append(unders, id)
+				break
+			}
+		}
+		for _, e := range posts {
+			if e.parent != 0 && posts[e.parent].deleted {
+				unders = append(unders, e.parent)
+				break
 			}
 		}
 		latest := latestRevision(t, store)
 		middle := RevisionSpan{After: latest / 4, Before: latest * 3 / 4}
 
-		for _, base := range []listingCase{
+		for i, base := range []listingCase{
 			{}, {project: "a"}, {user: "ines"}, {content: "heron"},
 			{project: "b", user: "omar"}, {project: "c"},
 			{project: "c", content: "duck"}, {project: "nothing"},
@@ -572,11 +588,12 @@ func TestListingMatchesTheReference(t *testing.T) {
 		} {
 			for _, under := range append([]int64{0}, unders...) {
 				for _, span := range spans {
-					for _, flags := range []int{0, 1, 2, 3} {
+					for flags := range 4 {
 						c := base
 						c.under, c.span = under, span
 						c.includeSuperseded = flags&1 != 0
 						c.includeChat = flags&2 != 0
+						c.includeDeleted = i%2 != 0
 						checkListingPage(t, store, workspace, posts,
 							messages, c, 500)
 						checkListingPage(t, store, workspace, posts,

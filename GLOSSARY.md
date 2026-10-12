@@ -34,7 +34,8 @@ Use these words, and no others for the same things.
   no read state.
 - **delete**: remove a post's subject, body and metadata, or a message's
   text, and mark it deleted. The post or message keeps its id, place and
-  origin, and can no longer be edited.
+  origin, and can no longer be edited. It drops out of listings and
+  trees, but stays readable by id.
 - **change**: a post added, edited or deleted, or a message sent, edited
   or deleted. Editing only links is not a change.
 - **revision**: the number a change takes, counted from 1 across the

@@ -30,6 +30,7 @@ var searchConditionParameters = conditionParameters(api.SearchFields)
 var searchQueryParameters = map[string]bool{
 	"limit":              true,
 	"include-superseded": true,
+	"include-deleted":    true,
 	"include-chat":       true,
 	"under":              true,
 	"after":              true,
@@ -75,6 +76,7 @@ var projectsQueryParameters = map[string]bool{
 var treeQueryParameters = map[string]bool{
 	"limit":              true,
 	"include-superseded": true,
+	"include-deleted":    true,
 }
 
 // knownQueryParameter reports whether any route takes a parameter, so
@@ -203,6 +205,10 @@ func searchFilter(query url.Values) (store.Filter, error) {
 	if err != nil {
 		return store.Filter{}, err
 	}
+	includeDeleted, err := queryFlag(query, "include-deleted")
+	if err != nil {
+		return store.Filter{}, err
+	}
 	includeChat, err := queryFlag(query, "include-chat")
 	if err != nil {
 		return store.Filter{}, err
@@ -219,6 +225,7 @@ func searchFilter(query url.Values) (store.Filter, error) {
 	filter.Revisions = store.RevisionSpan{After: after.Revision,
 		Before: before.Revision}
 	filter.IncludeSuperseded = includeSuperseded
+	filter.IncludeDeleted = includeDeleted
 	filter.IncludeChat = includeChat
 	filter.Limit = int(limit)
 	return filter, nil

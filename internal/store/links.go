@@ -368,7 +368,8 @@ func (s *Store) Detail(
 		SELECT count(*) FROM post_links AS l JOIN posts AS e
 			ON e.workspace_id = l.source_workspace_id AND e.id = l.source_id
 		WHERE l.target_workspace_id = ? AND l.target_id = ?
-			AND l.name = 'parent' AND NOT `+supersededClause,
+			AND l.name = 'parent' AND NOT e.deleted
+			AND NOT `+supersededClause,
 		key.Workspace, key.ID,
 	).Scan(&detail.Children); err != nil {
 		return api.PostDetail{}, fmt.Errorf("counting children: %w", err)

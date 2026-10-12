@@ -582,15 +582,37 @@ check "a deleted post keeps its origin" "From: $(id -un)@" "$gadwall_post"
 check "a child's path shows its deleted parent" "> $gadwall (deleted)" \
     "$(ws post "$egg")"
 untimed() { sed -E 's/\] ([0-9/]+ )?[0-9]{2}:[0-9]{2}:? /] /'; }
-check "a deleted post keeps its place in the tree" \
-    "  [$gadwall] (deleted)
-    [$egg] Eggs counted" "$(ws tree "$reply" | untimed)"
-check "a listing shows a deleted post as deleted" \
-    "[$gadwall] $(id -un) in $heron.$reply (deleted)" \
-    "$(ws recent --project owners | untimed)"
-check "a listing shows a deleted message as deleted" \
+check_equal "a tree puts the posts under a deleted post in its place" \
+    "[$reply] Reply under heron
+  [$egg] Eggs counted" "$(ws tree "$reply" | untimed | grep -v '^Path:')"
+check_equal "a tree with deleted posts shows them" \
+    "[$reply] Reply under heron
+  [$gadwall] (deleted)
+    [$egg] Eggs counted" \
+    "$(ws tree "$reply" --include-deleted | untimed | grep -v '^Path:')"
+check_equal "a tree of a deleted post shows it and the posts under it" \
+    "[$gadwall] (deleted)
+  [$egg] Eggs counted" \
+    "$(ws tree "$gadwall" | untimed | grep -v '^Path:')"
+owners="$(ws recent --project owners --include-chat | untimed)"
+check "a listing leaves out a deleted post but not the posts under it" \
+    "[$egg] $(id -un) in $heron.$reply.$gadwall: Eggs counted" "$owners"
+check "a listing keeps the chat of a deleted post" \
+    "[$gadwall-m1] $(id -un) in $heron.$reply.$gadwall: Before" "$owners"
+check_equal "a listing leaves out deleted posts and messages" "" \
+    "$(echo "$owners" | grep -F -e "[$gadwall]" -e "[$gadwall-m2]" || true)"
+with_deleted="$(ws recent --project owners --include-chat \
+    --include-deleted 2>&1 | untimed)"
+check "a listing says it includes deleted posts" \
+    "matching --project owners, deleted included:" "$with_deleted"
+check "a listing with deleted posts shows a deleted post as deleted" \
+    "[$gadwall] $(id -un) in $heron.$reply (deleted)" "$with_deleted"
+check "a listing with deleted posts shows a deleted message as deleted" \
     "[$gadwall-m2] $(id -un) in $heron.$reply.$gadwall (deleted)" \
-    "$(ws recent --project owners --include-chat | untimed)"
+    "$with_deleted"
+check "the next page keeps deleted posts" "--include-deleted" \
+    "$(ws recent --project owners --include-deleted -n 1 2>/dev/null |
+        grep '^Next:')"
 check "a deleted message keeps its place and shows no text" \
     "[$gadwall-m1] $(id -un): Before
 [$gadwall-m2] $(id -un) (deleted)

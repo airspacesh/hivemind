@@ -34,8 +34,8 @@ type treeFacts struct {
 }
 
 // readTreeFacts reads the latest activity anywhere in a post's subtree,
-// and how many current posts are under it. Superseded posts count
-// towards activity but not towards descendants.
+// and how many current posts are under it. Superseded and deleted posts
+// count towards activity but not towards descendants.
 func (v view) readTreeFacts(ctx context.Context, key Key) (treeFacts, error) {
 	var facts treeFacts
 	var activity string
@@ -43,7 +43,7 @@ func (v view) readTreeFacts(ctx context.Context, key Key) (treeFacts, error) {
 		WITH RECURSIVE `+subtreeCTE("subtree")+`
 		SELECT max(e.activity_utc),
 			coalesce(sum(NOT (e.workspace_id = ? AND e.id = ?)
-				AND NOT `+supersededClause+`), 0)
+				AND NOT e.deleted AND NOT `+supersededClause+`), 0)
 		FROM subtree JOIN posts AS e
 			ON e.workspace_id = subtree.workspace_id
 			AND e.id = subtree.id`,
@@ -85,6 +85,7 @@ type treeNode struct {
 	key        Key
 	created    string
 	superseded bool
+	deleted    bool
 	children   []*treeNode
 	// size counts the node and the visible nodes under it.
 	size  int
@@ -97,7 +98,7 @@ func (v view) readSubtree(ctx context.Context, root Key) (*treeNode, error) {
 	rows, err := v.tx.QueryContext(ctx, `
 		WITH RECURSIVE `+subtreeCTE("subtree")+`
 		SELECT e.workspace_id, e.id, e.created_utc, `+supersededClause+`,
-			p.target_workspace_id, p.target_id
+			e.deleted, p.target_workspace_id, p.target_id
 		FROM subtree JOIN posts AS e
 			ON e.workspace_id = subtree.workspace_id
 			AND e.id = subtree.id
@@ -116,7 +117,7 @@ func (v view) readSubtree(ctx context.Context, root Key) (*treeNode, error) {
 		node := &treeNode{}
 		var parentWorkspace, parentID *int64
 		if err := rows.Scan(&node.key.Workspace, &node.key.ID,
-			&node.created, &node.superseded,
+			&node.created, &node.superseded, &node.deleted,
 			&parentWorkspace, &parentID); err != nil {
 			return nil, fmt.Errorf("reading tree: %w", err)
 		}
@@ -145,6 +146,21 @@ func (v view) readSubtree(ctx context.Context, root Key) (*treeNode, error) {
 		})
 	}
 	return nodes[root], nil
+}
+
+// liftDeleted replaces each deleted node under node with its children,
+// in its place, so the live posts under a deleted post stay in the tree.
+func liftDeleted(node *treeNode) {
+	var kept []*treeNode
+	for _, child := range node.children {
+		liftDeleted(child)
+		if child.deleted {
+			kept = append(kept, child.children...)
+		} else {
+			kept = append(kept, child)
+		}
+	}
+	node.children = kept
 }
 
 // pruneSuperseded drops each superseded node with no current node under
@@ -228,12 +244,15 @@ func treeCuts(node *treeNode) (moreBelow, moreUnder int) {
 // Tree returns up to limit posts of a post's subtree, filled level by
 // level, with where it was cut. A superseded post is left out unless
 // includeSuperseded is set or a current post is under it, which it then
-// gives context to. The requested post is always included.
+// gives context to. A deleted post is left out unless includeDeleted is
+// set, and the posts under it take its place. The requested post is
+// always included.
 func (s *Store) Tree(
 	ctx context.Context,
 	access Access,
 	key Key,
 	includeSuperseded bool,
+	includeDeleted bool,
 	limit int,
 ) (api.TreeResponse, error) {
 	if limit < 1 || limit > MaxTreeLimit {
@@ -253,6 +272,9 @@ func (s *Store) Tree(
 	root, err := v.readSubtree(ctx, key)
 	if err != nil {
 		return api.TreeResponse{}, err
+	}
+	if !includeDeleted {
+		liftDeleted(root)
 	}
 	if includeSuperseded {
 		countSizes(root)

@@ -405,12 +405,17 @@ func (h *handler) tree(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
+	includeDeleted, err := queryFlag(query, "include-deleted")
+	if err != nil {
+		writeBadRequest(w, err.Error())
+		return
+	}
 	access, key, ok := h.pathPost(w, r)
 	if !ok {
 		return
 	}
 	tree, err := h.store.Tree(r.Context(), access, key,
-		includeSuperseded, int(limit))
+		includeSuperseded, includeDeleted, int(limit))
 	if err != nil {
 		writeStoreError(w, err)
 		return

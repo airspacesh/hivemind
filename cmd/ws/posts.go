@@ -519,13 +519,14 @@ func cmdPost(c *client, args []string) error {
 func cmdTree(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
 		strs:  []string{"--limit"},
-		bools: []string{"--include-superseded"},
+		bools: []string{"--include-superseded", "--include-deleted"},
 	})
 	if err != nil {
 		return err
 	}
 	if len(p.pos) != 1 {
-		return usageError("tree <ref> [--limit <n>] [--include-superseded]")
+		return usageError("tree <ref> [--limit <n>] [--include-superseded] " +
+			"[--include-deleted]")
 	}
 	ref, err := api.ParseRef(p.pos[0])
 	if err != nil {
@@ -541,6 +542,9 @@ func cmdTree(c *client, args []string) error {
 	}
 	if p.bools["--include-superseded"] {
 		query.Set("include-superseded", "true")
+	}
+	if p.bools["--include-deleted"] {
+		query.Set("include-deleted", "true")
 	}
 
 	t, err := c.resolve(ref)
@@ -641,6 +645,9 @@ func listingHeader(p *parsedArgs, limit int, includeChat bool) string {
 	if p.bools["--include-superseded"] {
 		text += ", superseded included"
 	}
+	if p.bools["--include-deleted"] {
+		text += ", deleted included"
+	}
 	return text + ":"
 }
 
@@ -673,7 +680,7 @@ func olderCommand(
 		text += " --limit " + shellQuote(p.strs["--limit"])
 	}
 	for _, flag := range []string{"--include-chat", "--include-superseded",
-		"--posts-only"} {
+		"--include-deleted", "--posts-only"} {
 		if p.bools[flag] {
 			text += " " + flag
 		}
@@ -699,6 +706,10 @@ func cmdListing(c *client, command string, args []string) error {
 		if p.has("--include-chat") {
 			return fmt.Errorf("search includes chat unless " +
 				"--posts-only. --include-chat is for recent")
+		}
+		if p.has("--include-deleted") {
+			return fmt.Errorf("search never lists deleted posts or " +
+				"messages. --include-deleted is for recent")
 		}
 		includeChat = !p.bools["--posts-only"]
 	case "recent":
@@ -746,6 +757,9 @@ func cmdListing(c *client, command string, args []string) error {
 	query.Set("limit", fmt.Sprint(limit))
 	if p.bools["--include-superseded"] {
 		query.Set("include-superseded", "true")
+	}
+	if p.bools["--include-deleted"] {
+		query.Set("include-deleted", "true")
 	}
 	if includeChat {
 		query.Set("include-chat", "true")

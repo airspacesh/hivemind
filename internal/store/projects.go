@@ -31,7 +31,7 @@ const projectNames = `
 
 // Projects lists a workspace's most recently active projects, at most
 // limit of them, with their posts created in the recentWindow before
-// now.
+// now. The counts leave out deleted posts, but a delete is activity.
 func (s *Store) Projects(
 	ctx context.Context, workspace int64, limit int, now time.Time,
 ) (api.ProjectsResponse, error) {
@@ -48,7 +48,7 @@ func (s *Store) Projects(
 		) AS latest, (
 			SELECT count(*) FROM posts
 			WHERE workspace_id = ?1 AND project = names.project
-				AND created_utc >= ?2
+				AND created_utc >= ?2 AND NOT deleted
 		)
 		FROM names WHERE project IS NOT NULL
 		ORDER BY latest DESC, project`, workspace, formatTime(since),
@@ -86,7 +86,8 @@ func (s *Store) Projects(
 }
 
 // Project reads one project of a workspace as Projects lists it, adding
-// its count of every post. It reads only that project's posts.
+// its count of every post that is not deleted. It reads only that
+// project's posts.
 func (s *Store) Project(
 	ctx context.Context, workspace int64, name string, now time.Time,
 ) (api.ProjectsResponse, error) {
@@ -94,10 +95,13 @@ func (s *Store) Project(
 	var latest sql.NullString
 	var posts, recent int
 	if err := s.reads.QueryRowContext(ctx, `
-		SELECT max(activity_utc), count(*), (
+		SELECT max(activity_utc), (
+			SELECT count(*) FROM posts
+			WHERE workspace_id = ?1 AND project = ?2 AND NOT deleted
+		), (
 			SELECT count(*) FROM posts
 			WHERE workspace_id = ?1 AND project = ?2
-				AND created_utc >= ?3
+				AND created_utc >= ?3 AND NOT deleted
 		)
 		FROM posts WHERE workspace_id = ?1 AND project = ?2`,
 		workspace, name, formatTime(since),

@@ -152,10 +152,11 @@ CREATE INDEX posts_origin_user
 ON posts(workspace_id, origin_user_lower, id)`
 
 // createProjectCreatedIndex counts a project's posts created since a
-// time by reading only those posts' part of the index.
+// time by reading only those posts' part of the index. It holds deleted
+// so the count can leave deleted posts out without reading the posts.
 const createProjectCreatedIndex = `
 CREATE INDEX posts_project_created
-ON posts(workspace_id, project, created_utc)`
+ON posts(workspace_id, project, created_utc, deleted)`
 
 // createLinks defines named links between posts, which may join
 // workspaces. Each link is stored once, on its source, and

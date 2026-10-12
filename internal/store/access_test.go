@@ -118,7 +118,7 @@ func TestProtectedPostsStayOutOfListings(t *testing.T) {
 	open := w.openAccess(t)
 	root := w.store.mustKey(w.openRoot.Ref)
 
-	tree, err := w.store.Tree(ctx, open, root, true, 30)
+	tree, err := w.store.Tree(ctx, open, root, true, true, 30)
 	if err != nil {
 		t.Fatal(err)
 	}

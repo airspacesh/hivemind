@@ -133,7 +133,7 @@ func searchFlagSpec() flagSpec {
 		strs: []string{"--limit", "--under", "--workspace", "--after",
 			"--before"},
 		bools: []string{"--id-only", "--include-superseded",
-			"--posts-only", "--include-chat"},
+			"--include-deleted", "--posts-only", "--include-chat"},
 		repeat: searchFilterFlags(),
 		alias:  map[string]string{"-n": "--limit"},
 	}

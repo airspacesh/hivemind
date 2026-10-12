@@ -526,7 +526,7 @@ func TestReadsProceedWhileAWriteIsOpen(t *testing.T) {
 			return err
 		},
 		"tree": func(ctx context.Context) error {
-			_, err := store.Tree(ctx, access, key, true, 10)
+			_, err := store.Tree(ctx, access, key, true, true, 10)
 			return err
 		},
 		"projects": func(ctx context.Context) error {
