@@ -860,62 +860,97 @@ func TestLinksCannotJoinServers(t *testing.T) {
 	}
 }
 
-// TestUncertainWritesAreReportedNotRepeated checks that a write that
-// may have reached the server is sent once, and reported as possibly
-// done, whatever went wrong after it left.
-func TestUncertainWritesAreReportedNotRepeated(t *testing.T) {
-	answer := func(write func(w http.ResponseWriter)) http.HandlerFunc {
-		return hosting(func(w http.ResponseWriter, r *http.Request) {
-			write(w)
-		}, "general=e")
+// requestIDLog records the request id of each write a fake server
+// gets.
+type requestIDLog struct {
+	mu  sync.Mutex
+	ids []string
+}
+
+// record notes the request id r carries, and returns how many writes
+// came before it.
+func (l *requestIDLog) record(t *testing.T, r *http.Request) int {
+	var body struct {
+		RequestID string `json:"request_id"`
 	}
-	uncertain := map[string]http.HandlerFunc{
-		"no version header": answer(func(w http.ResponseWriter) {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		t.Errorf("decoding %s %s: %v", r.Method, r.URL.Path, err)
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.ids = append(l.ids, body.RequestID)
+	return len(l.ids) - 1
+}
+
+func (l *requestIDLog) all() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Clone(l.ids)
+}
+
+// TestUncertainWritesGiveTheCommandThatRepeatsThem checks that a write
+// whose answer cannot be read is sent once, and reported as possibly
+// done with the command that repeats it under its request id.
+func TestUncertainWritesGiveTheCommandThatRepeatsThem(t *testing.T) {
+	uncertain := map[string]func(w http.ResponseWriter){
+		"no version header": func(w http.ResponseWriter) {
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprint(w, `{"ref":"e1"}`)
-		}),
-		"another version": answer(func(w http.ResponseWriter) {
+		},
+		"another version": func(w http.ResponseWriter) {
 			w.Header().Set(version.APIHeader, "1")
 			w.WriteHeader(http.StatusCreated)
-		}),
-		"truncated body": answer(func(w http.ResponseWriter) {
+		},
+		"truncated body": func(w http.ResponseWriter) {
 			w.Header().Set(version.APIHeader, strconv.Itoa(version.API))
 			w.Header().Set("Content-Length", "500")
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprint(w, `{"ref":"e1",`)
-		}),
-		"malformed JSON": answer(func(w http.ResponseWriter) {
+		},
+		"malformed JSON": func(w http.ResponseWriter) {
 			w.Header().Set(version.APIHeader, strconv.Itoa(version.API))
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprint(w, `{"ref": e1}`)
-		}),
-		"unreadable refusal": answer(func(w http.ResponseWriter) {
+		},
+		"unreadable refusal": func(w http.ResponseWriter) {
 			w.Header().Set(version.APIHeader, strconv.Itoa(version.API))
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprint(w, `<html>`)
-		}),
-		"server error": answer(func(w http.ResponseWriter) {
-			refuse(w, http.StatusServiceUnavailable, api.CodeUnavailable,
-				"server is busy or the request timed out")
-		}),
-		"timeout": answer(func(w http.ResponseWriter) {
-			time.Sleep(time.Second)
-		}),
+		},
 	}
-	for name, handler := range uncertain {
+	for name, write := range uncertain {
 		t.Run(name, func(t *testing.T) {
-			server := newFakeServer(t, handler)
+			var writes requestIDLog
+			server := newFakeServer(t, hosting(
+				func(w http.ResponseWriter, r *http.Request) {
+					writes.record(t, r)
+					write(w)
+				}, "general=e"))
 			config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 				server.URL+"\n", 0o600)
-			got := runBinary(t, wsBinary, []string{"WORKSTREAM_CONFIG=" +
-				config, "WORKSTREAM_TIMEOUT=300ms"}, "add", "Once",
-				"--project", "pond")
-			if got.ok || !strings.Contains(got.stderr, "may have taken "+
-				"effect") || !strings.Contains(got.stderr, "Check 'ws recent") {
-				t.Errorf("want a possibly-done report: %+v", got)
+			got := ws(t, config, "add", "Once more", "--project", "pond")
+			ids := writes.all()
+			if len(ids) != 1 || ids[0] == "" {
+				t.Fatalf("want one write with a request id, got %q", ids)
 			}
-			if requests := server.recorded(); len(requests) != 1 {
-				t.Errorf("want exactly one request, got %v", requests)
+			id := ids[0]
+			repeat := "\n  ws add --request-id " + id +
+				" 'Once more' --project pond\n"
+			if got.ok || !strings.Contains(got.stderr,
+				"may have taken effect") ||
+				!strings.Contains(got.stderr, repeat) {
+				t.Errorf("want a possibly-done report with %q: %+v", repeat,
+					got)
+			}
+
+			got = ws(t, config, "add", "--request-id", id, "Once more",
+				"--project", "pond")
+			if ids := writes.all(); len(ids) != 2 || ids[1] != id {
+				t.Errorf("want the repeat under the same id, got %q", ids)
+			}
+			if !strings.Contains(got.stderr, repeat) {
+				t.Errorf("a repeat should give itself again, %q: %+v",
+					repeat, got)
 			}
 		})
 	}
@@ -939,6 +974,47 @@ func TestUncertainWritesAreReportedNotRepeated(t *testing.T) {
 			t.Errorf("a refusal is certain: %+v", got)
 		}
 	})
+}
+
+// TestSendRepeatsUnderItsRequestID checks that a send which timed out
+// or found the server busy is sent again under the same request id.
+func TestSendRepeatsUnderItsRequestID(t *testing.T) {
+	failures := map[string]func(w http.ResponseWriter){
+		"timeout": func(w http.ResponseWriter) {
+			time.Sleep(time.Second)
+		},
+		"server busy": func(w http.ResponseWriter) {
+			refuse(w, http.StatusServiceUnavailable, api.CodeUnavailable,
+				"server is busy or the request timed out")
+		},
+	}
+	for name, fail := range failures {
+		t.Run(name, func(t *testing.T) {
+			var writes requestIDLog
+			server := newFakeServer(t, hosting(
+				func(w http.ResponseWriter, r *http.Request) {
+					if writes.record(t, r) == 0 {
+						fail(w)
+						return
+					}
+					reply(w, http.StatusCreated, api.Message{
+						Post: api.Ref{Prefix: "e", ID: 1}, Number: 1,
+						Revision: 7, Body: "quack"})
+				}, "general=e"))
+			config := writeConfig(t, "workspaces:\n  general:\n    server: "+
+				server.URL+"\n", 0o600)
+			got := runBinary(t, wsBinary, []string{"WORKSTREAM_CONFIG=" +
+				config, "WORKSTREAM_TIMEOUT=300ms"}, "chat", "send", "e1",
+				"quack")
+			if !got.ok || got.stdout != "Sent [e1-m1] at @7.\n" {
+				t.Errorf("want the send to land on its second try: %+v", got)
+			}
+			ids := writes.all()
+			if len(ids) != 2 || ids[0] == "" || ids[1] != ids[0] {
+				t.Errorf("want two sends under one request id, got %q", ids)
+			}
+		})
+	}
 }
 
 // listing answers a search with posts changed at the given times.
@@ -1019,10 +1095,11 @@ func TestForumNamesItselfAndReadsOnlyItsConfig(t *testing.T) {
 	}
 
 	withConfig := forum("FORUM_CONFIG="+wsConfig,
-		"FORUM_TIMEOUT=200ms")
-	got = withConfig("add", "Lost", "--project", "pond")
-	if !strings.Contains(got.stderr, "Check 'forum recent") ||
-		!strings.Contains(got.stderr, "forum did not retry") {
+		"FORUM_TIMEOUT=200ms", "USER=duck")
+	got = withConfig("edit", "e1", "Lost")
+	if !strings.Contains(got.stderr, "Check 'forum post e1'") ||
+		!strings.Contains(got.stderr, "forum did not retry") ||
+		!strings.Contains(got.stderr, "FORUM_TIMEOUT sets") {
 		t.Errorf("forum's retry advice: %+v", got)
 	}
 	got = withConfig("post")

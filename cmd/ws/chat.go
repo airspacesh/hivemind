@@ -178,7 +178,7 @@ func (c *client) numberBefore(
 
 func cmdChatSend(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs: []string{"--after"}, passUnknown: true,
+		strs: []string{"--after", "--request-id"}, passUnknown: true,
 	})
 	if err != nil {
 		return err
@@ -189,10 +189,14 @@ func cmdChatSend(c *client, args []string) error {
 		for _, arg := range p.pos {
 			if strings.HasPrefix(arg, "--") {
 				return fmt.Errorf("%s looks like a flag, but chat send "+
-					"has only --after\n%w", arg, usage)
+					"has only --after and --request-id\n%w", arg, usage)
 			}
 		}
 		return usage
+	}
+	id, err := requestID(p)
+	if err != nil {
+		return err
 	}
 	ref, err := api.ParseRef(p.pos[0])
 	if err != nil {
@@ -213,16 +217,20 @@ func cmdChatSend(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	request := api.PostMessageRequest{Body: p.pos[1], Origin: origin}
+	request := api.PostMessageRequest{Body: p.pos[1], Origin: origin,
+		RequestID: id}
 	if err := request.Validate(); err != nil {
 		return err
 	}
 
 	var message api.Message
-	err = c.do(t, "POST", postPath(ref, "/messages"), request, &message)
+	err = sendRetrying(func() error {
+		return c.do(t, "POST", postPath(ref, "/messages"), request,
+			&message)
+	}, systemClock{})
 	if err != nil {
-		return uncertainWrite(err, "The message",
-			programName+" chat recent "+ref.String())
+		return uncertainCreate(err, "The message",
+			repeatCommand("chat send", args, p, id))
 	}
 	fmt.Printf("Sent [%s] at %s.\n", message.Ref(),
 		api.FormatRevision(message.Revision))

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"net/url"
@@ -72,6 +73,46 @@ func uncertainWrite(err error, outcome, check string) error {
 	return fmt.Errorf("%w\n%s may have taken effect anyway, and %s did "+
 		"not retry. Check '%s' before trying again", err, outcome,
 		programName, check)
+}
+
+// uncertainCreate reports a failed add or send. One that may have taken
+// effect gives the command that repeats it under its request id, which
+// cannot make a second copy.
+func uncertainCreate(err error, outcome, repeat string) error {
+	if !mayHaveApplied(err) {
+		return err
+	}
+	return fmt.Errorf("%w\n%s may have taken effect anyway. This repeats "+
+		"it under the same request id, so it cannot make a second "+
+		"copy:\n  %s", err, outcome, repeat)
+}
+
+// requestID is the id of the one write a command makes: the id
+// --request-id gives, or else a new random one.
+func requestID(p *parsedArgs) (string, error) {
+	if !p.has("--request-id") {
+		return rand.Text(), nil
+	}
+	if p.strs["--request-id"] == "" {
+		return "", errors.New("--request-id needs an id")
+	}
+	return p.strs["--request-id"], nil
+}
+
+// repeatCommand is the command line that repeats a command, given its
+// args, under its request id. The id goes first, so that a -- among
+// the args cannot turn it into a positional argument.
+func repeatCommand(
+	command string, args []string, p *parsedArgs, requestID string,
+) string {
+	text := programName + " " + command
+	if !p.has("--request-id") {
+		text += " --request-id " + shellQuote(requestID)
+	}
+	for _, arg := range args {
+		text += " " + shellQuote(arg)
+	}
+	return text
 }
 
 // explainNotOwner adds the next step to an edit or delete refused
@@ -285,7 +326,8 @@ func (c *client) targetBeside(p *parsedArgs, refFlag string) (target, error) {
 
 func cmdAdd(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs:  []string{"--project", "--body", "--parent", "--workspace"},
+		strs: []string{"--project", "--body", "--parent", "--workspace",
+			"--request-id"},
 		bools: []string{"--no-recent"},
 		repeat: append([]string{"--meta", "--supersedes", "--link"},
 			shorthandFlags()...),
@@ -300,6 +342,10 @@ func cmdAdd(c *client, args []string) error {
 			"[--workspace <name>]")
 	}
 	metadata, err := collectMetadata(p)
+	if err != nil {
+		return err
+	}
+	id, err := requestID(p)
 	if err != nil {
 		return err
 	}
@@ -324,22 +370,25 @@ func cmdAdd(c *client, args []string) error {
 		return err
 	}
 	request := api.AddPostRequest{
-		Project:  p.strs["--project"],
-		Subject:  p.pos[0],
-		Body:     p.strs["--body"],
-		Metadata: metadata,
-		Origin:   origin,
-		Links:    links,
+		Project:   p.strs["--project"],
+		Subject:   p.pos[0],
+		Body:      p.strs["--body"],
+		Metadata:  metadata,
+		Origin:    origin,
+		Links:     links,
+		RequestID: id,
 	}
 	if err := request.Validate(); err != nil {
 		return err
 	}
 
 	var post api.Post
-	err = c.do(t, "POST", workspacePath(t, "/posts"), request, &post)
+	err = sendRetrying(func() error {
+		return c.do(t, "POST", workspacePath(t, "/posts"), request, &post)
+	}, systemClock{})
 	if err != nil {
-		return uncertainWrite(err, "The post",
-			programName+" recent --flat --workspace "+t.workspace)
+		return uncertainCreate(err, "The post",
+			repeatCommand("add", args, p, id))
 	}
 	fmt.Printf("Added post [%s] at %s.\n", post.Ref,
 		api.FormatRevision(post.Revision))

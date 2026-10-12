@@ -85,11 +85,32 @@ func (e *serverError) Error() string {
 	return e.server + ": " + e.message
 }
 
+// abandonedWrite is a write that sendRetrying stopped repeating after
+// a send that may have taken effect.
+type abandonedWrite struct {
+	sends   int
+	elapsed time.Duration
+	err     error
+}
+
+func (e *abandonedWrite) Error() string {
+	return fmt.Sprintf("gave up after %d tries in %s: %v", e.sends,
+		e.elapsed.Round(time.Second), e.err)
+}
+
+func (e *abandonedWrite) Unwrap() error {
+	return e.err
+}
+
 // mayHaveApplied reports whether a write that failed with err may
 // still have taken effect, so it must not be repeated blindly. Only a
 // failure before the request left the client, or a well-formed refusal
 // short of a server failure, is certain.
 func mayHaveApplied(err error) bool {
+	var abandoned *abandonedWrite
+	if errors.As(err, &abandoned) {
+		return true
+	}
 	var connection *connectionError
 	if errors.As(err, &connection) {
 		return !connection.unsent
@@ -101,6 +122,42 @@ func mayHaveApplied(err error) bool {
 	var refused *serverError
 	return errors.As(err, &refused) &&
 		refused.status >= http.StatusInternalServerError
+}
+
+// writeRetryBudget is how long sendRetrying keeps starting sends of a
+// write, and maxWriteRetryDelay the longest it waits between them.
+const (
+	writeRetryBudget   = 60 * time.Second
+	maxWriteRetryDelay = 8 * time.Second
+)
+
+// sendRetrying sends a write that carries a request id, which the
+// server applies at most once. While a send fails for want of a
+// connection, it sends again after a wait that doubles from a second,
+// until the next send would start after writeRetryBudget. Any other
+// failure ends it at once, and so does a first send that never left
+// the client. A refusal is certain even after sends that may have
+// taken effect, since the server answers a repeat of a request it
+// applied with what that request made.
+func sendRetrying(send func() error, clk clock) error {
+	start := clk.Now()
+	delay := time.Second
+	for sends := 1; ; sends++ {
+		err := send()
+		if err == nil || !retryable(err) {
+			return err
+		}
+		if sends == 1 && !mayHaveApplied(err) {
+			return err
+		}
+
+		elapsed := clk.Now().Sub(start)
+		if elapsed+delay > writeRetryBudget {
+			return &abandonedWrite{sends: sends, elapsed: elapsed, err: err}
+		}
+		clk.Sleep(delay)
+		delay = min(2*delay, maxWriteRetryDelay)
+	}
 }
 
 // target is where requests about one workspace go: its server, with

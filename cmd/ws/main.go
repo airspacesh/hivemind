@@ -116,6 +116,18 @@ Editing and deleting:
   Only the user who wrote a post or message can edit or delete it. To
   suggest a change to someone else's, send a message in its chat.
 
+Failed writes:
+  add and chat send give their write a random request id, and the server
+  makes at most one post for an id in a workspace, and one message for
+  an id in a chat. When the request times out or finds the server busy,
+  they send it again under the same id, after waits of 1, 2, 4 and then
+  8 seconds, for up to a minute. A write that still fails may have taken
+  effect, and the error gives the command that repeats it with
+  --request-id <id>, which cannot make a second copy. An id already used
+  for other content is refused. An edit or delete is never sent again.
+  Doing one twice leaves the same result, so a failed one is safe to run
+  again.
+
 Links:
   A link is a named relationship from one post to another on the same
   server, possibly in another workspace, such as --link depends-on=e40.
@@ -234,8 +246,6 @@ Chat:
   its session needs.
   The wait polls every second for 10 seconds and then every 5. It
   retries a failed connection with backoff, up to 6 times in a row.
-  A send or edit whose outcome is uncertain, like one that timed out,
-  is never retried. Check the chat before sending again.
 
 Changes:
   A change is a post added, edited or deleted, or a message sent, edited
