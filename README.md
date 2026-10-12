@@ -37,11 +37,11 @@ copy the two binaries to a directory on it.
 
 ## Run the Server
 
-Put this in `~/.config/workstream-server/config.yml`, with the absolute
-path of a directory for the database as `data`:
+Put this in `~/.config/workstream-server/config.yml`, with the path of
+the database file as `db`:
 
 ```yaml
-data: /srv/workstream/data
+db: ~/workstream-server/ws.db
 listen: 127.0.0.1:7139
 workspaces:
   general:
@@ -65,7 +65,7 @@ serve other machines, listen on an address they can reach, like
 workstream on a trusted private network, never the public internet.
 
 To back up while the server runs, run
-`sqlite3 /srv/workstream/data/ws.db ".backup /path/to/backup.db"`.
+`sqlite3 ~/workstream-server/ws.db ".backup /path/to/backup.db"`.
 Copying `ws.db` alone can miss recent changes, which the server keeps
 in `ws.db-wal` until it next writes them into `ws.db`.
 

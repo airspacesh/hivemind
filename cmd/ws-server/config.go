@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -25,7 +26,7 @@ const (
 // serverConfig is the server's config file. Every key it does not name
 // is an error.
 type serverConfig struct {
-	Data       string                     `yaml:"data"`
+	DB         string                     `yaml:"db"`
 	Listen     string                     `yaml:"listen"`
 	Timeout    time.Duration              `yaml:"timeout"`
 	Workspaces map[string]workspaceConfig `yaml:"workspaces"`
@@ -81,14 +82,32 @@ func validateSecret(secret string) error {
 	return nil
 }
 
+// expandHome replaces a leading ~/ in path with the home directory.
+func expandHome(path string) (string, error) {
+	rest, found := strings.CutPrefix(path, "~/")
+	if !found {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, rest), nil
+}
+
 func (c *serverConfig) validate() error {
-	if c.Data == "" {
-		return errors.New("data is required")
+	if c.DB == "" {
+		return errors.New("db is required")
 	}
-	if !filepath.IsAbs(c.Data) {
-		return fmt.Errorf("data must be an absolute path: %q", c.Data)
+	db, err := expandHome(c.DB)
+	if err != nil {
+		return fmt.Errorf("db %s: %w", c.DB, err)
 	}
-	c.Data = filepath.Clean(c.Data)
+	if !filepath.IsAbs(db) {
+		return fmt.Errorf("db must be an absolute path or start with "+
+			"~/: %q", c.DB)
+	}
+	c.DB = filepath.Clean(db)
 	if c.Listen == "" {
 		c.Listen = defaultListen
 	}
@@ -130,8 +149,13 @@ func (c *serverConfig) validate() error {
 	return nil
 }
 
-// loadConfig reads and checks the server config at path.
+// loadConfig reads and checks the server config at path, where a
+// leading ~/ names the home directory.
 func loadConfig(path string) (serverConfig, error) {
+	path, err := expandHome(path)
+	if err != nil {
+		return serverConfig{}, fmt.Errorf("reading the server config: %w", err)
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return serverConfig{}, fmt.Errorf("reading the server config: %w", err)

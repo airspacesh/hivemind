@@ -31,7 +31,7 @@ func main() {
 func run(args []string) error {
 	flags := flag.NewFlagSet("ws-server", flag.ContinueOnError)
 	configPath := flags.String("config", defaultConfigPath,
-		"server config file")
+		"server config file, where a leading ~/ names the home directory")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -48,18 +48,17 @@ func run(args []string) error {
 		return fmt.Errorf("listening on %s: %w", config.Listen, err)
 	}
 	defer listener.Close()
-	if err := os.MkdirAll(config.Data, 0o700); err != nil {
-		return fmt.Errorf("creating data directory: %w", err)
+	if err := os.MkdirAll(filepath.Dir(config.DB), 0o700); err != nil {
+		return fmt.Errorf("creating the database's directory: %w", err)
 	}
-	databasePath := filepath.Join(config.Data, "ws.db")
 	workTimeout := serverWorkTimeout(config.Timeout)
 	// The request timeout does not bound opening, since the integrity
 	// check reads the whole database and takes time in proportion to
 	// it. Waits for locks are bounded by the busy timeout instead.
-	stream, err := store.Open(context.Background(), databasePath,
+	stream, err := store.Open(context.Background(), config.DB,
 		workTimeout, config.workspaces())
 	if err != nil {
-		return fmt.Errorf("opening database %s: %w", databasePath, err)
+		return fmt.Errorf("opening database %s: %w", config.DB, err)
 	}
 	defer stream.Close()
 
@@ -80,8 +79,8 @@ func run(args []string) error {
 		context.Background(), os.Interrupt, syscall.SIGTERM,
 	)
 	defer stopSignals()
-	log.Printf("ws-server %s listening on %s (data: %s, workspaces: %s)",
-		version.Software, listener.Addr(), config.Data,
+	log.Printf("ws-server %s listening on %s (db: %s, workspaces: %s)",
+		version.Software, listener.Addr(), config.DB,
 		describeWorkspaces(h.workspaces))
 	for _, warning := range startupWarnings(
 		listener.Addr(), h.workspaces, stream.Unconfigured(),

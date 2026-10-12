@@ -57,8 +57,8 @@ mkdir -p "$HOME"
 start_server() {
     local name="$1" workspaces="$2"
     local config="$test_dir/$name-server.yml" log="$test_dir/$name.log"
-    printf 'data: %s\nlisten: 127.0.0.1:0\nworkspaces:\n%s\n' \
-        "$test_dir/$name-data" "$workspaces" >"$config"
+    printf 'db: %s\nlisten: 127.0.0.1:0\nworkspaces:\n%s\n' \
+        "$test_dir/$name-data/ws.db" "$workspaces" >"$config"
     chmod 600 "$config"
     "$repo/bin/ws-server" --config "$config" >"$log" 2>&1 &
     server_pids+=("$!")

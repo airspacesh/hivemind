@@ -28,7 +28,7 @@ const (
 // testConfig hosts an open workspace and two protected ones.
 func testConfig(t *testing.T) serverConfig {
 	return serverConfig{
-		Data:    t.TempDir(),
+		DB:      filepath.Join(t.TempDir(), "ws.db"),
 		Timeout: 5 * time.Second,
 		Workspaces: map[string]workspaceConfig{
 			"general": {Prefix: "e"},
@@ -54,9 +54,8 @@ func (s testServer) as(user string) testServer {
 // startServer serves the routes on a loopback port, as ws-server does.
 func startServer(t *testing.T, config serverConfig) testServer {
 	t.Helper()
-	stream, err := store.Open(context.Background(),
-		filepath.Join(config.Data, "ws.db"), time.Second,
-		config.workspaces())
+	stream, err := store.Open(context.Background(), config.DB,
+		time.Second, config.workspaces())
 	if err != nil {
 		t.Fatal(err)
 	}

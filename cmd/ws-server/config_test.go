@@ -24,7 +24,7 @@ func writeConfig(t *testing.T, text string, mode os.FileMode) string {
 
 func TestConfigReadsWorkspacesAndDefaults(t *testing.T) {
 	path := writeConfig(t, `
-data: /srv/workstream
+db: /srv/workstream/ws.db
 workspaces:
   personal:
     prefix: p
@@ -58,7 +58,7 @@ func TestConfigRefusesWhatItDoesNotKnow(t *testing.T) {
 		want string
 	}{
 		{"misspelt auth key", `
-data: /srv/workstream
+db: /srv/workstream/ws.db
 workspaces:
   personal:
     prefix: p
@@ -66,7 +66,7 @@ workspaces:
       secrte: s3cret
 `, "secrte"},
 		{"misspelt auth block", `
-data: /srv/workstream
+db: /srv/workstream/ws.db
 workspaces:
   personal:
     prefix: p
@@ -74,14 +74,14 @@ workspaces:
       secret: s3cret
 `, "auht"},
 		{"unknown top-level key", `
-data: /srv/workstream
+db: /srv/workstream/ws.db
 port: 7139
 workspaces:
   general:
     prefix: e
 `, "port"},
 		{"shared prefix", `
-data: /srv/workstream
+db: /srv/workstream/ws.db
 workspaces:
   general:
     prefix: e
@@ -89,7 +89,7 @@ workspaces:
     prefix: e
 `, "both have prefix e"},
 		{"empty secret", `
-data: /srv/workstream
+db: /srv/workstream/ws.db
 workspaces:
   personal:
     prefix: p
@@ -105,10 +105,27 @@ workspaces:
 	}
 }
 
+func TestConfigPathAndDBTakeTheHomeDirectoryForALeadingTilde(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	text := "db: ~/server/ws.db\nworkspaces:\n  e:\n    prefix: e\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yml"),
+		[]byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := loadConfig("~/config.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, "server/ws.db"); config.DB != want {
+		t.Fatalf("db = %q, want %q", config.DB, want)
+	}
+}
+
 func TestConfigHoldingASecretMustBeReadableByItsOwnerAlone(t *testing.T) {
-	secret := "data: /srv/ws\nworkspaces:\n  p:\n    prefix: p\n" +
+	secret := "db: /srv/ws/ws.db\nworkspaces:\n  p:\n    prefix: p\n" +
 		"    auth:\n      secret: s3cret\n"
-	open := "data: /srv/ws\nworkspaces:\n  e:\n    prefix: e\n"
+	open := "db: /srv/ws/ws.db\nworkspaces:\n  e:\n    prefix: e\n"
 	for _, test := range []struct {
 		text string
 		mode os.FileMode
@@ -156,7 +173,7 @@ func TestStartupWarnsOfOpenWorkspacesBeyondLoopbackAndLostOnes(t *testing.T) {
 
 func TestTimeoutIsADuration(t *testing.T) {
 	config, err := loadConfig(writeConfig(t,
-		"data: /srv/ws\ntimeout: 90s\nworkspaces:\n  e:\n    prefix: e\n",
+		"db: /srv/ws/ws.db\ntimeout: 90s\nworkspaces:\n  e:\n    prefix: e\n",
 		0o600))
 	if err != nil {
 		t.Fatal(err)
