@@ -850,14 +850,13 @@ check "an unreachable server is named" "request to http://127.0.0.1:1 failed" \
 once="$(ws add "Added once" --project repeats --request-id e2e-post \
     --no-recent | added)"
 check "an add repeated under its request id gives the same post" \
-    "Added post [$once] at @" \
+    "Added post [$once]." \
     "$(ws add "Added once" --project repeats --request-id e2e-post \
         --no-recent)"
 for _ in 1 2; do
     check_equal "a send repeated under its request id gives one message" \
-        "Sent [$once-m1] at @R." \
-        "$(ws chat send "$once" "Sent once" --request-id e2e-m |
-            revisionless)"
+        "Sent [$once-m1]." \
+        "$(ws chat send "$once" "Sent once" --request-id e2e-m)"
 done
 check_equal "the chat holds the message once" "1" \
     "$(ws chat read "$once" | grep -c '^\[')"

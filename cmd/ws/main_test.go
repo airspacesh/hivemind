@@ -999,7 +999,7 @@ func TestSendRepeatsUnderItsRequestID(t *testing.T) {
 			got := runBinary(t, wsBinary, []string{"WORKSTREAM_CONFIG=" +
 				config, "WORKSTREAM_TIMEOUT=300ms"}, "chat", "send", "e1",
 				"quack")
-			if !got.ok || got.stdout != "Sent [e1-m1] at @7.\n" {
+			if !got.ok || got.stdout != "Sent [e1-m1].\n" {
 				t.Errorf("want the send to land on its second try: %+v", got)
 			}
 			ids := writes.all()
