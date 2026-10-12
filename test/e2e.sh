@@ -844,7 +844,7 @@ done
 check_equal "the chat holds the message once" "1" \
     "$(ws chat read "$once" | grep -c '^\[')"
 check "a request id used for other text is refused" \
-    "request id \"e2e-m\" sent $once-m1, with other text" \
+    "request id already used: \"e2e-m\" sent $once-m1 with other text" \
     "$(ws chat send "$once" "Sent twice" --request-id e2e-m 2>&1 || true)"
 
 # Subjects: a headline of 72 characters, then an optional kind suffix.

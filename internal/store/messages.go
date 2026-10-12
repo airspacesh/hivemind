@@ -126,8 +126,8 @@ func (v view) requestedMessage(
 	}
 	if stored != digest {
 		ref := api.MessageRef{Post: v.store.mustRef(post), Number: number}
-		return 0, false, fmt.Errorf("%w: request id %q sent %s, with "+
-			"other text", ErrRequestReused, requestID, ref)
+		return 0, false, fmt.Errorf("%w: %q sent %s with other text",
+			ErrRequestReused, requestID, ref)
 	}
 	return number, true, nil
 }

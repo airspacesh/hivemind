@@ -184,9 +184,8 @@ func (v view) requestedPost(
 			"%q: %w", requestID, err)
 	}
 	if stored != digest {
-		return Key{}, false, fmt.Errorf("%w: request id %q added %s, "+
-			"with other content", ErrRequestReused, requestID,
-			v.store.mustRef(key))
+		return Key{}, false, fmt.Errorf("%w: %q added %s with other "+
+			"content", ErrRequestReused, requestID, v.store.mustRef(key))
 	}
 	return key, true, nil
 }
