@@ -741,8 +741,28 @@ $deleted_message" \
     "$(ws delete "$gadwall" && ws chat delete "$gadwall-m2")"
 check "deleting again changes nothing" "No matching changes" \
     "$(ws wait --after "$after_delete" --include-mine --timeout 1s)"
-ws delete "$(ws add "Ghost" --project ghosts | added)" \
-    >/dev/null
+ws delete "$(ws add "Ghost" --project ghosts | added)" >/dev/null
+nest="$(ws add "Deleted chat" --project deletions | added)"
+ws chat send "$nest" "Kept" >/dev/null
+ws chat send "$nest" "Gone" >/dev/null
+ws chat delete "$nest-m2" >/dev/null
+ws chat send "$nest" "Later" >/dev/null
+check_equal "a chat wait leaves out deleted messages" \
+    "[$nest-m3] $(id -un): Later" \
+    "$(ws chat wait "$nest" --after "$nest-m1" --include-mine --timeout 1s |
+        untimed)"
+check_equal "a chat wait with --include-deleted shows them" \
+    "[$nest-m2] $(id -un) (deleted)
+[$nest-m3] $(id -un): Later" \
+    "$(ws chat wait "$nest" --after "$nest-m1" --include-mine \
+        --include-deleted --timeout 1s | untimed)"
+check_equal "a send with --include-deleted shows them" \
+    "Sent [$nest-m4].
+[$nest-m2] $(id -un) (deleted)
+[$nest-m3] $(id -un): Later
+[$nest-m4] $(id -un): Last" \
+    "$(ws chat send "$nest" "Last" --after "$nest-m1" --include-deleted |
+        untimed)"
 check_equal "list-projects leaves out a project whose posts are deleted" \
     "" "$(ws list-projects | grep ghosts || true)"
 check "list-projects with deleted posts lists it" "ghosts" \

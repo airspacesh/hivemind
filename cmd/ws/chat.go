@@ -221,18 +221,20 @@ func (c *client) numberBefore(
 
 func cmdChatSend(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs: []string{"--after", "--request-id"}, passUnknown: true,
+		strs:  []string{"--after", "--request-id"},
+		bools: includeDeleted.flags(), passUnknown: true,
 	})
 	if err != nil {
 		return err
 	}
 	if len(p.pos) != 2 {
 		usage := usageError("chat send <ref> <message> " +
-			"[--after <bound>]")
+			"[--after <bound>] [--include-deleted]")
 		for _, arg := range p.pos {
 			if strings.HasPrefix(arg, "--") {
 				return fmt.Errorf("%s looks like a flag, but chat send "+
-					"has only --after and --request-id\n%w", arg, usage)
+					"has only --after, --include-deleted and --request-id"+
+					"\n%w", arg, usage)
 			}
 		}
 		return usage
@@ -286,14 +288,15 @@ func cmdChatSend(c *client, args []string) error {
 	from := chatCursor(ref, start)
 	latest := url.Values{"latest": {fmt.Sprint(sendShownLimit)},
 		"after": {from.String()}}
+	includeDeleted.addTo(p, latest)
 	page, err := c.chatPage(t, ref, latest)
 	if err != nil {
 		return fmt.Errorf("reading the chat after the send: %w", err)
 	}
-	printEarlier("", ref, from, page.Earlier, "")
+	printEarlier("", ref, from, page.Earlier, includeDeleted.arg(p))
 	cursor := api.MessageRef{Post: ref, Number: start}
 	printChatPage(ref, page, from,
-		fmt.Sprintf("No messages after %s.", cursor), "")
+		fmt.Sprintf("No messages after %s.", cursor), includeDeleted.arg(p))
 	return nil
 }
 
@@ -523,7 +526,7 @@ func cmdChatRead(c *client, args []string) error {
 func cmdChatWait(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
 		strs:   []string{"--after", "--timeout"},
-		bools:  mineToggle.flags(),
+		bools:  append(mineToggle.flags(), includeDeleted.flags()...),
 		repeat: filterFlags(api.MessageFields...),
 	})
 	if err != nil {
@@ -531,7 +534,7 @@ func cmdChatWait(c *client, args []string) error {
 	}
 	if len(p.pos) != 1 {
 		return usageError("chat wait <ref> [--after <bound>] " +
-			"[--timeout <d>] " +
+			"[--timeout <d>] [--include-deleted] " +
 			"[--content <pattern>]... [--origin-user <pattern>]... " +
 			"[--exclude-mine|--include-mine]")
 	}
@@ -551,6 +554,7 @@ func cmdChatWait(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
+	includeDeleted.addTo(p, query)
 
 	t, err := c.resolve(ref)
 	if err != nil {
@@ -601,7 +605,7 @@ func cmdChatWait(c *client, args []string) error {
 	if page.Remaining > 0 {
 		last := api.MessageRef{Post: ref, Number: page.Cursor}
 		fmt.Printf("Next: %s (more messages to check)\n",
-			chatWaitCommand(last, filterArgs(p)))
+			chatWaitCommand(last, filterArgs(p)+includeDeleted.arg(p)))
 		return nil
 	}
 	printChatCursor(ref, page, after)

@@ -51,6 +51,7 @@ Usage:
   {program} list-projects [--limit 30] [--include-deleted]
          [--workspace <name>]
   {program} chat send <ref> <message> [--after <bound>]
+         [--include-deleted]
   {program} chat recent [<ref>|--workspace <name>] [--after <bound>]
          [--before <bound>] [--limit 20] [--include-deleted]
          [--content <pattern>]... [--origin-user <pattern>]...
@@ -58,8 +59,8 @@ Usage:
          [--limit 20] [--include-deleted]
          [--content <pattern>]... [--origin-user <pattern>]...
   {program} chat wait <ref> [--after <bound>] [--timeout 10m]
+         [--include-deleted] [--exclude-mine|--include-mine]
          [--content <pattern>]... [--origin-user <pattern>]...
-         [--exclude-mine|--include-mine]
   {program} chat edit <ref>-m<n> <message>
   {program} chat delete <ref>-m<n>
   {program} wait [--after <bound>] [--timeout 10m]
@@ -231,8 +232,9 @@ Inclusion flags:
       default. A command left to show neither posts nor messages refuses
       to run.
   --include-deleted
-      deleted posts and messages, as (deleted), in recent, tree, chat
-      recent, chat read and list-projects. search never shows them.
+      deleted posts and messages, as (deleted), in recent, tree,
+      list-projects, chat send, chat recent, chat read and chat wait.
+      search never shows them.
   --include-superseded
       superseded posts, in recent, search and tree.
   --exclude-mine, --include-mine
