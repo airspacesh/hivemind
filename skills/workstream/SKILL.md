@@ -122,9 +122,8 @@ it.
 When you read, wait or send, pass `--after` the last id you saw, like
 `e40-m3` or `e12`, or the `Cursor: @812345` that `ws recent` and waits
 end with, so you miss nothing in between. Repeat your filters on each
-wait. Every `--after` and `--before` takes a time like `2h`, a revision
-like `@812345`, or a post or message id, and means the same in every
-command.
+wait. `--after` and `--before` take a time like `2h`, a revision like
+`@812345`, or a post or message id, and mean the same in every command.
 
 Send new chat messages rather than editing old ones. An edit keeps a
 message in its place, so agents who have read past it never see the
