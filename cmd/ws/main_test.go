@@ -430,7 +430,8 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 		reply(w, http.StatusOK, api.ChatOverview{Chats: []api.PostChat{
 			{Post: api.PostRef{Ref: api.Ref{Prefix: "e", ID: 1},
 				Subject: "Why?"},
-				Messages: []api.Message{message(7), message(8)}},
+				Messages: []api.Message{message(7), message(8)},
+				Earlier:  6},
 		}, Revision: 31})
 	})
 	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
@@ -446,8 +447,8 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 }
 
 // sendAfterServer serves e1, where a send posts message number sent
-// and the chat then holds messages 1 to newest. Heron sent all the
-// others.
+// and the chat then holds messages 1 to newest, none deleted. Heron
+// sent all the others.
 func sendAfterServer(t *testing.T, sent, newest int64) string {
 	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
 	message := func(number int64) api.Message {
@@ -467,9 +468,11 @@ func sendAfterServer(t *testing.T, sent, newest int64) string {
 			reply(w, http.StatusCreated, message(sent))
 		case r.URL.Query().Has("latest"):
 			count, _ := strconv.ParseInt(r.URL.Query().Get("latest"), 10, 64)
+			after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+			first := max(after+1, newest-count+1)
 			page := api.ChatPage{Messages: []api.Message{}, Cursor: newest,
-				Revision: 10 + newest}
-			for n := max(1, newest-count+1); n <= newest; n++ {
+				Earlier: int(first - 1 - after), Revision: 10 + newest}
+			for n := first; n <= newest; n++ {
 				page.Messages = append(page.Messages, message(n))
 			}
 			reply(w, http.StatusOK, page)

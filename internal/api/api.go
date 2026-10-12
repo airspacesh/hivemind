@@ -103,8 +103,8 @@ type ListedPost struct {
 }
 
 // PostDetail adds the links that point at a post, how many of its
-// children are neither superseded nor deleted, and a summary of its
-// chat.
+// children are neither superseded nor deleted, and a summary of the
+// messages in its chat that are not deleted.
 type PostDetail struct {
 	ListedPost
 	Backlinks []Link `json:"backlinks,omitempty"`
@@ -182,24 +182,30 @@ type DeleteRequest struct {
 	User string `json:"user"`
 }
 
-// ChatPage holds messages from one chat, oldest first. Cursor is the
-// highest message number the server checked, so every message up to it
-// is in the page or did not match the request's filters. Remaining
-// counts the messages after Cursor. Revision is the latest revision
-// when the page was read, so the changes after it are the changes since
-// the read.
+// ChatPage holds messages from one chat, oldest first. A read leaves
+// deleted messages out unless it asks for them. Cursor is the highest
+// message number the server checked, so every message up to it is in
+// the page or did not match the request's filters. Remaining counts the
+// messages after Cursor that the read would show, filters aside.
+// Earlier, for a read of the newest messages, counts those it would
+// show from its start up to the first in Messages, which it leaves out.
+// Revision is the latest revision when the page was read, so the
+// changes after it are the changes since the read.
 type ChatPage struct {
 	Messages  []Message `json:"messages"`
 	Cursor    int64     `json:"cursor"`
 	Remaining int       `json:"remaining"`
+	Earlier   int       `json:"earlier"`
 	Revision  int64     `json:"revision"`
 }
 
 // PostChat is the newest messages of one post in a chat overview,
-// oldest first.
+// oldest first. Earlier counts the messages before the first in
+// Messages that the overview would show, but leaves out.
 type PostChat struct {
 	Post     PostRef   `json:"post"`
 	Messages []Message `json:"messages"`
+	Earlier  int       `json:"earlier"`
 }
 
 // ChatOverview holds the newest messages across a workspace, grouped by

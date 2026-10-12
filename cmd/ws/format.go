@@ -422,16 +422,18 @@ func printChatCursor(post api.Ref, page api.ChatPage, after api.ChatBound) {
 }
 
 // printCursorLine ends a chat read from after with the read of its next
-// page, or else its cursor.
-func printCursorLine(post api.Ref, page api.ChatPage, after api.ChatBound) {
+// page, with the flags readFlags repeats, or else its cursor.
+func printCursorLine(
+	post api.Ref, page api.ChatPage, after api.ChatBound, readFlags string,
+) {
 	if page.Remaining > 0 {
 		noun := "messages"
 		if page.Remaining == 1 {
 			noun = "message"
 		}
 		cursor := api.MessageRef{Post: post, Number: page.Cursor}
-		fmt.Printf("Next: %s chat read %s --after %s (%d more %s)\n",
-			programName, post, cursor, page.Remaining, noun)
+		fmt.Printf("Next: %s chat read %s --after %s%s (%d more %s)\n",
+			programName, post, cursor, readFlags, page.Remaining, noun)
 		return
 	}
 	printChatCursor(post, page, after)
@@ -439,21 +441,16 @@ func printCursorLine(post api.Ref, page api.ChatPage, after api.ChatBound) {
 
 // printEarlier marks how many messages after the number start a chat
 // output leaves out before the first it shows, with the read that shows
-// them. Message numbers count from 1 in each post and none are removed,
-// so the first number shown says how many come before it.
+// them, which repeats the flags readFlags holds.
 func printEarlier(
-	indent string, post api.Ref, start int64, messages []api.Message,
+	indent string, post api.Ref, start int64, earlier int, readFlags string,
 ) {
-	if len(messages) == 0 {
-		return
-	}
-	earlier := messages[0].Number - 1 - start
-	if earlier <= 0 {
+	if earlier == 0 {
 		return
 	}
 	cursor := api.MessageRef{Post: post, Number: start}
-	fmt.Printf("%s... %d earlier (%s chat read %s --after %s)\n", indent,
-		earlier, programName, post, cursor)
+	fmt.Printf("%s... %d earlier (%s chat read %s --after %s%s)\n", indent,
+		earlier, programName, post, cursor, readFlags)
 }
 
 // printChatMessages prints one chat's messages oldest first, or empty
@@ -469,12 +466,13 @@ func printChatMessages(page api.ChatPage, empty string) {
 }
 
 // printChatPage prints one chat's messages after after oldest first,
-// then the cursor line.
+// then the cursor line, whose read repeats the flags readFlags holds.
 func printChatPage(
 	post api.Ref, page api.ChatPage, after api.ChatBound, empty string,
+	readFlags string,
 ) {
 	printChatMessages(page, empty)
-	printCursorLine(post, page, after)
+	printCursorLine(post, page, after, readFlags)
 }
 
 // printChatHeader names the post a run of chat messages belongs to.
@@ -484,7 +482,12 @@ func printChatHeader(post api.PostRef) {
 		supersededLabel(post.SupersededBy))
 }
 
-func printOverview(overview api.ChatOverview, workspace string) {
+// printOverview prints the newest messages across a workspace under
+// their posts, each chat's earlier ones counted with the read that shows
+// them, which repeats the flags readFlags holds.
+func printOverview(
+	overview api.ChatOverview, workspace string, readFlags string,
+) {
 	if len(overview.Chats) == 0 {
 		fmt.Printf("No messages in workspace %s yet.\n", workspace)
 		return
@@ -496,7 +499,7 @@ func printOverview(overview api.ChatOverview, workspace string) {
 	layout := timeLayout(times)
 	for _, chat := range overview.Chats {
 		printChatHeader(chat.Post)
-		printEarlier("  ", chat.Post.Ref, 0, chat.Messages)
+		printEarlier("  ", chat.Post.Ref, 0, chat.Earlier, readFlags)
 		for _, m := range chat.Messages {
 			printMessage(m, nil, m.Created, "  ", layout)
 		}

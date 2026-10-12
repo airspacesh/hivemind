@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -31,6 +32,21 @@ func mustDeleteMessage(
 		t.Fatalf("deleting %s: %v", ref, err)
 	}
 	return message
+}
+
+// readChatWithDeleted reads a post's chat as readChat does, deleted
+// messages included.
+func readChatWithDeleted(
+	t *testing.T, store *Store, post api.Ref, since int64, limit int,
+) api.ChatPage {
+	t.Helper()
+	page, err := store.Messages(context.Background(), everyAccess(store),
+		store.mustKey(post), api.ChatBound{Number: since},
+		Filter{IncludeDeleted: true}, nil, limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return page
 }
 
 func TestDeleteClearsAPostButKeepsItsPlace(t *testing.T) {
@@ -117,7 +133,8 @@ func TestDeleteMessageKeepsItsPlace(t *testing.T) {
 		t.Fatalf("deleted message is not marked deleted: %+v", deleted)
 	}
 	want := "e1-m1:first e1-m2: e1-m3:third cursor=3 remaining=0"
-	if got := chatText(readChat(t, store, post.Ref, 0, 10)); got != want {
+	if got := chatText(readChatWithDeleted(t, store, post.Ref, 0,
+		10)); got != want {
 		t.Fatalf("chat is %s, want %s", got, want)
 	}
 
@@ -172,8 +189,87 @@ func TestNobodyCanEditWhatIsDeleted(t *testing.T) {
 				"refusal", body, err)
 		}
 	}
-	if got := readChat(t, store, post.Ref, 0, 10).Messages[0]; !got.Deleted ||
-		got.Body != "" {
+	if got := readChatWithDeleted(t, store, post.Ref, 0,
+		10).Messages[0]; !got.Deleted || got.Body != "" {
 		t.Fatalf("a refused edit changed the deleted message: %+v", got)
+	}
+}
+
+// A chat read leaves deleted messages out and counts only the others,
+// but its cursor passes the deleted ones, so a read from it moves on.
+func TestChatReadsLeaveOutDeletedMessages(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	post := mustAdd(t, store, "topic", "", nil)
+	for i := 1; i <= 6; i++ {
+		mustPostMessage(t, store, post.Ref, fmt.Sprint(i))
+	}
+	for _, number := range []int64{1, 4, 6} {
+		mustDeleteMessage(t, store, api.MessageRef{Post: post.Ref,
+			Number: number})
+	}
+	key := store.mustKey(post.Ref)
+
+	for _, test := range []struct {
+		since int64
+		limit int
+		want  string
+	}{
+		{0, 2, "e1-m2:2 e1-m3:3 cursor=3 remaining=1"},
+		{3, 2, "e1-m5:5 cursor=6 remaining=0"},
+		{3, 1, "e1-m5:5 cursor=5 remaining=0"},
+		{5, 2, " cursor=6 remaining=0"},
+		{6, 2, " cursor=6 remaining=0"},
+	} {
+		got := chatText(readChat(t, store, post.Ref, test.since,
+			test.limit))
+		if got != test.want {
+			t.Fatalf("since %d limit %d = %q, want %q", test.since,
+				test.limit, got, test.want)
+		}
+	}
+	if got := chatText(readChatWithDeleted(t, store, post.Ref, 0,
+		2)); got != "e1-m1: e1-m2:2 cursor=2 remaining=4" {
+		t.Fatalf("with deleted = %q", got)
+	}
+
+	for _, test := range []struct {
+		after          int64
+		includeDeleted bool
+		want           string
+		earlier        int
+	}{
+		{0, false, "e1-m3:3 e1-m5:5 cursor=6 remaining=0", 1},
+		{2, false, "e1-m3:3 e1-m5:5 cursor=6 remaining=0", 0},
+		{0, true, "e1-m5:5 e1-m6: cursor=6 remaining=0", 4},
+	} {
+		latest, err := store.LatestMessages(ctx, everyAccess(store), key,
+			api.ChatBound{Number: test.after}, test.includeDeleted, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := chatText(latest); got != test.want ||
+			latest.Earlier != test.earlier {
+			t.Fatalf("latest 2 after %d with deleted %v = %q and %d "+
+				"earlier, want %q and %d", test.after, test.includeDeleted,
+				got, latest.Earlier, test.want, test.earlier)
+		}
+	}
+
+	overview, err := store.Overview(ctx, everyAccess(store), key.Workspace,
+		false, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat := overview.Chats[0]
+	if got := chatText(api.ChatPage{Messages: chat.Messages}); got !=
+		"e1-m3:3 e1-m5:5 cursor=0 remaining=0" || chat.Earlier != 1 {
+		t.Fatalf("overview = %q with %d earlier, want m3 and m5 with 1",
+			got, chat.Earlier)
+	}
+	detail := mustGet(t, store, post.Ref)
+	if detail.Messages != 3 || detail.LastMessage != 5 {
+		t.Fatalf("post counts %d messages, newest m%d, want 3 and m5",
+			detail.Messages, detail.LastMessage)
 	}
 }

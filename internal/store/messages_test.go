@@ -165,7 +165,7 @@ func TestChatReadsPageAfterTheCursor(t *testing.T) {
 
 	latest, err := store.LatestMessages(context.Background(),
 		everyAccess(store),
-		store.mustKey(post.Ref), 3)
+		store.mustKey(post.Ref), api.ChatBound{}, false, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +377,7 @@ func TestOverviewGroupsTheNewestMessagesByPost(t *testing.T) {
 	}
 
 	overview, err := store.Overview(ctx, everyAccess(store),
-		workspaceID(t, store, "general"), 4)
+		workspaceID(t, store, "general"), false, 4)
 	if err != nil {
 		t.Fatal(err)
 	}

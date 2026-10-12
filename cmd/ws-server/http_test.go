@@ -243,7 +243,7 @@ func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 			postBody("probe", `{"name":"see","ref":"e9"}`), 400,
 			api.CodeLinkTargetNotFound},
 		{"GET", "/api/posts/E1", "", 400, api.CodeBadRequest},
-		{"GET", "/api/posts/e1/messages?after=1&latest=2", "", 400,
+		{"GET", "/api/posts/e1/messages?limit=1&latest=2", "", 400,
 			api.CodeBadRequest},
 		{"GET", "/nowhere", "", 404, api.CodeRouteNotFound},
 	} {
@@ -477,7 +477,8 @@ func TestNoRequestChangesAnOriginOverHTTP(t *testing.T) {
 	}
 	var page api.ChatPage
 	if err := json.Unmarshal([]byte(s.must(t, "GET",
-		"/api/posts/e1/messages", "", "", http.StatusOK)),
+		"/api/posts/e1/messages?include-deleted=true", "", "",
+		http.StatusOK)),
 		&page); err != nil {
 		t.Fatal(err)
 	}
@@ -521,7 +522,8 @@ func TestChatReadsOverHTTP(t *testing.T) {
 		"?after=2":         "e1-m3:three cursor=3 remaining=0",
 		"?after=2000-01-01T00:00:00Z&limit=1": "e1-m1:one! cursor=1 " +
 			"remaining=2",
-		"?latest=2": "e1-m2:two e1-m3:three cursor=3 remaining=0",
+		"?latest=2":         "e1-m2:two e1-m3:three cursor=3 remaining=0",
+		"?latest=2&after=2": "e1-m3:three cursor=3 remaining=0",
 	} {
 		if got := read(query); got != want {
 			t.Fatalf("messages%s = %q, want %q", query, got, want)

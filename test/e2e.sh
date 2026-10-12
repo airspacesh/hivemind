@@ -628,6 +628,7 @@ ws delete "$empty" >/dev/null
 ws chat send "$gadwall" "Before" >/dev/null
 ws chat send "$gadwall" "The code is 4417" >/dev/null
 ws chat send "$gadwall" "After" >/dev/null
+ws chat send "$gadwall" "Oops" >/dev/null
 before_delete="$(ws wait --after @0 --include-mine --timeout 1s | cursor_of)"
 deleted_post="$(ws delete "$gadwall")"
 check_equal "you can delete your own post" "Deleted post [$gadwall]." \
@@ -635,6 +636,7 @@ check_equal "you can delete your own post" "Deleted post [$gadwall]." \
 deleted_message="$(ws chat delete "$gadwall-m2")"
 check_equal "you can delete your own message" "Deleted [$gadwall-m2]." \
     "$deleted_message"
+ws chat delete "$gadwall-m4" >/dev/null
 gadwall_post="$(ws post "$gadwall")"
 check "a deleted post shows as deleted" "[$gadwall] (deleted)" \
     "$gadwall_post"
@@ -683,10 +685,29 @@ check "a listing with deleted posts shows a deleted message as deleted" \
 check "the next page keeps deleted posts" "--include-deleted" \
     "$(ws recent --project owners --include-deleted -n 1 2>/dev/null |
         grep '^Next:')"
-check "a deleted message keeps its place and shows no text" \
+check_equal "a chat leaves out deleted messages, but its cursor passes them" \
+    "[$gadwall-m1] $(id -un): Before
+[$gadwall-m3] $(id -un): After
+Cursor: $gadwall-m4" "$(ws chat recent "$gadwall" | untimed)"
+check_equal "a chat with deleted messages shows them in their place" \
     "[$gadwall-m1] $(id -un): Before
 [$gadwall-m2] $(id -un) (deleted)
-[$gadwall-m3] $(id -un): After" "$(ws chat recent "$gadwall" | untimed)"
+[$gadwall-m3] $(id -un): After
+[$gadwall-m4] $(id -un) (deleted)" \
+    "$(ws chat read "$gadwall" --include-deleted | untimed)"
+check_equal "a read from before a deleted message moves its cursor past it" \
+    "No messages after $gadwall-m3.
+Cursor: $gadwall-m4" "$(ws chat read "$gadwall" --after "$gadwall-m3")"
+check_equal "a read from that cursor finds nothing more" \
+    "No messages after $gadwall-m4." \
+    "$(ws chat read "$gadwall" --after "$gadwall-m4")"
+check_equal "a chat counts only the messages it would show earlier" \
+    "... 1 earlier (ws chat read $gadwall --after $gadwall-m0)
+[$gadwall-m3] $(id -un): After
+Cursor: $gadwall-m4" \
+    "$(ws chat recent "$gadwall" --limit 1 | untimed)"
+check "post counts the messages that are not deleted" \
+    "Chat: 2 messages, newest $gadwall-m3" "$gadwall_post"
 check "the chat overview names a deleted post as deleted" \
     "[$gadwall] (deleted)" "$(ws chat recent)"
 check_equal "search no longer finds deleted text" "No matches." \

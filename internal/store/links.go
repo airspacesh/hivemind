@@ -449,7 +449,8 @@ func (s *Store) Detail(
 	}
 	if err := v.tx.QueryRowContext(ctx, `
 		SELECT count(*), coalesce(max(id), 0) FROM post_messages
-		WHERE workspace_id = ? AND post_id = ?`, key.Workspace, key.ID,
+		WHERE workspace_id = ? AND post_id = ? AND NOT deleted`,
+		key.Workspace, key.ID,
 	).Scan(&detail.Messages, &detail.LastMessage); err != nil {
 		return api.PostDetail{}, fmt.Errorf("reading chat summary: %w", err)
 	}

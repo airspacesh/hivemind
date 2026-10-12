@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
@@ -158,14 +157,15 @@ func describeChatAfter(post api.Ref, after api.ChatBound) string {
 
 // numberBefore is the number of the message a read of a post's chat
 // from after starts after. That is after's own number, or for a time,
-// the number of the last message posted before it.
+// the number of the last message posted before it, deleted or not.
 func (c *client) numberBefore(
 	t target, post api.Ref, after api.ChatBound,
 ) (int64, error) {
 	if after.Time.IsZero() {
 		return after.Number, nil
 	}
-	query := url.Values{"after": {after.String()}, "limit": {"1"}}
+	query := url.Values{"after": {after.String()}, "limit": {"1"},
+		"include-deleted": {"true"}}
 	page, err := c.chatPage(t, post, query)
 	if err != nil {
 		return 0, err
@@ -243,18 +243,17 @@ func cmdChatSend(c *client, args []string) error {
 	if err != nil {
 		return fmt.Errorf("reading the chat after the send: %w", err)
 	}
-	latest := url.Values{"latest": {fmt.Sprint(sendShownLimit)}}
+	from := api.ChatBound{Number: start}
+	latest := url.Values{"latest": {fmt.Sprint(sendShownLimit)},
+		"after": {from.String()}}
 	page, err := c.chatPage(t, ref, latest)
 	if err != nil {
 		return fmt.Errorf("reading the chat after the send: %w", err)
 	}
-	printEarlier("", ref, start, page.Messages)
+	printEarlier("", ref, start, page.Earlier, "")
 	cursor := api.MessageRef{Post: ref, Number: start}
-	page.Messages = slices.DeleteFunc(page.Messages, func(m api.Message) bool {
-		return m.Number <= start
-	})
-	printChatPage(ref, page, api.ChatBound{Number: start},
-		fmt.Sprintf("No messages after %s.", cursor))
+	printChatPage(ref, page, from,
+		fmt.Sprintf("No messages after %s.", cursor), "")
 	return nil
 }
 
@@ -314,14 +313,15 @@ func cmdChatDelete(c *client, args []string) error {
 
 func cmdChatRecent(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs: []string{"--limit", "--workspace"},
+		strs:  []string{"--limit", "--workspace"},
+		bools: []string{includeDeleted},
 	})
 	if err != nil {
 		return err
 	}
 	if len(p.pos) > 1 || (len(p.pos) == 1 && p.has("--workspace")) {
 		return usageError("chat recent [<ref>|--workspace <name>] " +
-			"[--limit <n>]")
+			"[--limit <n>] [--include-deleted]")
 	}
 	limit := 20
 	if p.has("--limit") {
@@ -336,12 +336,14 @@ func cmdChatRecent(c *client, args []string) error {
 			return err
 		}
 		t := targetOf(workspace)
+		query := url.Values{"limit": {fmt.Sprint(limit)}}
+		addIncludeDeleted(p, query)
 		var overview api.ChatOverview
-		path := workspacePath(t, fmt.Sprintf("/messages?limit=%d", limit))
+		path := workspacePath(t, "/messages?"+query.Encode())
 		if err := c.do(t, "GET", path, nil, &overview); err != nil {
 			return err
 		}
-		printOverview(overview, t.workspace)
+		printOverview(overview, t.workspace, includeDeletedArg(p))
 		printChangeCursor(os.Stdout, overview.Revision)
 		return nil
 	}
@@ -354,13 +356,15 @@ func cmdChatRecent(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	page, err := c.chatPage(t, ref, url.Values{"latest": {fmt.Sprint(limit)}})
+	query := url.Values{"latest": {fmt.Sprint(limit)}}
+	addIncludeDeleted(p, query)
+	page, err := c.chatPage(t, ref, query)
 	if err != nil {
 		return err
 	}
-	printEarlier("", ref, 0, page.Messages)
+	printEarlier("", ref, 0, page.Earlier, includeDeletedArg(p))
 	printChatPage(ref, page, api.ChatBound{},
-		fmt.Sprintf("%s has no messages yet.", ref))
+		fmt.Sprintf("%s has no messages yet.", ref), includeDeletedArg(p))
 	return nil
 }
 
@@ -381,13 +385,16 @@ func parseTimeout(
 }
 
 func cmdChatRead(c *client, args []string) error {
-	p, err := parseArgs(args, flagSpec{strs: []string{"--after", "--limit"}})
+	p, err := parseArgs(args, flagSpec{
+		strs:  []string{"--after", "--limit"},
+		bools: []string{includeDeleted},
+	})
 	if err != nil {
 		return err
 	}
 	if len(p.pos) != 1 {
 		return usageError("chat read <ref> [--after <ref>-m<n>|<time>] " +
-			"[--limit <n>]")
+			"[--limit <n>] [--include-deleted]")
 	}
 	ref, err := api.ParseRef(p.pos[0])
 	if err != nil {
@@ -408,6 +415,7 @@ func cmdChatRead(c *client, args []string) error {
 		}
 		query.Set("limit", fmt.Sprint(limit))
 	}
+	addIncludeDeleted(p, query)
 
 	t, err := c.resolve(ref)
 	if err != nil {
@@ -421,7 +429,7 @@ func cmdChatRead(c *client, args []string) error {
 	if p.has("--after") {
 		empty = fmt.Sprintf("No messages %s.", describeChatAfter(ref, after))
 	}
-	printChatPage(ref, page, after, empty)
+	printChatPage(ref, page, after, empty, includeDeletedArg(p))
 	return nil
 }
 

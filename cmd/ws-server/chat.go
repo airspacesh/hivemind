@@ -2,7 +2,9 @@ package main
 
 import (
 	"log"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/airspacesh/workstream/internal/api"
@@ -127,7 +129,8 @@ func (h *handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 // listMessages returns a page of the messages after the query's after
-// that match its conditions, or the newest messages, given latest.
+// that match its conditions, or the newest messages after it, given
+// latest.
 func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 	query, ok := parseQueryOf(w, r, messageConditionParameters,
 		chatQueryParameters)
@@ -135,9 +138,13 @@ func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, hasLatest := query["latest"]
-	if hasLatest && len(query) > 1 {
-		writeBadRequest(w, "latest takes no other parameter")
-		return
+	if hasLatest {
+		for _, key := range slices.Sorted(maps.Keys(query)) {
+			if !latestQueryParameters[key] {
+				writeBadRequest(w, "latest takes no "+key)
+				return
+			}
+		}
 	}
 	var after api.ChatBound
 	if values := query["after"]; len(values) != 0 {
@@ -168,6 +175,12 @@ func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
+	includeDeleted, err := queryFlag(query, "include-deleted")
+	if err != nil {
+		writeBadRequest(w, err.Error())
+		return
+	}
+	filter.IncludeDeleted = includeDeleted
 	access, post, ok := h.pathPost(w, r)
 	if !ok {
 		return
@@ -176,7 +189,7 @@ func (h *handler) listMessages(w http.ResponseWriter, r *http.Request) {
 	var page api.ChatPage
 	if hasLatest {
 		page, err = h.store.LatestMessages(r.Context(), access, post,
-			int(latest))
+			after, includeDeleted, int(latest))
 	} else {
 		page, err = h.store.Messages(r.Context(), access, post, after,
 			filter, exclude, int(limit))
@@ -201,6 +214,11 @@ func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
+	includeDeleted, err := queryFlag(query, "include-deleted")
+	if err != nil {
+		writeBadRequest(w, err.Error())
+		return
+	}
 	access, ok := h.access(w, r)
 	if !ok {
 		return
@@ -210,7 +228,7 @@ func (h *handler) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	overview, err := h.store.Overview(r.Context(), access, workspace.ID,
-		int(limit))
+		includeDeleted, int(limit))
 	if err != nil {
 		writeStoreError(w, err)
 		return

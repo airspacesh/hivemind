@@ -577,11 +577,12 @@ func TestReadsAndWritesGiveARevisionToReadChangesAfter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	latest, err := store.LatestMessages(ctx, everyAccess(store), key, 20)
+	latest, err := store.LatestMessages(ctx, everyAccess(store), key,
+		api.ChatBound{}, false, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	overview, err := store.Overview(ctx, everyAccess(store), general, 20)
+	overview, err := store.Overview(ctx, everyAccess(store), general, false, 20)
 	if err != nil {
 		t.Fatal(err)
 	}

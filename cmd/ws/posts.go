@@ -589,7 +589,7 @@ func cmdPost(c *client, args []string) error {
 func cmdTree(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
 		strs:  []string{"--limit"},
-		bools: []string{"--include-superseded", "--include-deleted"},
+		bools: []string{"--include-superseded", includeDeleted},
 	})
 	if err != nil {
 		return err
@@ -613,9 +613,7 @@ func cmdTree(c *client, args []string) error {
 	if p.bools["--include-superseded"] {
 		query.Set("include-superseded", "true")
 	}
-	if p.bools["--include-deleted"] {
-		query.Set("include-deleted", "true")
-	}
+	addIncludeDeleted(p, query)
 
 	t, err := c.resolve(ref)
 	if err != nil {
@@ -715,7 +713,7 @@ func listingHeader(p *parsedArgs, limit int, includeChat bool) string {
 	if p.bools["--include-superseded"] {
 		text += ", superseded included"
 	}
-	if p.bools["--include-deleted"] {
+	if p.bools[includeDeleted] {
 		text += ", deleted included"
 	}
 	return text + ":"
@@ -750,7 +748,7 @@ func olderCommand(
 		text += " --limit " + shellQuote(p.strs["--limit"])
 	}
 	for _, flag := range []string{"--include-chat", "--include-superseded",
-		"--include-deleted", "--posts-only"} {
+		includeDeleted, "--posts-only"} {
 		if p.bools[flag] {
 			text += " " + flag
 		}
@@ -777,9 +775,9 @@ func cmdListing(c *client, command string, args []string) error {
 			return fmt.Errorf("search includes chat unless " +
 				"--posts-only. --include-chat is for recent")
 		}
-		if p.has("--include-deleted") {
+		if p.has(includeDeleted) {
 			return fmt.Errorf("search never lists deleted posts or " +
-				"messages. --include-deleted is for recent")
+				"messages, so it takes no " + includeDeleted)
 		}
 		includeChat = !p.bools["--posts-only"]
 	case "recent":
@@ -828,9 +826,7 @@ func cmdListing(c *client, command string, args []string) error {
 	if p.bools["--include-superseded"] {
 		query.Set("include-superseded", "true")
 	}
-	if p.bools["--include-deleted"] {
-		query.Set("include-deleted", "true")
-	}
+	addIncludeDeleted(p, query)
 	if includeChat {
 		query.Set("include-chat", "true")
 	}

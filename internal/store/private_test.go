@@ -165,7 +165,7 @@ func TestOnlyTheOwnerReadsAPrivatePostAndWhatIsUnderIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertNoSecret(t, "the changes", changes)
-	overview, err := store.Overview(ctx, bob, general, 20)
+	overview, err := store.Overview(ctx, bob, general, false, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,8 @@ func TestOnlyTheOwnerReadsAPrivatePostAndWhatIsUnderIt(t *testing.T) {
 			return err
 		},
 		"latest chat": func() error {
-			_, err := store.LatestMessages(ctx, bob, draftKey, 20)
+			_, err := store.LatestMessages(ctx, bob, draftKey,
+				api.ChatBound{}, false, 20)
 			return err
 		},
 		"message": func() error {
@@ -479,8 +480,15 @@ func readsAs(
 	changes, err := store.Changes(ctx, access, general, 0, Filter{}, nil,
 		100)
 	read("changes", changes, err)
-	overview, err := store.Overview(ctx, access, general, 20)
-	read("chat overview", overview, err)
+	for _, includeDeleted := range []bool{false, true} {
+		suffix := ""
+		if includeDeleted {
+			suffix = " with deleted"
+		}
+		overview, err := store.Overview(ctx, access, general,
+			includeDeleted, 20)
+		read("chat overview"+suffix, overview, err)
+	}
 	projects, err := store.Projects(ctx, access, general, 20, time.Now())
 	read("projects", projects, err)
 	return reads

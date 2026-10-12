@@ -40,15 +40,17 @@ Usage:
   {program} post <ref>|<ref>-m<n>
   {program} tree <ref> [--limit 30] [--include-superseded]
          [--include-deleted]
-  {program} recent [--include-chat] [--under <ref>] [search filters]
-         [--workspace <name>]
+  {program} recent [--include-chat] [--include-deleted] [--under <ref>]
+         [search filters] [--workspace <name>]
   {program} search [<text>] [--posts-only] [--under <ref>]
          [search filters] [--workspace <name>]
   {program} list-workspaces
   {program} list-projects [--limit 30] [--workspace <name>]
   {program} chat send <ref> <message> [--after <ref>-m<n>|<time>]
   {program} chat recent [<ref>|--workspace <name>] [--limit 20]
+         [--include-deleted]
   {program} chat read <ref> [--after <ref>-m<n>|<time>] [--limit 20]
+         [--include-deleted]
   {program} chat wait <ref> [--after <ref>-m<n>|<time>] [--timeout 10m]
          [--content <pattern>]... [--origin-user <pattern>]...
          [--exclude-mine|--include-mine]
@@ -109,11 +111,14 @@ Editing and deleting:
   stay, and the posts under it stay in place. A message deleted with
   '{program} chat delete <ref>-m<n>' loses its text for good, and keeps
   its number and place. Deleting again changes nothing. A deleted post
-  or message cannot be edited. recent and search leave deleted posts and
-  messages out, but not the posts under a deleted post or the messages
-  in its chat. tree shows a deleted post only above the posts under it.
-  '{program} post' and the chat commands show them as (deleted), as do
-  recent and tree with --include-deleted.
+  or message cannot be edited.
+
+  Deleted posts and messages drop out of every listing, but the posts
+  under a deleted post and the messages in its chat stay. A tree keeps a
+  deleted post only above the posts under it. --include-deleted shows
+  them all, as (deleted), in recent, tree, chat recent and chat read.
+  search never shows them. '{program} post' shows one by its id, and
+  wait and firehose show a delete as a change.
 
   Only the user who wrote a post or message can edit or delete it. To
   suggest a change to someone else's, send a message in its chat.
@@ -174,9 +179,8 @@ Listings:
   read at, like 'Cursor: @812345', which a wait takes. --under <ref>
   keeps recent or search to a post and what is beneath it.
   '{program} tree <ref>' shows the path to a post, then its subtree, at
-  most --limit posts, marking where it was cut. A deleted or superseded
-  post shows as context above the posts under it, and only then, unless
-  --include-deleted or --include-superseded shows it.
+  most --limit posts, marking where it was cut. A superseded post shows
+  only above the posts under it, unless --include-superseded shows it.
   '{program} list-projects' lists the --limit most recently active
   projects, each with the number of its posts created in the last 90
   days, and their share of the workspace's. When the limit leaves some
@@ -218,7 +222,6 @@ Search filters (recent, search, wait and firehose):
   --id-only              print one post or message id per line, and
                          the 'Next:' and 'Cursor:' lines on stderr
   --include-superseded   include superseded posts
-  --include-deleted      include deleted posts and messages in recent
   --posts-only           leave chats out of a search
   --include-chat         list messages too in recent
 

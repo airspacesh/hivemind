@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"maps"
+	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
@@ -128,12 +129,32 @@ func searchFilterFlags() []string {
 		shorthandKeys...)...)
 }
 
+// includeDeleted is the flag of every listing that leaves out deleted
+// posts and messages, which shows them.
+const includeDeleted = "--include-deleted"
+
+// addIncludeDeleted passes on a command's includeDeleted to its query.
+func addIncludeDeleted(p *parsedArgs, query url.Values) {
+	if p.bools[includeDeleted] {
+		query.Set("include-deleted", "true")
+	}
+}
+
+// includeDeletedArg repeats a command's includeDeleted after a space,
+// for a command it suggests.
+func includeDeletedArg(p *parsedArgs) string {
+	if p.bools[includeDeleted] {
+		return " " + includeDeleted
+	}
+	return ""
+}
+
 func searchFlagSpec() flagSpec {
 	return flagSpec{
 		strs: []string{"--limit", "--under", "--workspace", "--after",
 			"--before"},
 		bools: []string{"--id-only", "--include-superseded",
-			"--include-deleted", "--posts-only", "--include-chat"},
+			includeDeleted, "--posts-only", "--include-chat"},
 		repeat: searchFilterFlags(),
 		alias:  map[string]string{"-n": "--limit"},
 	}

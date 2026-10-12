@@ -57,13 +57,23 @@ var chatQueryParameters = map[string]bool{
 	"after":                  true,
 	"latest":                 true,
 	"limit":                  true,
+	"include-deleted":        true,
 	"exclude-user":           true,
 	"exclude-claude-session": true,
 }
 
+// latestQueryParameters are the parameters a read of a chat's newest
+// messages takes.
+var latestQueryParameters = map[string]bool{
+	"latest":          true,
+	"after":           true,
+	"include-deleted": true,
+}
+
 // overviewQueryParameters are the parameters of a chat overview.
 var overviewQueryParameters = map[string]bool{
-	"limit": true,
+	"limit":           true,
+	"include-deleted": true,
 }
 
 // projectsQueryParameters are the parameters of a projects listing.
