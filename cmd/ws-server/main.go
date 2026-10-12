@@ -251,8 +251,17 @@ func (h *handler) projects(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, "give name or limit, not both")
 		return
 	}
+	if query.Has("name") && query.Has("include-deleted") {
+		writeBadRequest(w, "name takes no include-deleted")
+		return
+	}
 	limit, err := queryInteger(query, "limit", defaultProjectLimit,
 		1, store.MaxProjectLimit)
+	if err != nil {
+		writeBadRequest(w, err.Error())
+		return
+	}
+	includeDeleted, err := queryFlag(query, "include-deleted")
 	if err != nil {
 		writeBadRequest(w, err.Error())
 		return
@@ -272,7 +281,7 @@ func (h *handler) projects(w http.ResponseWriter, r *http.Request) {
 			query.Get("name"), time.Now())
 	} else {
 		projects, err = h.store.Projects(r.Context(), access, workspace.ID,
-			int(limit), time.Now())
+			includeDeleted, int(limit), time.Now())
 	}
 	if err != nil {
 		writeStoreError(w, err)

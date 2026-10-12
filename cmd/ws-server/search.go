@@ -78,8 +78,9 @@ var overviewQueryParameters = map[string]bool{
 
 // projectsQueryParameters are the parameters of a projects listing.
 var projectsQueryParameters = map[string]bool{
-	"name":  true,
-	"limit": true,
+	"name":            true,
+	"limit":           true,
+	"include-deleted": true,
 }
 
 // treeQueryParameters are the parameters of a tree.

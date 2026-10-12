@@ -733,6 +733,12 @@ $deleted_message" \
     "$(ws delete "$gadwall" && ws chat delete "$gadwall-m2")"
 check "deleting again changes nothing" "No matching changes" \
     "$(ws wait --after "$after_delete" --include-mine --timeout 1s)"
+ws delete "$(ws add "Ghost" --project ghosts --no-recent | added)" \
+    >/dev/null
+check_equal "list-projects leaves out a project whose posts are deleted" \
+    "" "$(ws list-projects | grep ghosts || true)"
+check "list-projects with deleted posts lists it" "ghosts" \
+    "$(ws list-projects --include-deleted)"
 
 # Changes.
 private_changes="$(ws wait --after @0 --workspace personal --include-mine \

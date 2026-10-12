@@ -281,12 +281,11 @@ func (c *client) collectLinks(t target, p *parsedArgs) ([]api.Link, error) {
 }
 
 func (c *client) projects(
-	t target, limit int,
+	t target, query url.Values,
 ) (api.ProjectsResponse, error) {
 	var projects api.ProjectsResponse
-	query := url.Values{"limit": {fmt.Sprint(limit)}}.Encode()
-	err := c.do(t, "GET", workspacePath(t, "/projects?"+query), nil,
-		&projects)
+	err := c.do(t, "GET", workspacePath(t, "/projects?"+query.Encode()),
+		nil, &projects)
 	return projects, err
 }
 
@@ -869,13 +868,15 @@ func cmdListing(c *client, command string, args []string) error {
 
 func cmdListProjects(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs: []string{"--limit", "--workspace"},
+		strs:  []string{"--limit", "--workspace"},
+		bools: []string{includeDeleted},
 	})
 	if err != nil {
 		return err
 	}
 	if len(p.pos) != 0 {
-		return usageError("list-projects [--limit 30] [--workspace <name>]")
+		return usageError("list-projects [--limit 30] [--include-deleted] " +
+			"[--workspace <name>]")
 	}
 	limit := 30
 	if p.has("--limit") {
@@ -887,7 +888,9 @@ func cmdListProjects(c *client, args []string) error {
 	if err != nil {
 		return err
 	}
-	result, err := c.projects(targetOf(workspace), limit)
+	query := url.Values{"limit": {fmt.Sprint(limit)}}
+	addIncludeDeleted(p, query)
+	result, err := c.projects(targetOf(workspace), query)
 	if err != nil {
 		return err
 	}
@@ -902,9 +905,9 @@ func cmdListProjects(c *client, args []string) error {
 		noun = "project"
 	}
 	if more > 0 {
-		fmt.Printf("Next: %s list-projects --limit %d --workspace %s "+
+		fmt.Printf("Next: %s list-projects --limit %d%s --workspace %s "+
 			"(%d more %s)\n", programName, result.Count,
-			shellQuote(workspace.name), more, noun)
+			includeDeletedArg(p), shellQuote(workspace.name), more, noun)
 	}
 	return nil
 }

@@ -30,7 +30,7 @@ func listProjects(
 ) api.ProjectsResponse {
 	t.Helper()
 	response, err := store.Projects(context.Background(), everyAccess(store),
-		workspaceID(t, store, workspace), limit, now)
+		workspaceID(t, store, workspace), false, limit, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,20 +150,37 @@ func TestProjectsCountPostsCreatedInTheWindow(t *testing.T) {
 	}
 }
 
-// The counts leave deleted posts out, but a delete is activity, so a
-// project whose every post is deleted still lists, with none.
-func TestProjectsLeaveDeletedPostsOutOfTheCounts(t *testing.T) {
+// The counts leave deleted posts out, and the listing a project whose
+// every post is deleted, however old its live posts are, unless it
+// includes deleted posts. A delete is activity, so with them the
+// project lists, with none.
+func TestProjectsLeaveDeletedPostsOut(t *testing.T) {
 	store := openTestStore(t)
 	now := time.Now()
 	addToProject(t, store, "general", "pond")
 	mustDelete(t, store, addToProject(t, store, "general", "pond").Ref)
 	mustDelete(t, store, addToProject(t, store, "general", "nest").Ref)
 
-	all := listProjects(t, store, "general", 30, now)
+	live := listProjects(t, store, "general", 30, now)
+	if got := describeProjects(live); got != "pond 1" ||
+		live.Count != 1 || live.RecentPosts != 1 {
+		t.Fatalf("projects = %q, %d of them, with %d recent posts", got,
+			live.Count, live.RecentPosts)
+	}
+	later := now.Add(2 * recentWindow)
+	if got := describeProjects(listProjects(t, store, "general", 30,
+		later)); got != "pond 0" {
+		t.Fatalf("projects with no recent posts = %q", got)
+	}
+	all, err := store.Projects(context.Background(), everyAccess(store),
+		workspaceID(t, store, "general"), true, 30, now)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := describeProjects(all); got != "nest 0, pond 1" ||
-		all.RecentPosts != 1 {
-		t.Fatalf("projects = %q with %d recent posts", got,
-			all.RecentPosts)
+		all.Count != 2 || all.RecentPosts != 1 {
+		t.Fatalf("projects with deleted = %q, %d of them, with %d recent "+
+			"posts", got, all.Count, all.RecentPosts)
 	}
 	if got := describeProjects(readProject(t, store, "pond", now)); got !=
 		"pond 1/1" {

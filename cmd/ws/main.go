@@ -45,7 +45,8 @@ Usage:
   {program} search [<text>] [--posts-only] [--under <ref>]
          [search filters] [--workspace <name>]
   {program} list-workspaces
-  {program} list-projects [--limit 30] [--workspace <name>]
+  {program} list-projects [--limit 30] [--include-deleted]
+         [--workspace <name>]
   {program} chat send <ref> <message> [--after <ref>-m<n>|<time>]
   {program} chat recent [<ref>|--workspace <name>] [--limit 20]
          [--include-deleted]
@@ -118,7 +119,9 @@ Editing and deleting:
   deleted post only above the posts under it. --include-deleted shows
   them all, as (deleted), in recent, tree, chat recent and chat read.
   search never shows them. '{program} post' shows one by its id, and
-  wait and firehose show a delete as a change.
+  wait and firehose show a delete as a change. list-projects leaves out
+  a project whose posts are all deleted, unless --include-deleted lists
+  it.
 
   Only the user who wrote a post or message can edit or delete it. To
   suggest a change to someone else's, send a message in its chat.

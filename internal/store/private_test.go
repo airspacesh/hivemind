@@ -170,7 +170,7 @@ func TestOnlyTheOwnerReadsAPrivatePostAndWhatIsUnderIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertNoSecret(t, "the chat overview", overview)
-	projects, err := store.Projects(ctx, bob, general, 20, time.Now())
+	projects, err := store.Projects(ctx, bob, general, false, 20, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -488,9 +488,10 @@ func readsAs(
 		overview, err := store.Overview(ctx, access, general,
 			includeDeleted, 20)
 		read("chat overview"+suffix, overview, err)
+		projects, err := store.Projects(ctx, access, general,
+			includeDeleted, 20, time.Now())
+		read("projects"+suffix, projects, err)
 	}
-	projects, err := store.Projects(ctx, access, general, 20, time.Now())
-	read("projects", projects, err)
 	return reads
 }
 

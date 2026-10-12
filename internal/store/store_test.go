@@ -539,8 +539,8 @@ func TestReadsProceedWhileAWriteIsOpen(t *testing.T) {
 			return err
 		},
 		"projects": func(ctx context.Context) error {
-			_, err := store.Projects(ctx, everyAccess(store), key.Workspace, 10,
-				time.Now())
+			_, err := store.Projects(ctx, everyAccess(store), key.Workspace,
+				false, 10, time.Now())
 			return err
 		},
 		"ping": store.Ping,

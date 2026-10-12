@@ -33,12 +33,15 @@ const projectNames = `
 // limit of them, with their posts created in the recentWindow before
 // now. It counts only the posts the reader can read that are not
 // deleted, but a delete is activity. It leaves out a project with no
-// post the reader can read. Each count takes away the posts private to
-// others, as createPrivateProjectCreatedIndex explains.
+// post the reader can read, and unless includeDeleted is set, one whose
+// posts the reader can read are all deleted. Each count takes away the
+// posts private to others, as createPrivateProjectCreatedIndex
+// explains.
 func (s *Store) Projects(
 	ctx context.Context,
 	access Access,
 	workspace int64,
+	includeDeleted bool,
 	limit int,
 	now time.Time,
 ) (api.ProjectsResponse, error) {
@@ -62,10 +65,14 @@ func (s *Store) Projects(
 			WHERE workspace_id = ?1 AND project = names.project
 				AND created_utc >= ?2 AND NOT deleted
 				AND private_to <> '' AND private_to <> ?3
+		), ?4 OR EXISTS (
+			SELECT 1 FROM posts
+			WHERE workspace_id = ?1 AND project = names.project
+				AND NOT deleted AND private_to IN ('', ?3)
 		)
 		FROM names WHERE project IS NOT NULL
 		ORDER BY latest DESC, project`, workspace, formatTime(since),
-		access.user,
+		access.user, includeDeleted,
 	)
 	if err != nil {
 		return api.ProjectsResponse{}, fmt.Errorf("listing projects: %w", err)
@@ -78,8 +85,9 @@ func (s *Store) Projects(
 	for rows.Next() {
 		var project api.Project
 		var latest sql.NullString
+		var listed bool
 		if err := rows.Scan(
-			&project.Name, &latest, &project.RecentPosts,
+			&project.Name, &latest, &project.RecentPosts, &listed,
 		); err != nil {
 			return api.ProjectsResponse{}, fmt.Errorf(
 				"listing projects: %w", err)
@@ -87,7 +95,7 @@ func (s *Store) Projects(
 		// A project has no latest activity when the reader can read none
 		// of its posts. Filtering on it in the query would have SQLite
 		// read each project's latest activity twice.
-		if !latest.Valid {
+		if !latest.Valid || !listed {
 			continue
 		}
 		if project.Latest, err = parseTime(latest.String); err != nil {
