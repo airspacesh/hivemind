@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -390,5 +392,126 @@ func TestMakingAPostPublicOrPrivateIsAChange(t *testing.T) {
 	if got := changeIDs(changes("alice", cursor)); !reflect.DeepEqual(got,
 		refStrings(draft.Ref)) {
 		t.Fatalf("alice's changes after the draft was hidden = %v", got)
+	}
+}
+
+// readsAs gathers what user gets from each read of the general
+// workspace, and of each post in refs, by what was read.
+func readsAs(
+	t *testing.T, store *Store, user string, refs ...api.Ref,
+) map[string]any {
+	t.Helper()
+	ctx := context.Background()
+	access := accessAs(store, user)
+	general := workspaceID(t, store, "general")
+	reads := map[string]any{}
+	read := func(what string, value any, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("%s's %s: %v", user, what, err)
+		}
+		reads[what] = value
+	}
+	for _, ref := range refs {
+		key := store.mustKey(ref)
+		detail, err := store.Detail(ctx, access, key)
+		read("post "+ref.String(), detail, err)
+		tree, err := store.Tree(ctx, access, key, true, true, 30)
+		read("tree "+ref.String(), tree, err)
+		tree, err = store.Tree(ctx, access, key, false, false, 30)
+		read("current tree "+ref.String(), tree, err)
+		chat, err := store.Messages(ctx, access, key, api.ChatBound{},
+			Filter{}, nil, 20)
+		read("chat "+ref.String(), chat, err)
+	}
+	for what, filter := range map[string]Filter{
+		"recent": {Limit: 50},
+		"recent with everything": {Limit: 50, IncludeChat: true,
+			IncludeSuperseded: true, IncludeDeleted: true},
+	} {
+		page, err := store.Search(ctx, access, general, filter)
+		read(what, page, err)
+	}
+	changes, err := store.Changes(ctx, access, general, 0, Filter{}, nil,
+		100)
+	read("changes", changes, err)
+	overview, err := store.Overview(ctx, access, general, 20)
+	read("chat overview", overview, err)
+	projects, err := store.Projects(ctx, access, general, 20, time.Now())
+	read("projects", projects, err)
+	return reads
+}
+
+// mentions reports whether a read names ref, as a post or by one of
+// its messages.
+func mentions(t *testing.T, read any, ref api.Ref) bool {
+	t.Helper()
+	text, err := json.Marshal(read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Contains(string(text), `"`+ref.String()+`"`)
+}
+
+// TestLinksOfAPrivatePostShowOnlyToItsOwner links a private post to
+// public ones, and public ones to private ones, every way, and checks
+// that no read by anyone else names a private post at all.
+func TestLinksOfAPrivatePostShowOnlyToItsOwner(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	topic := addAs(t, store, "alice", "topic")
+	old := addAs(t, store, "bob", "old")
+	bobs := addAs(t, store, "bob", "bobs")
+	draft := addTo(t, store, "general", api.AddPostRequest{
+		Subject: "draft", Private: true, Origin: api.Origin{User: "alice"},
+		Links: []api.Link{link(api.ParentLink, topic.Ref),
+			link(api.SupersedesLink, old.Ref), link("see", bobs.Ref)},
+	})
+	detail := addAsUnder(t, store, "alice", "detail", &draft.Ref, false)
+	summary := addAs(t, store, "alice", "summary", link("see", draft.Ref),
+		link(api.SupersedesLink, detail.Ref), link("see", topic.Ref))
+	later := addAs(t, store, "alice", "later")
+	reply := addAs(t, store, "bob", "reply", link("see", later.Ref),
+		link(api.SupersedesLink, later.Ref))
+	mustSetPrivate(t, store, "alice", later.Ref, true)
+	postAs(t, store, "bob", topic.Ref, "a question")
+	postAs(t, store, "alice", draft.Ref, "a note")
+	postAs(t, store, "alice", later.Ref, "a note")
+	public := []api.Ref{topic.Ref, old.Ref, bobs.Ref, summary.Ref,
+		reply.Ref}
+	private := []api.Ref{draft.Ref, detail.Ref, later.Ref}
+
+	for what, read := range readsAs(t, store, "bob", public...) {
+		for _, ref := range private {
+			if mentions(t, read, ref) {
+				t.Errorf("bob's %s names %s", what, ref)
+			}
+		}
+	}
+	for _, ref := range private {
+		named := false
+		for _, read := range readsAs(t, store, "alice", public...) {
+			named = named || mentions(t, read, ref)
+		}
+		if !named {
+			t.Errorf("no read of alice's names %s", ref)
+		}
+	}
+
+	bob := accessAs(store, "bob")
+	shown, err := store.Detail(ctx, bob, store.mustKey(summary.Ref))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(shown.Links, []api.Link{link("see", topic.Ref)}) {
+		t.Fatalf("bob reads the summary's links as %+v", shown.Links)
+	}
+	shown, err = store.Detail(ctx, bob, store.mustKey(topic.Ref))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(shown.Backlinks,
+		[]api.Link{link("see", summary.Ref)}) {
+		t.Fatalf("bob reads the topic's backlinks as %+v", shown.Backlinks)
 	}
 }

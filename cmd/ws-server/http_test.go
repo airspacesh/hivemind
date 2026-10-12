@@ -676,6 +676,54 @@ func TestPrivatePostsAreNotFoundForOthersOverHTTP(t *testing.T) {
 	}
 }
 
+// Links from alice's private post e3 to public posts, and from a public
+// post to e3, show to alice alone. No response to bob names e3.
+func TestLinksOfAPrivatePostShowOnlyToItsOwnerOverHTTP(t *testing.T) {
+	s := startServer(t, testConfig(t))
+	alice, bob := s.as("alice"), s.as("bob")
+	for _, body := range []string{
+		`{"subject":"topic","project":"p","origin":{"user":"alice"}}`,
+		`{"subject":"old","project":"p","origin":{"user":"bob"}}`,
+		`{"subject":"draft","project":"p","private":true,` +
+			`"origin":{"user":"alice"},` +
+			`"links":[{"name":"parent","ref":"e1"},` +
+			`{"name":"supersedes","ref":"e2"},{"name":"see","ref":"e2"}]}`,
+		`{"subject":"summary","project":"p","origin":{"user":"alice"},` +
+			`"links":[{"name":"see","ref":"e3"},` +
+			`{"name":"supersedes","ref":"e3"}]}`,
+	} {
+		alice.must(t, "POST", "/api/workspaces/general/posts", body, "",
+			http.StatusCreated)
+	}
+	alice.must(t, "POST", "/api/posts/e3/messages",
+		`{"body":"note","origin":{"user":"alice"}}`, "",
+		http.StatusCreated)
+
+	reads := []string{
+		"/api/posts/e1", "/api/posts/e2", "/api/posts/e4",
+		"/api/posts/e1/tree?include-superseded=true&include-deleted=true",
+		"/api/posts/e1/tree",
+		"/api/workspaces/general/posts",
+		"/api/workspaces/general/posts?include-superseded=true&" +
+			"include-deleted=true&include-chat=true",
+		"/api/workspaces/general/changes?after=@0",
+		"/api/workspaces/general/messages",
+		"/api/workspaces/general/projects",
+	}
+	for _, path := range reads {
+		if text := bob.must(t, "GET", path, "", "",
+			http.StatusOK); strings.Contains(text, `"e3"`) {
+			t.Errorf("bob's GET %s names e3: %s", path, text)
+		}
+	}
+	for _, path := range []string{"/api/posts/e2", "/api/posts/e4"} {
+		if text := alice.must(t, "GET", path, "", "",
+			http.StatusOK); !strings.Contains(text, `"e3"`) {
+			t.Errorf("alice's GET %s does not name e3: %s", path, text)
+		}
+	}
+}
+
 func TestRequestLogKeepsNoClientText(t *testing.T) {
 	var logs bytes.Buffer
 	oldOutput := log.Writer()
