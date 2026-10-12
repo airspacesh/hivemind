@@ -390,23 +390,37 @@ func chatWaitCommand(cursor api.MessageRef, filterArgs string) string {
 		cursor.Post, cursor, filterArgs)
 }
 
-// printCursorLine ends a chat read with the cursor to read on from, as
-// the command that uses it. When the read reached the newest message,
-// the line gives the revision it read at too, for a wait on the whole
-// workspace.
-func printCursorLine(post api.Ref, page api.ChatPage) {
-	cursor := api.MessageRef{Post: post, Number: page.Cursor}
+// printChatCursor ends the output of a chat read from after with its
+// cursor, unless the output already names it last, as the last message
+// shown, or when it shows none, as the message the read started after.
+func printChatCursor(post api.Ref, page api.ChatPage, after api.ChatBound) {
+	var named int64
+	switch {
+	case len(page.Messages) > 0:
+		named = page.Messages[len(page.Messages)-1].Number
+	case after.Time.IsZero():
+		named = after.Number
+	}
+	if page.Cursor != named {
+		fmt.Printf("Cursor: %s\n",
+			api.MessageRef{Post: post, Number: page.Cursor})
+	}
+}
+
+// printCursorLine ends a chat read from after with the read of its next
+// page, or else its cursor.
+func printCursorLine(post api.Ref, page api.ChatPage, after api.ChatBound) {
 	if page.Remaining > 0 {
 		noun := "messages"
 		if page.Remaining == 1 {
 			noun = "message"
 		}
+		cursor := api.MessageRef{Post: post, Number: page.Cursor}
 		fmt.Printf("Next: %s chat read %s --after %s (%d more %s)\n",
 			programName, post, cursor, page.Remaining, noun)
 		return
 	}
-	fmt.Printf("Cursor: %s, %s (wait for more: %s)\n", cursor,
-		api.FormatRevision(page.Revision), chatWaitCommand(cursor, ""))
+	printChatCursor(post, page, after)
 }
 
 // printEarlier marks how many messages after the number start a chat
@@ -440,11 +454,13 @@ func printChatMessages(page api.ChatPage, empty string) {
 	}
 }
 
-// printChatPage prints one chat's messages oldest first, then the
-// cursor line.
-func printChatPage(post api.Ref, page api.ChatPage, empty string) {
+// printChatPage prints one chat's messages after after oldest first,
+// then the cursor line.
+func printChatPage(
+	post api.Ref, page api.ChatPage, after api.ChatBound, empty string,
+) {
 	printChatMessages(page, empty)
-	printCursorLine(post, page)
+	printCursorLine(post, page, after)
 }
 
 // printChatHeader names the post a run of chat messages belongs to.

@@ -144,10 +144,8 @@ check_status() {
     check "$desc" "$expected" "$actual"
 }
 
-added() { sed -n 's/^Added post \[\([a-z]*[0-9]*\)\] at @[0-9]*\.$/\1/p'; }
-cursor_of() { sed -n 's/^Cursor: \(@[0-9]*\) .*/\1/p'; }
-# revisionless writes each revision as @R.
-revisionless() { sed -E 's#@[0-9]+#@R#g'; }
+added() { sed -n 's/^Added post \[\([a-z]*[0-9]*\)\]\.$/\1/p'; }
+cursor_of() { sed -n 's/^Cursor: \(@[0-9]*\)$/\1/p'; }
 # untimed drops the times from listings, which differ from run to run,
 # and writes an exact time as T and a revision as @R.
 untimed() {
@@ -280,7 +278,7 @@ check_equal "recent shows the newest posts with their paths" \
 [e$((pond_n + 1))] $(id -un) in $root: Pond 2
 [$pond_1] $(id -un) in $root: Pond 1
 Next: ws recent --before @R --workspace general --limit 3 --project views (more older matches)
-Cursor: @R (wait for more: ws wait --after @R --workspace general --project views)" \
+Cursor: @R" \
     "$(ws recent --project views -n 3 | untimed)"
 check_equal "recent says on stderr what it ran" \
     "Newest 3 posts matching --project views:" \
@@ -290,6 +288,8 @@ check "recent --id-only gives the next page on stderr" \
     "$(ws recent --project views -n 3 --id-only 2>&1 >/dev/null)"
 check "recent --id-only gives the cursor on stderr" "Cursor: @" \
     "$(ws recent --project views -n 3 --id-only 2>&1 >/dev/null)"
+check_equal "search ends with no cursor" "" \
+    "$(ws search Pond --project views 2>&1 | grep '^Cursor: ' || true)"
 older="$(ws recent --project views -n 3 | grep '^Next: ' |
     sed -E 's/^Next: (.*) \(more older matches\)$/\1/')"
 check_equal "the footer's command lists the next page" \
@@ -356,7 +356,7 @@ check "a parent cannot cross workspaces" \
         --parent "$root" 2>&1 || true)"
 ws add "Protected see PROTECTEDMARK" --project mine \
     --workspace personal --link "see=$root" --no-recent >/dev/null # p2
-check "add takes its parent's workspace" "Added post [p3] at @" \
+check "add takes its parent's workspace" "Added post [p3]." \
     "$(ws add "Protected child" --project mine --parent p2 --no-recent)"
 curl -fsS -X POST -H "Workstream-API-Version: $api_version" \
     -H "Authorization: Bearer $test_secret" \
@@ -382,19 +382,20 @@ check_equal "a tree holds no protected post" "" \
 
 # Chat.
 chat="$(ws add "Chat thread" --project chat --no-recent | added)"
-check_equal "a send prints only the message id and its revision" \
-    "Sent [$chat-m1] at @R." \
-    "$(ws chat send "$chat" "First QUESTIONMARK" | revisionless)"
+check_equal "a send prints only the message id" "Sent [$chat-m1]." \
+    "$(ws chat send "$chat" "First QUESTIONMARK")"
 ws chat send "$chat" "Second" >/dev/null
 ws chat send "$chat" "Third" >/dev/null
 check "a read pages forward from the start with a footer" \
     "Next: ws chat read $chat --after $chat-m1 (2 more messages)" \
     "$(ws chat read "$chat" --limit 1)"
-check "the last page ends with the cursor and the revision read at" \
-    "Cursor: $chat-m3, @R (wait for more: ws chat wait $chat --after $chat-m3)" \
-    "$(ws chat read "$chat" --after "$chat-m1" | revisionless)"
-check "an empty read keeps the cursor" "No messages after $chat-m3." \
+check_equal "the last page ends with its last message, the cursor" \
+    "[$chat-m3]" "$(ws chat read "$chat" --after "$chat-m1" | tail -1 |
+        sed 's/^\(\[[a-z0-9-]*\]\).*/\1/')"
+check_equal "an empty read keeps the cursor" "No messages after $chat-m3." \
     "$(ws chat read "$chat" --after "$chat-m3")"
+check "an empty read from a time ends with the cursor" \
+    "Cursor: $chat-m3" "$(ws chat read "$chat" --after 2100-01-01)"
 check "a read from a time starts at the first message posted since" \
     "[$chat-m1]" "$(ws chat read "$chat" --after 1h --limit 1)"
 check "a read refuses a message of another chat" \
@@ -429,12 +430,11 @@ race="$(ws add "Cursor race" --project chat --no-recent | added)"
 ws chat send "$race" "Read first" >/dev/null
 ws chat send "$race" "From a peer" >/dev/null
 check_equal "a send with --after shows what others sent, then yours" \
-    "Sent [$race-m3] at @R.
+    "Sent [$race-m3].
 [$race-m2]
-[$race-m3]
-Cursor: $race-m3, @R (wait for more: ws chat wait $race --after $race-m3)" \
+[$race-m3]" \
     "$(ws chat send "$race" "My own" --after "$race-m1" |
-        sed 's/^\(\[[a-z0-9-]*\]\).*/\1/' | revisionless)"
+        sed 's/^\(\[[a-z0-9-]*\]\).*/\1/')"
 check "a wait from a send's cursor does not return your own message" \
     "No matching messages after $race-m3 within 1s." \
     "$(ws chat wait "$race" --after "$race-m3" --timeout 1s)"
@@ -444,15 +444,13 @@ check "a message may start with a dash beside --after" \
 # how to read the 2 it left out.
 for n in $(seq 21); do ws chat send "$race" "Peer $n" >/dev/null; done
 sent="$(ws chat send "$race" "Catching up" --after "$race-m4" |
-    sed 's/^\(\[[a-z0-9-]*\]\).*/\1/' | revisionless)"
+    sed 's/^\(\[[a-z0-9-]*\]\).*/\1/')"
 check_equal "a send shows at most the newest 20 messages after --after" \
-    "Sent [$race-m26] at @R.
+    "Sent [$race-m26].
 ... 2 earlier (ws chat read $race --after $race-m4)
 [$race-m7]" "$(echo "$sent" | head -3)"
-check_equal "a send that left messages out ends with yours and its cursor" \
-    "[$race-m26]
-Cursor: $race-m26, @R (wait for more: ws chat wait $race --after $race-m26)" \
-    "$(echo "$sent" | tail -2)"
+check_equal "a send that left messages out ends with yours, the cursor" \
+    "[$race-m26]" "$(echo "$sent" | tail -1)"
 check_equal "a send that left messages out shows 20 of them" 20 \
     "$(echo "$sent" | grep -c '^\[')"
 check_equal "a send after a time counts what it left out from that time" \
@@ -478,7 +476,7 @@ check_equal "recent with chat shares the limit with messages" \
     "[$chat-m4] $(id -un) in $chat: Woken
 [$race-m27] $(id -un) in $race: Within the hour
 Next: ws recent --before @R --workspace general --limit 2 --include-chat --project chat (more older matches)
-Cursor: @R (wait for more: ws wait --after @R --workspace general --project chat)" \
+Cursor: @R" \
     "$(ws recent --project chat --include-chat -n 2 | untimed)"
 check "search shows the matching messages" \
     "[$chat-m4] $(id -un) in $chat: Woken" \
@@ -503,8 +501,8 @@ reply="$(ws add "Reply under heron" --project owners --parent "$heron" \
     --no-recent | added)"
 check "anyone can add under another user's post" "[$reply]" \
     "$(ws tree "$heron")"
-check_equal "anyone can chat on another user's post" "Sent [$heron-m1] at @R." \
-    "$(ws chat send "$heron" "Please fix the subject" | revisionless)"
+check_equal "anyone can chat on another user's post" "Sent [$heron-m1]." \
+    "$(ws chat send "$heron" "Please fix the subject")"
 post_as_heron "posts/$heron/messages" \
     '{"body":"Fixed soon","origin":{"user":"heron"}}'
 check "an origin filter finds that user's messages" \
@@ -524,7 +522,7 @@ check_equal "a chat wait's origin filter matches each message" \
         --include-mine --timeout 1s | grep -o "^\[$heron-m[0-9]*\]")"
 check_equal "recent finds a post at any level by its origin" \
     "[$reply] $(id -un) in $heron: Reply under heron
-Cursor: @R (wait for more: ws wait --after @R --workspace general --no-origin-user heron --project owners)" \
+Cursor: @R" \
     "$(ws recent --project owners --no-origin-user heron | untimed)"
 check_equal "recent with chat filters each message itself" \
     "[$heron-m1] $(id -un) in $heron: Please fix the subject
@@ -562,11 +560,11 @@ ws chat send "$gadwall" "The code is 4417" >/dev/null
 ws chat send "$gadwall" "After" >/dev/null
 before_delete="$(ws wait --after @0 --include-mine --timeout 1s | cursor_of)"
 deleted_post="$(ws delete "$gadwall")"
-check_equal "you can delete your own post" "Deleted post [$gadwall] at @R." \
-    "$(echo "$deleted_post" | revisionless)"
+check_equal "you can delete your own post" "Deleted post [$gadwall]." \
+    "$deleted_post"
 deleted_message="$(ws chat delete "$gadwall-m2")"
-check_equal "you can delete your own message" "Deleted [$gadwall-m2] at @R." \
-    "$(echo "$deleted_message" | revisionless)"
+check_equal "you can delete your own message" "Deleted [$gadwall-m2]." \
+    "$deleted_message"
 gadwall_post="$(ws post "$gadwall")"
 check "a deleted post shows as deleted" "[$gadwall] (deleted)" \
     "$gadwall_post"
@@ -648,9 +646,6 @@ private_changes="$(ws wait --after @0 --workspace personal --include-mine \
     --timeout 1s)"
 check "wait lists a workspace's changes from the start" "[p2-m1]" \
     "$private_changes"
-check "wait names the workspace to wait on in" \
-    "--workspace personal --include-mine" \
-    "$private_changes"
 private_cursor="$(echo "$private_changes" | cursor_of)"
 check "a wait from the last cursor finds nothing new" \
     "No matching changes after $private_cursor" \
@@ -684,29 +679,27 @@ check "a firehose prints messages as they arrive" "[$chat-m6]" \
 check "a firehose prints posts as they arrive" "Hosed post" \
     "$firehose_output"
 
-# A read gives the revision it read at, and a write the revision of its
-# change, so a wait from either shows exactly what came after.
+# A listing gives the revision it read at, so a wait from it shows
+# exactly what came after. So does a wait from the last message a read
+# showed, or from the post a write added.
 listed="$(ws recent --project chat | cursor_of)"
 peer chat send "$chat" "After the listing" >/dev/null
 since_listing="$(ws wait --after "$listed" --timeout 1s)"
 check_equal "a wait from a listing's cursor shows only what came after" \
     "[$chat-m7] $(id -un) in $chat: After the listing" \
     "$(echo "$since_listing" | grep '^\[' | untimed)"
-read_at="$(ws chat read "$chat" --after "$chat-m6" |
-    sed -n 's/^Cursor: [a-z0-9-]*, \(@[0-9]*\) .*/\1/p')"
-added_written="$(ws add "Written" --project chat --no-recent)"
-written="$(echo "$added_written" | added)"
-written_at="$(echo "$added_written" |
-    sed -n 's/^Added post .* at \(@[0-9]*\)\.$/\1/p')"
+last_read="$(ws chat read "$chat" --after "$chat-m6" | tail -1 |
+    sed 's/^\[\([a-z0-9-]*\)\].*/\1/')"
+written="$(ws add "Written" --project chat --no-recent | added)"
 peer chat send "$chat" "After the write" >/dev/null
-check_equal "a wait from a chat read's revision shows what came after" \
+check_equal "a wait from a chat read's last message shows what came after" \
     "[$written] $(id -un): Written
 [$chat-m8] $(id -un) in $chat: After the write" \
-    "$(ws wait --after "$read_at" --include-mine --timeout 1s |
+    "$(ws wait --after "$last_read" --include-mine --timeout 1s |
         grep '^\[' | untimed)"
-check_equal "a wait from a write's revision shows only what came after" \
+check_equal "a wait from a written post shows only what came after" \
     "[$chat-m8] $(id -un) in $chat: After the write" \
-    "$(ws wait --after "$written_at" --include-mine --timeout 1s |
+    "$(ws wait --after "$written" --include-mine --timeout 1s |
         grep '^\[' | untimed)"
 
 # A post or message id works as a wait's cursor, from when it was added
@@ -770,8 +763,6 @@ own_post_line="^\[$own\] [0-9]"
 check_equal "a wait's filters leave out what does not match" "" \
     "$(echo "$filtered" | grep -e "$own_post_line" -e "\[$own-m2\]" ||
         true)"
-check "a suggested wait repeats the filters" \
-    "--content 'lead MESSAGE' --project own)" "$filtered"
 check_equal "a firehose with --exclude-mine leaves out your own" "" \
     "$(lead firehose --after "$start" --exclude-mine --timeout 1s |
         grep -e "$own_post_line" -e "\[$own-m1\]" || true)"
@@ -779,9 +770,8 @@ check "a firehose with filters shows what matches" "[$own-m2]" \
     "$(ws firehose --after "$start" --content bare --timeout 1s)"
 lonely="$(lead chat wait "$own" --after "$own-m0" --timeout 1s)"
 check_equal "a chat wait shows only messages that are not yours" \
-    "[$own-m2]
-Cursor: $own-m2, @R (wait for more: ws chat wait $own --after $own-m2)" \
-    "$(echo "$lonely" | sed 's/^\(\[[a-z0-9-]*\]\).*/\1/' | revisionless)"
+    "[$own-m2]" \
+    "$(echo "$lonely" | sed 's/^\(\[[a-z0-9-]*\]\).*/\1/')"
 (sleep 1.5 && peer chat send "$own" "Answered" >/dev/null) &
 sender_pid=$!
 lead chat send "$own" "Asked again" >/dev/null
@@ -827,6 +817,7 @@ check_equal "forum records the user alone" \
     "$(curl -fsS -H "Workstream-API-Version: $api_version" \
         "$main_url/api/posts/$forum_post" | grep -o '"origin":{[^}]*}')"
 forum chat send "$forum_post" "Forum reply" >/dev/null
+forum chat send "$forum_post" "Another forum reply" >/dev/null
 check_equal "the private context never reached the server" "" \
     "$(curl -fsS -H "Workstream-API-Version: $api_version" \
         "$main_url/api/posts/$forum_post/messages?after=0" |
@@ -836,8 +827,8 @@ check "forum help names forum" "  forum add <subject>" \
 check_equal "forum help never suggests ws" "" \
     "$(forum help | grep -E "(^|[ '])ws " || true)"
 check "forum chat continues with forum" \
-    "(wait for more: forum chat wait $forum_post --after $forum_post-m1)" \
-    "$(forum chat recent "$forum_post")"
+    "Next: forum chat read $forum_post --after $forum_post-m1" \
+    "$(forum chat read "$forum_post" --limit 1)"
 check "forum post points at forum chat" \
     "see 'forum chat recent $forum_post'" "$(forum post "$forum_post")"
 check "a forum usage error names forum" "usage: forum post <ref>" \

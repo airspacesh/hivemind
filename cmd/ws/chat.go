@@ -232,8 +232,7 @@ func cmdChatSend(c *client, args []string) error {
 		return uncertainCreate(err, "The message",
 			repeatCommand("chat send", args, p, id))
 	}
-	fmt.Printf("Sent [%s] at %s.\n", message.Ref(),
-		api.FormatRevision(message.Revision))
+	fmt.Printf("Sent [%s].\n", message.Ref())
 	// Without --after a send prints no cursor, since others may have
 	// sent messages between the reader's last read and this one.
 	if !p.has("--after") {
@@ -254,7 +253,8 @@ func cmdChatSend(c *client, args []string) error {
 	page.Messages = slices.DeleteFunc(page.Messages, func(m api.Message) bool {
 		return m.Number <= start
 	})
-	printChatPage(ref, page, fmt.Sprintf("No messages after %s.", cursor))
+	printChatPage(ref, page, api.ChatBound{Number: start},
+		fmt.Sprintf("No messages after %s.", cursor))
 	return nil
 }
 
@@ -281,8 +281,7 @@ func cmdChatEdit(c *client, args []string) error {
 		return uncertainWrite(explainNotOwner(err, ref.Post), "The edit",
 			programName+" chat recent "+ref.Post.String())
 	}
-	fmt.Printf("Edited [%s] at %s.\n", message.Ref(),
-		api.FormatRevision(message.Revision))
+	fmt.Printf("Edited [%s].\n", message.Ref())
 	return nil
 }
 
@@ -309,8 +308,7 @@ func cmdChatDelete(c *client, args []string) error {
 		return uncertainWrite(explainNotOwner(err, ref.Post), "The delete",
 			programName+" chat recent "+ref.Post.String())
 	}
-	fmt.Printf("Deleted [%s] at %s.\n", message.Ref(),
-		api.FormatRevision(message.Revision))
+	fmt.Printf("Deleted [%s].\n", message.Ref())
 	return nil
 }
 
@@ -344,7 +342,7 @@ func cmdChatRecent(c *client, args []string) error {
 			return err
 		}
 		printOverview(overview, t.workspace)
-		printChangeCursor(os.Stdout, t, overview.Revision, "")
+		printChangeCursor(os.Stdout, overview.Revision)
 		return nil
 	}
 
@@ -361,7 +359,8 @@ func cmdChatRecent(c *client, args []string) error {
 		return err
 	}
 	printEarlier("", ref, 0, page.Messages)
-	printChatPage(ref, page, fmt.Sprintf("%s has no messages yet.", ref))
+	printChatPage(ref, page, api.ChatBound{},
+		fmt.Sprintf("%s has no messages yet.", ref))
 	return nil
 }
 
@@ -422,7 +421,7 @@ func cmdChatRead(c *client, args []string) error {
 	if p.has("--after") {
 		empty = fmt.Sprintf("No messages %s.", describeChatAfter(ref, after))
 	}
-	printChatPage(ref, page, empty)
+	printChatPage(ref, page, after, empty)
 	return nil
 }
 
@@ -504,14 +503,13 @@ func cmdChatWait(c *client, args []string) error {
 
 	// Remaining counts the messages the filters leave out too, so a wait
 	// with more to check reads on with another wait, not a count.
-	last := api.MessageRef{Post: ref, Number: page.Cursor}
-	next := chatWaitCommand(last, filterArgs(p))
 	if page.Remaining > 0 {
-		fmt.Printf("Next: %s (more messages to check)\n", next)
+		last := api.MessageRef{Post: ref, Number: page.Cursor}
+		fmt.Printf("Next: %s (more messages to check)\n",
+			chatWaitCommand(last, filterArgs(p)))
 		return nil
 	}
-	fmt.Printf("Cursor: %s, %s (wait for more: %s)\n", last,
-		api.FormatRevision(page.Revision), next)
+	printChatCursor(ref, page, after)
 	return nil
 }
 

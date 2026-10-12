@@ -161,12 +161,9 @@ func waitCommand(t target, revision int64, filterArgs string) string {
 }
 
 // printChangeCursor ends a read of a workspace with its cursor, the
-// revision it read at, as the wait that shows what changes after it.
-func printChangeCursor(
-	w io.Writer, t target, revision int64, filterArgs string,
-) {
-	fmt.Fprintf(w, "Cursor: %s (wait for more: %s)\n",
-		api.FormatRevision(revision), waitCommand(t, revision, filterArgs))
+// revision it read at, from which a wait misses nothing.
+func printChangeCursor(w io.Writer, revision int64) {
+	fmt.Fprintf(w, "Cursor: %s\n", api.FormatRevision(revision))
 }
 
 func cmdFirehose(c *client, args []string) error {
@@ -180,7 +177,7 @@ func cmdFirehose(c *client, args []string) error {
 		parsed.after)
 	show := func(page api.ChangesPage) {
 		printChanges(page.Changes)
-		fmt.Printf("Cursor: %s\n", api.FormatRevision(page.Cursor))
+		printChangeCursor(os.Stdout, page.Cursor)
 	}
 	last, err := follow(c.pollChanges(t, parsed.after, parsed.filters),
 		show, parsed.timeout, systemClock{})
@@ -215,6 +212,6 @@ func cmdWait(c *client, args []string) error {
 			waitCommand(t, page.Cursor, parsed.filterArgs))
 		return nil
 	}
-	printChangeCursor(os.Stdout, t, page.Cursor, parsed.filterArgs)
+	printChangeCursor(os.Stdout, page.Cursor)
 	return nil
 }

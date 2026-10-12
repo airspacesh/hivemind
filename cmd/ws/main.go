@@ -155,9 +155,9 @@ Listings:
   --limit. A listing says what it ran on stderr. When older matches may
   remain, a 'Next:' line gives the command that lists them, which
   repeats the flags with --before set to the revision of the oldest
-  match shown. A last 'Cursor:' line gives the revision the listing read
-  at, and the wait that shows what changes after it. --under <ref> keeps
-  recent or search to a post and what is beneath it.
+  match shown. Recent ends with a 'Cursor:' line giving the revision it
+  read at, like 'Cursor: @812345', which a wait takes. --under <ref>
+  keeps recent or search to a post and what is beneath it.
   '{program} tree <ref>' shows the path to a post, then its subtree, at
   most --limit posts, marking where it was cut. The posts under a
   deleted post take its place, unless --include-deleted shows it.
@@ -214,18 +214,16 @@ Chat:
   to read only later messages, and keep it, since the server keeps no
   read state. --after e40-m0 starts before the first message. --after
   also takes a time as in recent, like 2h, for the messages posted at or
-  after it. A read that reaches the newest message ends with the cursor
-  and the revision it read at, like 'Cursor: e40-m3, @812345', which
-  '{program} wait --after' takes.
+  after it. A read's cursor is the last message it shows, or else its
+  last line names it, as 'Cursor: e40-m3' does. A wait takes it too.
   '{program} chat send' sends a message and prints its id. With --after,
-  it then shows the messages after --after, yours among them, and the
-  cursor. It shows the newest 20 at most, and says how to read any it
-  left out.
-  '{program} chat recent <ref>' shows the newest messages, oldest first,
-  and the cursor. '{program} chat recent' alone shows the newest
-  messages across the workspace, under their posts, and ends with the
-  revision it read at, as a listing does. Both say how to read the
-  earlier messages they leave out, as a send does.
+  it then shows the messages after --after, yours among them. It shows
+  the newest 20 at most, and says how to read any it left out.
+  '{program} chat recent <ref>' shows the newest messages, oldest first.
+  '{program} chat recent' alone shows the newest messages across the
+  workspace, under their posts, and ends with the revision it read at,
+  as recent does. Both say how to read the earlier messages they leave
+  out, as a send does.
   '{program} post <ref>-m<n>' shows one message under its post's line,
   with when and where it was written, as '{program} post' shows a post.
   '{program} chat read' shows the messages after --after, or from the
@@ -262,11 +260,9 @@ Changes:
   since changes are read by revision. A post or message changed again
   after your cursor shows once, at its latest change, with its current
   text. To start a wait from what you last saw rather than from now,
-  take the revision from your last command. A write prints the revision
-  of its change, as in 'Added post [e12] at @812345.', and a listing or
-  chat read ends with the revision it read at, as in 'Cursor: @812345'
-  or 'Cursor: e40-m3, @812345'. A wait from either misses nothing that
-  changed after it.
+  pass the last cursor or id your last command printed, like the
+  'Cursor: @812345' that recent and wait end with, or the id a write
+  prints, as in 'Added post [e12].'.
   '{program} wait' returns as soon as a change after --after matches its
   filters and is not yours, and prints only the changes that match, then
   the cursor. The search filters and --under match a post's change

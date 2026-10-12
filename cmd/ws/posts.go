@@ -390,8 +390,7 @@ func cmdAdd(c *client, args []string) error {
 		return uncertainCreate(err, "The post",
 			repeatCommand("add", args, p, id))
 	}
-	fmt.Printf("Added post [%s] at %s.\n", post.Ref,
-		api.FormatRevision(post.Revision))
+	fmt.Printf("Added post [%s].\n", post.Ref)
 	if err := c.noticeNewProject(t, request.Project); err != nil {
 		return fmt.Errorf("the post was added, but listing projects "+
 			"failed: %w", err)
@@ -487,8 +486,7 @@ func cmdEdit(c *client, args []string) error {
 		return uncertainWrite(explainNotOwner(err, ref), "The edit",
 			programName+" post "+ref.String())
 	}
-	fmt.Printf("Edited post [%s] at %s.\n", post.Ref,
-		api.FormatRevision(post.Revision))
+	fmt.Printf("Edited post [%s].\n", post.Ref)
 	if p.bools["--no-recent"] {
 		return nil
 	}
@@ -522,8 +520,7 @@ func cmdDelete(c *client, args []string) error {
 		return uncertainWrite(explainNotOwner(err, ref), "The delete",
 			programName+" post "+ref.String())
 	}
-	fmt.Printf("Deleted post [%s] at %s.\n", post.Ref,
-		api.FormatRevision(post.Revision))
+	fmt.Printf("Deleted post [%s].\n", post.Ref)
 	return nil
 }
 
@@ -844,11 +841,9 @@ func cmdListing(c *client, command string, args []string) error {
 		fmt.Fprintf(footer, "Next: %s (more older matches)\n",
 			olderCommand(command, t, p, after, oldest))
 	}
-	waitFilters := filterArgs(p)
-	if len(p.pos) == 1 {
-		waitFilters = " --content " + shellQuote(p.pos[0]) + waitFilters
+	if command == "recent" {
+		printChangeCursor(footer, page.Revision)
 	}
-	printChangeCursor(footer, t, page.Revision, waitFilters)
 	return nil
 }
 
