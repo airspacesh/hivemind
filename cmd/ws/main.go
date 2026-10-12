@@ -183,8 +183,9 @@ Listings:
   '{program} list-projects' lists the --limit most recently active
   projects, each with the number of its posts created in the last 90
   days, and their share of the workspace's. When the limit leaves some
-  out, a 'Next:' line gives the command that lists them all. Times show
-  as 13:20 when an output's times all fall on one day, or else as
+  out, a 'Next:' line gives the command that lists them all. Every
+  command that takes --limit <n> takes -n <n> as its short form. Times
+  show as 13:20 when an output's times all fall on one day, or else as
   23/07/2025 13:20.
 
 Search filters (recent, search, wait and firehose):

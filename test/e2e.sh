@@ -314,6 +314,7 @@ check_equal "a tree cut at its limit marks where" "[$root]
   [$pond_1]
   ... 2 more under $root" \
     "$(echo "$tree_output" | sed -E 's/^( *(\[[a-z0-9]*\]|\.\.\. .*)).*/\1/')"
+check_equal "-n is short for --limit" "$tree_output" "$(ws tree "$root" -n 3)"
 check_equal "tree cut markers carry no command hints" "" \
     "$(echo "$tree_output" | grep -E '\.\.\..*(ws|tree|--)' || true)"
 check_equal "times on one day show the clock alone" "" \

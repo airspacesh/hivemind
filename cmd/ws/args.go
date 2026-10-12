@@ -17,14 +17,17 @@ import (
 // hand-rolled instead of using the flag package so flags can appear
 // after positional arguments (`ws add "text" --project x`).
 type flagSpec struct {
-	strs   []string          // flags taking a value
-	bools  []string          // flags taking no value
-	repeat []string          // repeatable flags taking a value
-	alias  map[string]string // short form -> canonical flag
+	strs   []string // flags taking a value
+	bools  []string // flags taking no value
+	repeat []string // repeatable flags taking a value
 	// passUnknown keeps an unknown flag as a positional argument, so
 	// free text that starts with - needs no --.
 	passUnknown bool
 }
+
+// shortForms are the short forms of flags, each accepted wherever its
+// flag is.
+var shortForms = map[string]string{"-n": "--limit"}
 
 type parsedArgs struct {
 	pos     []string
@@ -64,8 +67,9 @@ func parseArgs(args []string, spec flagSpec) (*parsedArgs, error) {
 			value = arg[idx+1:]
 			hasValue = true
 		}
-		if canonical, ok := spec.alias[name]; ok {
-			name = canonical
+		typed := name
+		if long, ok := shortForms[name]; ok {
+			name = long
 		}
 		switch {
 		case slices.Contains(spec.bools, name):
@@ -103,7 +107,7 @@ func parseArgs(args []string, spec flagSpec) (*parsedArgs, error) {
 		case spec.passUnknown:
 			p.pos = append(p.pos, arg)
 		default:
-			return nil, fmt.Errorf("unknown flag: %s", name)
+			return nil, fmt.Errorf("unknown flag: %s", typed)
 		}
 	}
 	return p, nil
@@ -156,7 +160,6 @@ func searchFlagSpec() flagSpec {
 		bools: []string{"--id-only", "--include-superseded",
 			includeDeleted, "--posts-only", "--include-chat"},
 		repeat: searchFilterFlags(),
-		alias:  map[string]string{"-n": "--limit"},
 	}
 }
 
