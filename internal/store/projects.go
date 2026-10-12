@@ -33,7 +33,8 @@ const projectNames = `
 // limit of them, with their posts created in the recentWindow before
 // now. It counts only the posts the reader can read that are not
 // deleted, but a delete is activity. It leaves out a project with no
-// post the reader can read.
+// post the reader can read. Each count takes away the posts private to
+// others, as createPrivateProjectCreatedIndex explains.
 func (s *Store) Projects(
 	ctx context.Context,
 	access Access,
@@ -48,20 +49,21 @@ func (s *Store) Projects(
 	}
 	since := now.Add(-recentWindow)
 	rows, err := s.reads.QueryContext(ctx, projectNames+`
-		SELECT project, latest, recent FROM (
-			SELECT project, (
-				SELECT max(activity_utc) FROM posts
-				WHERE workspace_id = ?1 AND project = names.project
-					AND private_to IN ('', ?3)
-			) AS latest, (
-				SELECT count(*) FROM posts
-				WHERE workspace_id = ?1 AND project = names.project
-					AND created_utc >= ?2 AND NOT deleted
-					AND private_to IN ('', ?3)
-			) AS recent
-			FROM names WHERE project IS NOT NULL
+		SELECT project, (
+			SELECT max(activity_utc) FROM posts
+			WHERE workspace_id = ?1 AND project = names.project
+				AND private_to IN ('', ?3)
+		) AS latest, (
+			SELECT count(*) FROM posts
+			WHERE workspace_id = ?1 AND project = names.project
+				AND created_utc >= ?2 AND NOT deleted
+		) - (
+			SELECT count(*) FROM posts
+			WHERE workspace_id = ?1 AND project = names.project
+				AND created_utc >= ?2 AND NOT deleted
+				AND private_to <> '' AND private_to <> ?3
 		)
-		WHERE latest IS NOT NULL
+		FROM names WHERE project IS NOT NULL
 		ORDER BY latest DESC, project`, workspace, formatTime(since),
 		access.user,
 	)
@@ -75,14 +77,20 @@ func (s *Store) Projects(
 	}
 	for rows.Next() {
 		var project api.Project
-		var latest string
+		var latest sql.NullString
 		if err := rows.Scan(
 			&project.Name, &latest, &project.RecentPosts,
 		); err != nil {
 			return api.ProjectsResponse{}, fmt.Errorf(
 				"listing projects: %w", err)
 		}
-		if project.Latest, err = parseTime(latest); err != nil {
+		// A project has no latest activity when the reader can read none
+		// of its posts. Filtering on it in the query would have SQLite
+		// read each project's latest activity twice.
+		if !latest.Valid {
+			continue
+		}
+		if project.Latest, err = parseTime(latest.String); err != nil {
 			return api.ProjectsResponse{}, err
 		}
 		response.Count++
@@ -98,8 +106,8 @@ func (s *Store) Projects(
 }
 
 // Project reads one project of a workspace as Projects lists it, adding
-// its count of every post that is not deleted. It reads only that
-// project's posts.
+// its count of every post that is not deleted and the reader can read.
+// It reads only that project's posts.
 func (s *Store) Project(
 	ctx context.Context,
 	access Access,
@@ -111,19 +119,27 @@ func (s *Store) Project(
 	var latest sql.NullString
 	var posts, recent int
 	if err := s.reads.QueryRowContext(ctx, `
-		SELECT max(activity_utc), (
+		SELECT (
+			SELECT max(activity_utc) FROM posts
+			WHERE workspace_id = ?1 AND project = ?2
+				AND private_to IN ('', ?4)
+		), (
 			SELECT count(*) FROM posts
 			WHERE workspace_id = ?1 AND project = ?2 AND NOT deleted
-				AND private_to IN ('', ?4)
+		) - (
+			SELECT count(*) FROM posts
+			WHERE workspace_id = ?1 AND project = ?2 AND NOT deleted
+				AND private_to <> '' AND private_to <> ?4
 		), (
 			SELECT count(*) FROM posts
 			WHERE workspace_id = ?1 AND project = ?2
 				AND created_utc >= ?3 AND NOT deleted
-				AND private_to IN ('', ?4)
-		)
-		FROM posts
-		WHERE workspace_id = ?1 AND project = ?2
-			AND private_to IN ('', ?4)`,
+		) - (
+			SELECT count(*) FROM posts
+			WHERE workspace_id = ?1 AND project = ?2
+				AND created_utc >= ?3 AND NOT deleted
+				AND private_to <> '' AND private_to <> ?4
+		)`,
 		workspace, name, formatTime(since), access.user,
 	).Scan(&latest, &posts, &recent); err != nil {
 		return api.ProjectsResponse{}, fmt.Errorf(

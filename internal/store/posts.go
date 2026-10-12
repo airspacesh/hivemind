@@ -485,28 +485,28 @@ func (v view) setPrivateTo(
 func (v view) writeVisibility(
 	ctx context.Context, key Key, state postState, private *bool,
 ) (bool, error) {
-	made := state.private
+	isPrivate := state.private
 	if private != nil {
-		made = *private
+		isPrivate = *private
 	}
 	privateTo := state.owner
-	if !made {
+	if !isPrivate {
 		var err error
 		if privateTo, err = v.parentPrivateTo(ctx, key); err != nil {
 			return false, err
 		}
 	}
 
-	if made != state.private {
+	if isPrivate != state.private {
 		if _, err := v.tx.ExecContext(ctx, `
 			UPDATE posts SET private = ? WHERE workspace_id = ? AND id = ?`,
-			made, key.Workspace, key.ID,
+			isPrivate, key.Workspace, key.ID,
 		); err != nil {
 			return false, fmt.Errorf("making post private: %w", err)
 		}
 	}
 	if privateTo == state.privateTo {
-		return made != state.private, nil
+		return isPrivate != state.private, nil
 	}
 	if privateTo != "" {
 		shared, err := v.othersPostedUnder(ctx, key, privateTo)

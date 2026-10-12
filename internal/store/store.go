@@ -179,6 +179,17 @@ const createProjectCreatedIndex = `
 CREATE INDEX posts_project_created
 ON posts(workspace_id, project, created_utc, deleted)`
 
+// createPrivateProjectCreatedIndex holds createProjectCreatedIndex's
+// columns for the private posts alone, so a count of a project's posts
+// that a reader can read takes away those private to others by reading
+// only the private posts. Checking every post's private_to in
+// createProjectCreatedIndex instead would read a column more for every
+// post counted.
+const createPrivateProjectCreatedIndex = `
+CREATE INDEX posts_private_project_created
+ON posts(workspace_id, project, created_utc, deleted, private_to)
+WHERE private_to <> ''`
+
 // createLinks defines named links between posts, which may join
 // workspaces. Each link is stored once, on its source, and
 // post_links_target derives the reverse direction. A source has at most
@@ -369,7 +380,8 @@ var schemaSteps = []schemaStep{
 			startRevisionCounter, createPosts, createMetadata,
 			createMetadataKeyIndex, createActivityIndex,
 			createRevisionIndex, createProjectIndex,
-			createProjectCreatedIndex, createOriginUserIndex,
+			createProjectCreatedIndex, createPrivateProjectCreatedIndex,
+			createOriginUserIndex,
 			createPostRequestIndex, createLinks,
 			createLinkTargetIndex, createOneParentIndex, createMessages,
 			createMessagePostedIndex, createMessageRevisionIndex, createMessageOriginUserIndex,
@@ -391,6 +403,8 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createProjectIndex)},
 			{"index", "posts_project_created", "posts",
 				normalizeSchemaSQL(createProjectCreatedIndex)},
+			{"index", "posts_private_project_created", "posts",
+				normalizeSchemaSQL(createPrivateProjectCreatedIndex)},
 			{"index", "post_links_one_parent", "post_links",
 				normalizeSchemaSQL(createOneParentIndex)},
 			{"index", "post_links_target", "post_links",

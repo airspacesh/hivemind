@@ -206,41 +206,97 @@ func (v view) writeLinks(
 	return nil
 }
 
+// unreadable finds which of the given posts the reader cannot read. It
+// reads nothing when there are none to check.
+func (v view) unreadable(
+	ctx context.Context, keys []Key,
+) (map[Key]bool, error) {
+	hidden := map[Key]bool{}
+	if len(keys) == 0 {
+		return hidden, nil
+	}
+	packed := make([]int64, len(keys))
+	for i, key := range keys {
+		packed[i] = key.Workspace<<32 | key.ID
+	}
+	rows, err := v.tx.QueryContext(ctx, `
+		SELECT e.workspace_id, e.id
+		FROM json_each(?) AS checked CROSS JOIN posts AS e
+			ON e.workspace_id = checked.value >> 32
+			AND e.id = checked.value & 0xffffffff
+		WHERE NOT `+visibleClause("e"), idsJSON(packed), v.access.user)
+	if err != nil {
+		return nil, fmt.Errorf("checking linked posts: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key Key
+		if err := rows.Scan(&key.Workspace, &key.ID); err != nil {
+			return nil, fmt.Errorf("checking linked posts: %w", err)
+		}
+		hidden[key] = true
+	}
+	return hidden, rows.Err()
+}
+
 // readLinks reads (name, workspace, id) rows into links, leaving out
-// posts in workspaces the config no longer names, which have no ref.
-// The query leaves out the posts the reader cannot read.
+// posts in workspaces the config no longer names, which have no ref,
+// and posts the reader cannot read. The query reads links from a post
+// the reader can read when fromReadable is set. That post's parent is
+// readable too, since everything under a private post is private to
+// the same user, so the usual post, whose one link is to its parent,
+// needs no check. Joining the posts in the query instead would cost
+// every read the time SQLite takes to plan the join, which this
+// avoids for the many small reads of a listing.
 func (v view) readLinks(
-	ctx context.Context, query string, args ...any,
+	ctx context.Context, fromReadable bool, query string, args ...any,
 ) ([]api.Link, error) {
 	rows, err := v.tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var links []api.Link
+	type linkRow struct {
+		name string
+		key  Key
+	}
+	var read []linkRow
+	var unchecked []Key
 	for rows.Next() {
-		var name string
-		var key Key
-		if err := rows.Scan(&name, &key.Workspace, &key.ID); err != nil {
+		var row linkRow
+		if err := rows.Scan(&row.name, &row.key.Workspace,
+			&row.key.ID); err != nil {
 			return nil, err
 		}
-		if ref, ok := v.store.ref(key); ok {
-			links = append(links, api.Link{Name: name, Ref: ref})
+		read = append(read, row)
+		if !(fromReadable && row.name == api.ParentLink) {
+			unchecked = append(unchecked, row.key)
 		}
 	}
-	return links, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	hidden, err := v.unreadable(ctx, unchecked)
+	if err != nil {
+		return nil, err
+	}
+
+	var links []api.Link
+	for _, row := range read {
+		ref, ok := v.store.ref(row.key)
+		if ok && !hidden[row.key] {
+			links = append(links, api.Link{Name: row.name, Ref: ref})
+		}
+	}
+	return links, nil
 }
 
 func (v view) linksFrom(ctx context.Context, key Key) ([]api.Link, error) {
-	links, err := v.readLinks(ctx, `
-		SELECT l.name, l.target_workspace_id, l.target_id
-		FROM post_links AS l CROSS JOIN posts AS other
-			ON other.workspace_id = l.target_workspace_id
-			AND other.id = l.target_id
-		WHERE l.source_workspace_id = ? AND l.source_id = ?
-			AND `+visibleClause("other")+`
-		ORDER BY l.name, l.target_workspace_id, l.target_id`,
-		key.Workspace, key.ID, v.access.user,
+	links, err := v.readLinks(ctx, true, `
+		SELECT name, target_workspace_id, target_id FROM post_links
+		WHERE source_workspace_id = ? AND source_id = ?
+		ORDER BY name, target_workspace_id, target_id`,
+		key.Workspace, key.ID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("reading links: %w", err)
@@ -249,15 +305,11 @@ func (v view) linksFrom(ctx context.Context, key Key) ([]api.Link, error) {
 }
 
 func (v view) linksTo(ctx context.Context, key Key) ([]api.Link, error) {
-	links, err := v.readLinks(ctx, `
-		SELECT l.name, l.source_workspace_id, l.source_id
-		FROM post_links AS l CROSS JOIN posts AS other
-			ON other.workspace_id = l.source_workspace_id
-			AND other.id = l.source_id
-		WHERE l.target_workspace_id = ? AND l.target_id = ?
-			AND `+visibleClause("other")+`
-		ORDER BY l.name, l.source_workspace_id, l.source_id`,
-		key.Workspace, key.ID, v.access.user,
+	links, err := v.readLinks(ctx, false, `
+		SELECT name, source_workspace_id, source_id FROM post_links
+		WHERE target_workspace_id = ? AND target_id = ?
+		ORDER BY name, source_workspace_id, source_id`,
+		key.Workspace, key.ID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("reading backlinks: %w", err)
@@ -268,15 +320,11 @@ func (v view) linksTo(ctx context.Context, key Key) ([]api.Link, error) {
 func (v view) supersedersOf(
 	ctx context.Context, key Key,
 ) ([]api.Ref, error) {
-	links, err := v.readLinks(ctx, `
-		SELECT l.name, l.source_workspace_id, l.source_id
-		FROM post_links AS l CROSS JOIN posts AS other
-			ON other.workspace_id = l.source_workspace_id
-			AND other.id = l.source_id
-		WHERE l.target_workspace_id = ? AND l.target_id = ? AND l.name = ?
-			AND `+visibleClause("other")+`
-		ORDER BY l.source_workspace_id, l.source_id`,
-		key.Workspace, key.ID, api.SupersedesLink, v.access.user,
+	links, err := v.readLinks(ctx, false, `
+		SELECT name, source_workspace_id, source_id FROM post_links
+		WHERE target_workspace_id = ? AND target_id = ? AND name = ?
+		ORDER BY source_workspace_id, source_id`,
+		key.Workspace, key.ID, api.SupersedesLink,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("reading superseding posts: %w", err)
