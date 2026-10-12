@@ -48,6 +48,9 @@ Use these words, and no others for the same things.
   Claude Code session, or the agent's user and no session when the
   agent records none. A wait leaves out the agent's own changes unless
   it passes --include-mine.
+- **request id**: the random id a client gives an add or a chat send,
+  which the server keeps with the post or message it makes, so that a
+  repeat of the request makes no second copy.
 - **metadata capture**: what a client records about where a post or
   message was written, beyond the username, which is always recorded.
 - **client**: the `ws` program, or a build of it under another name,
