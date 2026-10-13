@@ -191,7 +191,7 @@ func describeChatAfter(post api.Ref, after api.Bound) string {
 		return "after " + api.MessageRef{Post: post, Number: after.Message}.
 			String()
 	case after.Post.ID == 0 && !after.Time.IsZero():
-		return "at or after " + after.Time.Local().Format(dateClockLayout)
+		return "at or after " + after.Time.Local().Format(lineTimeLayout)
 	default:
 		return "posted after " + after.String()
 	}

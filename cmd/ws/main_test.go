@@ -332,10 +332,10 @@ func TestListProjectsShowsSharesOfRecentPosts(t *testing.T) {
 
 	got := ws(t, config, "list-projects", "--limit", "4")
 	want := `Projects by latest activity, with posts from the last 90 days:
-duck-pond   10/10/2026 20:41   1,204 posts   38%
-heron       09/10/2026 14:10       4 posts   <1%
-nest        08/10/2026 09:15       1 post    <1%
-old-lake    01/05/2026 10:00       0 posts    0%
+duck-pond   2026-10-10 20:41   1,204 posts   38%
+heron       2026-10-09 14:10       4 posts   <1%
+nest        2026-10-08 09:15       1 post    <1%
+old-lake    2026-05-01 10:00       0 posts    0%
 Next: ws list-projects --limit 6 --workspace general (2 more projects)
 `
 	if !got.ok || got.stdout != want {
@@ -438,9 +438,10 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
 	got := ws(t, config, "chat", "recent")
-	want := "[e1] 05:20 heron: Why?\n" +
+	want := "[e1] 2026-10-09 05:20 heron: Why?\n" +
 		"  ... 6 earlier (ws chat read e1 --after e1-m0)\n" +
-		"  [e1-m7] 05:20 duck: quack\n  [e1-m8] 05:20 duck: quack\n" +
+		"  [e1-m7] 2026-10-09 05:20 duck: quack\n" +
+		"  [e1-m8] 2026-10-09 05:20 duck: quack\n" +
 		"Cursor: @31\n"
 	if !got.ok || got.stdout != want {
 		t.Fatalf("overview =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
@@ -496,8 +497,9 @@ func TestSendAfterShowsMessagesThatRaceIt(t *testing.T) {
 	config := sendAfterServer(t, 3, 4)
 	got := ws(t, config, "chat", "send", "e1", "quack", "--after", "e1-m1")
 	want := "Sent [e1-m3].\n" +
-		"[e1-m2] 05:20 heron: quack\n[e1-m3] 05:20 duck: quack\n" +
-		"[e1-m4] 05:20 heron: quack\n"
+		"[e1-m2] 2026-10-09 05:20 heron: quack\n" +
+		"[e1-m3] 2026-10-09 05:20 duck: quack\n" +
+		"[e1-m4] 2026-10-09 05:20 heron: quack\n"
 	if !got.ok || got.stdout != want {
 		t.Fatalf("send =\n%s\nwant\n%s (%+v)", got.stdout, want, got)
 	}
@@ -515,12 +517,12 @@ func TestSendAfterLeavesOutOlderMessages(t *testing.T) {
 	}
 	want := []string{"Sent [e1-m24].",
 		"... 4 earlier (ws chat read e1 --after e1-m1)",
-		"[e1-m6] 05:20 heron: quack"}
+		"[e1-m6] 2026-10-09 05:20 heron: quack"}
 	if !slices.Equal(lines[:3], want) {
 		t.Fatalf("send began\n%s\nwant\n%s", strings.Join(lines[:3], "\n"),
 			strings.Join(want, "\n"))
 	}
-	if end := "[e1-m25] 05:20 heron: quack"; lines[21] != end {
+	if end := "[e1-m25] 2026-10-09 05:20 heron: quack"; lines[21] != end {
 		t.Fatalf("send ended %q, want %q", lines[21], end)
 	}
 }
@@ -588,11 +590,11 @@ func TestListingShowsAMatchALine(t *testing.T) {
 
 	got := ws(t, config, "recent", "-n", "4", "--project", "ai",
 		"--after", "@12")
-	want := `[f21] 08:59 ruth: Fixture rules (4 new messages)
-[f6-m4] 08:58 lena in f4.f5.f6 (edited): two
+	want := `[f21] 2026-10-09 08:59 ruth: Fixture rules (4 new messages)
+[f6-m4] 2026-10-09 08:58 lena in f4.f5.f6 (edited): two
     lines
-[f7] 08:40 omar in f4 (deleted) (1 new message)
-[f6-m2] 08:38 ines in f4.f5.f6 (deleted)
+[f7] 2026-10-09 08:40 omar in f4 (deleted) (1 new message)
+[f6-m2] 2026-10-09 08:38 ines in f4.f5.f6 (deleted)
 Next: ws recent --before @81 --workspace general --after @12 --limit 4 --project ai (more older matches)
 Cursor: @93
 `
@@ -1052,36 +1054,18 @@ func listing(times ...time.Time) http.HandlerFunc {
 	}
 }
 
-func TestTimesShowDatesOnlyWhenDaysDiffer(t *testing.T) {
-	utcPlus8 := []string{"TZ=Asia/Singapore"}
-	tests := map[string]struct {
-		times []time.Time
-		want  []string
-	}{
-		"one local day": {[]time.Time{
-			time.Date(2025, 7, 23, 1, 0, 0, 0, time.UTC),
-			time.Date(2025, 7, 23, 15, 59, 0, 0, time.UTC),
-		}, []string{"[e1] 09:00: Duck", "[e2] 23:59: Duck"}},
-		// One UTC day, but the second falls on the next day at UTC+8.
-		"two local days": {[]time.Time{
-			time.Date(2025, 7, 23, 1, 0, 0, 0, time.UTC),
-			time.Date(2025, 7, 23, 16, 0, 0, 0, time.UTC),
-		}, []string{"[e1] 23/07/2025 09:00: Duck",
-			"[e2] 24/07/2025 00:00: Duck"}},
-	}
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			server := newFakeServer(t, listing(test.times...))
-			config := writeConfig(t, "workspaces:\n  general:\n    server: "+
-				server.URL+"\n", 0o600)
-			got := runBinary(t, wsBinary, append(utcPlus8,
-				"WORKSTREAM_CONFIG="+config), "search")
-			lines := strings.Split(strings.TrimSpace(got.stdout), "\n")
-			if strings.Join(lines, "\n") != strings.Join(test.want, "\n") {
-				t.Errorf("got\n%s\nwant\n%s", got.stdout,
-					strings.Join(test.want, "\n"))
-			}
-		})
+func TestTimesShowTheLocalDate(t *testing.T) {
+	// One UTC day, but the second falls on the next day at UTC+8.
+	server := newFakeServer(t, listing(
+		time.Date(2025, 7, 23, 1, 0, 0, 0, time.UTC),
+		time.Date(2025, 7, 23, 16, 0, 0, 0, time.UTC)))
+	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
+		server.URL+"\n", 0o600)
+	got := runBinary(t, wsBinary, []string{"TZ=Asia/Singapore",
+		"WORKSTREAM_CONFIG=" + config}, "search")
+	want := "[e1] 2025-07-23 09:00: Duck\n[e2] 2025-07-24 00:00: Duck"
+	if strings.TrimSpace(got.stdout) != want {
+		t.Errorf("got\n%s\nwant\n%s", got.stdout, want)
 	}
 }
 
@@ -1251,9 +1235,9 @@ func TestChangesShowEachAtItsLatestChange(t *testing.T) {
 	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
 	got := ws(t, config, "wait", "--after", "@3")
-	want := "[e1] 05:30 duck: Pond\n" +
-		"[e1-m2] 05:41 duck in e1 (edited): quack\n" +
-		"[e1-m3] 05:45 duck in e1 (deleted)\n"
+	want := "[e1] 2026-10-09 05:30 duck: Pond\n" +
+		"[e1-m2] 2026-10-09 05:41 duck in e1 (edited): quack\n" +
+		"[e1-m3] 2026-10-09 05:45 duck in e1 (deleted)\n"
 	if !got.ok || !strings.HasPrefix(got.stdout, want) {
 		t.Fatalf("wait =\n%s\nwant it to begin\n%s (%+v)", got.stdout,
 			want, got)

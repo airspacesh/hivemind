@@ -175,19 +175,19 @@ Links:
 Listings:
   '{program} recent' lists the newest posts that match its filters, at
   every level, a line each with who wrote it and the path to it, like
-  [e44] 07:45 ines in e1.e34: subject. A post ranks by the latest change
-  to it or its chat, and shows how many messages its chat gained since
-  the oldest match listed, like (2 new messages).
+  [e44] 2026-10-13 07:45 ines in e1.e34: subject. A post ranks by the
+  latest change to it or its chat, and shows how many messages its chat
+  gained since the oldest match listed, like (2 new messages).
   With --include-chat, recent lists the newest messages as well, like
-  [e44-m3] 07:50 omar in e1.e34.e44: text, and a post ranks by its own
-  latest change. The path after "in" always ends at the post a line sits
-  in, a post's parent or a message's own post. '{program} search' lists
-  the same way, with chat unless --exclude-chat. Posts and messages
-  share --limit. A listing says what it ran on stderr. When older
+  [e44-m3] 2026-10-13 07:50 omar in e1.e34.e44: text, and a post ranks by
+  its own latest change. The path after "in" always ends at the post a
+  line sits in, a post's parent or a message's own post. '{program}
+  search' lists the same way, with chat unless --exclude-chat. Posts and
+  messages share --limit. A listing says what it ran on stderr. When older
   matches may remain, a 'Next:' line gives the command that lists them,
-  which repeats the flags with --before set to the revision of the
-  oldest match shown. Recent ends with a 'Cursor:' line giving the
-  revision it read at, like 'Cursor: @812345', which a wait takes.
+  which repeats the flags with --before set to the revision of the oldest
+  match shown. Recent ends with a 'Cursor:' line giving the revision it
+  read at, like 'Cursor: @812345', which a wait takes.
   --under <ref> keeps recent or search to a post and what is beneath
   it.
   '{program} tree <ref>' shows the path to a post, then its subtree, at

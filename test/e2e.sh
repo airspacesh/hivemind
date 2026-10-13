@@ -149,7 +149,7 @@ cursor_of() { sed -n 's/^Cursor: \(@[0-9]*\)$/\1/p'; }
 # untimed drops the times from listings, which differ from run to run,
 # and writes an exact time as T and a revision as @R.
 untimed() {
-    sed -E 's# ([0-9]{2}/[0-9]{2}/[0-9]{4} )?[0-9]{2}:[0-9]{2}##g
+    sed -E 's# [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}##g
         s#[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z#T#g
         s#@[0-9]+#@R#g'
 }
@@ -317,8 +317,6 @@ check_equal "a tree cut at its limit marks where" "[$root]
 check_equal "-n is short for --limit" "$tree_output" "$(ws tree "$root" -n 3)"
 check_equal "tree cut markers carry no command hints" "" \
     "$(echo "$tree_output" | grep -E '\.\.\..*(ws|tree|--)' || true)"
-check_equal "times on one day show the clock alone" "" \
-    "$(echo "$tree_output" | grep -E '[0-9]{2}/[0-9]{2}/[0-9]{4}' || true)"
 
 # Two workspaces on one server count their posts apart, and an id picks
 # its workspace.
@@ -425,7 +423,7 @@ check_equal "message shows a message under its post's line" \
     "[$chat] $(id -un): Chat thread
   [$chat-m1] $(id -un) (edited): First, edited" \
     "$(echo "$message_detail" | head -2 |
-        sed -E 's/ [0-9]{2}:[0-9]{2}( |$)/\1/')"
+        sed -E 's/ [0-9-]{10} [0-9]{2}:[0-9]{2}( |$)/\1/')"
 check "message shows when a message was edited" "Modified: " \
     "$message_detail"
 check "message says a missing message is missing" \
@@ -435,7 +433,8 @@ check_equal "no read returns the old text" "" \
 overview="$(ws chat recent)"
 check_equal "the overview lists the post with the newest message last" \
     "[$chat] $(id -un): Chat thread" \
-    "$(echo "$overview" | grep '^\[' | tail -1 | sed -E 's/ [0-9]{2}:[0-9]{2}//')"
+    "$(echo "$overview" | grep '^\[' | tail -1 |
+        sed -E 's/ [0-9-]{10} [0-9]{2}:[0-9]{2}//')"
 # Read to 1, a peer sends 2, you send 3 with --after at 1. The send shows
 # the peer's message and yours, and a wait from its cursor waits for
 # the next message rather than returning yours.
@@ -660,7 +659,8 @@ check "a deleted post shows as deleted" "[$gadwall] $(id -un) (deleted)" \
     "$(echo "$gadwall_post" | untimed)"
 check "message shows a deleted message as deleted" \
     "  [$gadwall-m2] $(id -un) (deleted)" \
-    "$(ws message "$gadwall-m2" | sed -E 's/ [0-9]{2}:[0-9]{2} / /')"
+    "$(ws message "$gadwall-m2" |
+        sed -E 's/ [0-9-]{10} [0-9]{2}:[0-9]{2} / /')"
 check "a deleted post shows when it was deleted" "Deleted: " \
     "$gadwall_post"
 check_equal "a deleted post keeps no body or metadata" "" \
@@ -669,7 +669,7 @@ check_equal "a deleted post keeps no body or metadata" "" \
 check "a deleted post keeps its origin" "From: $(id -un)@" "$gadwall_post"
 check "a child's path shows its deleted parent" "> $gadwall (deleted)" \
     "$(ws post "$egg")"
-untimed() { sed -E 's/\] ([0-9/]+ )?[0-9]{2}:[0-9]{2}:? /] /'; }
+untimed() { sed -E 's/\] [0-9-]{10} [0-9]{2}:[0-9]{2}:? /] /'; }
 check_equal "a tree keeps a deleted post above the posts under it" \
     "[$reply] $(id -un): Reply under heron
   [$gadwall] $(id -un) (deleted)
