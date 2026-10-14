@@ -533,6 +533,8 @@ func TestExcludedOriginKeysMatchExactly(t *testing.T) {
 	}
 }
 
+// Changes under a post keep to its subtree, and changes not under a
+// post leave out its subtree and the chats in it.
 func TestChangesUnderAPostKeepToItsSubtree(t *testing.T) {
 	store := openTestStore(t)
 	root := mustAdd(t, store, "root", "", nil)
@@ -545,19 +547,31 @@ func TestChangesUnderAPostKeepToItsSubtree(t *testing.T) {
 	mustPostMessage(t, store, other.Ref, "aside")
 
 	for _, test := range []struct {
-		under api.Ref
-		want  []string
+		under    api.Ref
+		notUnder []api.Ref
+		want     []string
 	}{
-		{root.Ref, []string{"e1", "e2", "e3", "e3-m1"}},
-		{child.Ref, []string{"e2", "e3", "e3-m1"}},
-		{other.Ref, []string{"e4", "e4-m1"}},
+		{root.Ref, nil, []string{"e1", "e2", "e3", "e3-m1"}},
+		{child.Ref, nil, []string{"e2", "e3", "e3-m1"}},
+		{other.Ref, nil, []string{"e4", "e4-m1"}},
+		{api.Ref{}, []api.Ref{child.Ref}, []string{"e1", "e4", "e4-m1"}},
+		{api.Ref{}, []api.Ref{child.Ref, other.Ref}, []string{"e1"}},
+		{root.Ref, []api.Ref{child.Ref}, []string{"e1"}},
+		{root.Ref, []api.Ref{grandchild.Ref}, []string{"e1", "e2"}},
 	} {
-		under := store.mustKey(test.under)
-		got, _ := readAllMatching(t, store, 0,
-			Filter{Items: api.PostsAndChat, Under: &under}, nil, 10,
+		filter := Filter{Items: api.PostsAndChat}
+		if test.under.ID != 0 {
+			under := store.mustKey(test.under)
+			filter.Under = &under
+		}
+		for _, ref := range test.notUnder {
+			filter.NotUnder = append(filter.NotUnder, store.mustKey(ref))
+		}
+		got, _ := readAllMatching(t, store, 0, filter, nil, 10,
 			revisionsPerRead)
 		if !reflect.DeepEqual(got, test.want) {
-			t.Fatalf("under %s read %v, want %v", test.under, got, test.want)
+			t.Fatalf("under %s and not under %v read %v, want %v",
+				test.under, test.notUnder, got, test.want)
 		}
 	}
 }

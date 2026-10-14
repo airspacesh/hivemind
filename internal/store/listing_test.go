@@ -285,6 +285,7 @@ type listingCase struct {
 	span                   timeSpan
 	revisions              RevisionSpan
 	under                  int64
+	notUnder               []int64
 	includeSuperseded      bool
 	includeDeleted         bool
 	items                  api.Items
@@ -320,6 +321,9 @@ func (c listingCase) filter(
 	if c.under != 0 {
 		filter.Under = &Key{workspace, c.under}
 	}
+	for _, id := range c.notUnder {
+		filter.NotUnder = append(filter.NotUnder, Key{workspace, id})
+	}
 	return filter
 }
 
@@ -344,6 +348,14 @@ func referenceListing(
 		}
 		return c.under == 0
 	}
+	notUnder := func(id int64) bool {
+		for ; id != 0; id = posts[id].parent {
+			if slices.Contains(c.notUnder, id) {
+				return false
+			}
+		}
+		return true
+	}
 	holds := func(e forestPost, keyPattern, valuePattern string) bool {
 		for key, value := range e.metadata {
 			keyMatched, _ := path.Match(keyPattern, key)
@@ -359,7 +371,8 @@ func referenceListing(
 			(c.key == "" || holds(e, c.key, "*")) &&
 			(c.noKey == "" || !holds(e, c.noKey, "*")) &&
 			(c.metaKey == "" || holds(e, c.metaKey, c.metaValue)) &&
-			(c.includeSuperseded || !e.superseded) && under(e.id)
+			(c.includeSuperseded || !e.superseded) && under(e.id) &&
+			notUnder(e.id)
 	}
 	matched := func(text, user string) bool {
 		return (c.user == "" || user == c.user) &&
@@ -536,18 +549,43 @@ func TestListingMatchesTheReference(t *testing.T) {
 		posts, messages := readForest(t, store, workspace)
 		// A listing under a top-level post, and under a deleted post
 		// with posts under it, which it still lists.
-		var unders []int64
+		type cut struct {
+			under    int64
+			notUnder []int64
+		}
+		cuts := []cut{{}}
 		for id, e := range posts {
 			if e.parent == 0 {
-				unders = append(unders, id)
+				cuts = append(cuts, cut{under: id})
 				break
 			}
 		}
+		var deleted int64
 		for _, e := range posts {
 			if e.parent != 0 && posts[e.parent].deleted {
-				unders = append(unders, e.parent)
+				deleted = e.parent
+				cuts = append(cuts, cut{under: deleted})
 				break
 			}
+		}
+		// Listings that leave out a post with a grandchild, inside its
+		// top-level post and alongside the deleted post.
+		for _, e := range posts {
+			parent := posts[e.parent]
+			if e.parent == 0 || parent.parent == 0 {
+				continue
+			}
+			top := parent.parent
+			for posts[top].parent != 0 {
+				top = posts[top].parent
+			}
+			cuts = append(cuts,
+				cut{under: top, notUnder: []int64{e.parent}},
+				cut{notUnder: []int64{e.parent, deleted}})
+			break
+		}
+		if len(cuts) != 5 {
+			t.Fatalf("seed %d made too few subtrees to list", seed)
 		}
 		latest := latestRevision(t, store)
 		middle := RevisionSpan{After: latest / 4, Before: latest * 3 / 4}
@@ -561,11 +599,18 @@ func TestListingMatchesTheReference(t *testing.T) {
 			{metaKey: "jira*", metaValue: "proj-9"},
 			{project: "c", metaKey: "jira", metaValue: "proj-*"},
 		} {
-			for _, under := range append([]int64{0}, unders...) {
-				for _, span := range spans {
+			for _, k := range cuts {
+				// One span covers the cuts that leave a subtree out, to
+				// keep the test short.
+				cutSpans := spans
+				if len(k.notUnder) != 0 {
+					cutSpans = spans[:1]
+				}
+				for _, span := range cutSpans {
 					for flags := range 6 {
 						c := base
-						c.under, c.span = under, span
+						c.under, c.notUnder, c.span = k.under,
+							k.notUnder, span
 						c.includeSuperseded = flags%2 != 0
 						c.items = []api.Items{api.PostsOnly,
 							api.ChatOnly, api.PostsAndChat}[flags/2]

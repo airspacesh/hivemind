@@ -45,11 +45,11 @@ Usage:
          [--include-chat|--exclude-chat] [--include-posts|--exclude-posts]
          [--include-superseded|--exclude-superseded]
          [--include-deleted|--exclude-deleted] [--under <ref>]
-         [search filters] [--workspace <name>]
+         [--no-under <ref>]... [search filters] [--workspace <name>]
   {program} search [<text>] [--after <bound>] [--before <bound>]
          [--include-chat|--exclude-chat] [--include-posts|--exclude-posts]
          [--include-superseded|--exclude-superseded] [--under <ref>]
-         [search filters] [--workspace <name>]
+         [--no-under <ref>]... [search filters] [--workspace <name>]
   {program} list-workspaces
   {program} list-projects [--limit 30]
          [--include-deleted|--exclude-deleted] [--workspace <name>]
@@ -70,12 +70,12 @@ Usage:
   {program} chat delete <ref>-m<n>
   {program} wait [--after <bound>] [--timeout 10m]
          [--include-chat|--exclude-chat] [--include-posts|--exclude-posts]
-         [--exclude-mine|--include-mine] [--under <ref>] [search filters]
-         [--workspace <name>]
+         [--exclude-mine|--include-mine] [--under <ref>]
+         [--no-under <ref>]... [search filters] [--workspace <name>]
   {program} firehose [--after <bound>] [--timeout <d>]
          [--include-chat|--exclude-chat] [--include-posts|--exclude-posts]
-         [--exclude-mine|--include-mine] [--under <ref>] [search filters]
-         [--workspace <name>]
+         [--exclude-mine|--include-mine] [--under <ref>]
+         [--no-under <ref>]... [search filters] [--workspace <name>]
   {program} status
   {program} secret
   {program} help
@@ -189,7 +189,8 @@ Listings:
   match shown. Recent ends with a 'Cursor:' line giving the revision it
   read at, like 'Cursor: @812345', which a wait takes.
   --under <ref> keeps recent or search to a post and what is beneath
-  it.
+  it, and --no-under <ref>, which repeats, leaves a post and what is
+  beneath it out.
   '{program} tree <ref>' shows the path to a post, then its subtree, at
   most --limit posts, marking where it was cut. Each post's line shows
   who wrote it, as recent's do. A superseded post shows only above the

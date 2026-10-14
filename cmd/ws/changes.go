@@ -94,7 +94,7 @@ func (c *client) parseChangesArgs(
 	p, err := parseArgs(args, flagSpec{
 		strs:    []string{"--after", "--timeout", "--workspace", "--under"},
 		toggles: append([]toggle{mineToggle}, itemToggles...),
-		repeat:  searchFilterFlags(),
+		repeat:  append(searchFilterFlags(), "--no-under"),
 	})
 	if err != nil {
 		return changesArgs{}, err
@@ -105,7 +105,7 @@ func (c *client) parseChangesArgs(
 			"[--include-chat|--exclude-chat] " +
 			"[--include-posts|--exclude-posts] " +
 			"[--exclude-mine|--include-mine] [--under <ref>] " +
-			"[search filters] [--workspace <name>]")
+			"[--no-under <ref>]... [search filters] [--workspace <name>]")
 	}
 	parsed := changesArgs{filterArgs: filterArgs(p)}
 	if p.has("--after") {

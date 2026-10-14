@@ -55,12 +55,8 @@ func (h *handler) changes(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if values := query["under"]; len(values) != 0 {
-		under, ok := h.postKey(w, access, values[0])
-		if !ok {
-			return
-		}
-		filter.Under = &under
+	if !h.readSubtrees(w, access, query, &filter) {
+		return
 	}
 
 	var since int64

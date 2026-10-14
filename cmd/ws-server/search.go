@@ -22,8 +22,12 @@ func conditionParameters(fields []string) map[string]bool {
 }
 
 // searchConditionParameters are the conditions of a search or the
-// changes feed.
-var searchConditionParameters = conditionParameters(api.SearchFields)
+// changes feed. no-under repeats like them, so it counts as one.
+var searchConditionParameters = func() map[string]bool {
+	parameters := conditionParameters(api.SearchFields)
+	parameters["no-under"] = true
+	return parameters
+}()
 
 // searchQueryParameters are the parameters of a search, besides its
 // conditions.
@@ -236,6 +240,29 @@ func searchFilter(query url.Values) (store.Filter, error) {
 	return filter, nil
 }
 
+// readSubtrees reads into a filter the post a query keeps under and
+// those it leaves out, with everything beneath them.
+func (h *handler) readSubtrees(
+	w http.ResponseWriter, access store.Access, query url.Values,
+	filter *store.Filter,
+) bool {
+	if values := query["under"]; len(values) != 0 {
+		under, ok := h.postKey(w, access, values[0])
+		if !ok {
+			return false
+		}
+		filter.Under = &under
+	}
+	for _, value := range query["no-under"] {
+		key, ok := h.postKey(w, access, value)
+		if !ok {
+			return false
+		}
+		filter.NotUnder = append(filter.NotUnder, key)
+	}
+	return true
+}
+
 func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 	query, ok := parseQueryOf(w, r, searchConditionParameters,
 		searchQueryParameters)
@@ -259,12 +286,8 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 		api.Ref{}, &filter); !ok {
 		return
 	}
-	if values := query["under"]; len(values) != 0 {
-		under, ok := h.postKey(w, access, values[0])
-		if !ok {
-			return
-		}
-		filter.Under = &under
+	if !h.readSubtrees(w, access, query, &filter) {
+		return
 	}
 	page, err := h.store.Search(r.Context(), access, workspace.ID, filter)
 	if err != nil {

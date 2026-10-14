@@ -45,7 +45,8 @@ ws chat recent [<ref>]
 `ws recent` lists posts at every level, the newest first, a line each
 with the path to it, and with `--include-chat`, messages too.
 `ws search` lists the posts and messages that match, the same way.
-`--under <ref>` scopes either to one post and everything under it.
+`--under <ref>` scopes either to one post and everything under it, and
+`--no-under <ref>` leaves one out.
 `ws post` shows one post in full, with its body and metadata.
 `ws message e40-m3` shows one message, and `ws tree` shows a post and
 everything under it.

@@ -235,7 +235,7 @@ func searchFlagSpec() flagSpec {
 		bools: []string{"--id-only"},
 		toggles: append([]toggle{supersededToggle, deletedToggle},
 			itemToggles...),
-		repeat: searchFilterFlags(),
+		repeat: append(searchFilterFlags(), "--no-under"),
 	}
 }
 
@@ -254,6 +254,9 @@ func shellQuote(text string) string {
 func conditionArgs(p *parsedArgs) string {
 	var text strings.Builder
 	for _, flag := range slices.Sorted(maps.Keys(p.lists)) {
+		if flag == "--no-under" {
+			continue
+		}
 		for _, value := range p.lists[flag] {
 			text.WriteString(" " + flag + " " + shellQuote(value))
 		}
@@ -268,6 +271,9 @@ func filterArgs(p *parsedArgs) string {
 	text := conditionArgs(p)
 	if p.has("--under") {
 		text += " --under " + shellQuote(p.strs["--under"])
+	}
+	for _, ref := range p.lists["--no-under"] {
+		text += " --no-under " + shellQuote(ref)
 	}
 	return text + itemArgs(p) + mineToggle.arg(p)
 }

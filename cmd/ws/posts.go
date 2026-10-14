@@ -639,28 +639,44 @@ func cmdTree(c *client, args []string) error {
 	return nil
 }
 
-// addUnder adds the --under a command was given to its query, which
-// must name a post in the target's workspace, since a subtree never
-// leaves its workspace.
+// addUnder adds the --under and each --no-under a command was given to
+// its query, which must name posts in the target's workspace, since a
+// subtree never leaves its workspace.
 func (c *client) addUnder(t target, p *parsedArgs, query url.Values) error {
-	if !p.has("--under") {
-		return nil
+	resolve := func(text string) (api.Ref, target, error) {
+		ref, err := api.ParseRef(text)
+		if err != nil {
+			return api.Ref{}, target{}, err
+		}
+		home, err := c.resolve(ref)
+		return ref, home, err
 	}
-	under, err := api.ParseRef(p.strs["--under"])
-	if err != nil {
-		return err
+	if p.has("--under") {
+		under, home, err := resolve(p.strs["--under"])
+		if err != nil {
+			return err
+		}
+		if home.server != t.server || home.workspace != t.workspace {
+			return fmt.Errorf("%s is in workspace %s on %s, not in %s on "+
+				"%s, so nothing in %s is under it. Leave out --workspace "+
+				"to work in %s", under, home.workspace, home.server,
+				t.workspace, t.server, t.workspace, home.workspace)
+		}
+		query.Set("under", under.String())
 	}
-	home, err := c.resolve(under)
-	if err != nil {
-		return err
+	for _, text := range p.lists["--no-under"] {
+		notUnder, home, err := resolve(text)
+		if err != nil {
+			return err
+		}
+		if home.server != t.server || home.workspace != t.workspace {
+			return fmt.Errorf("%s is in workspace %s on %s, not in %s on "+
+				"%s, so nothing in %s is under it to leave out", notUnder,
+				home.workspace, home.server, t.workspace, t.server,
+				t.workspace)
+		}
+		query.Add("no-under", notUnder.String())
 	}
-	if home.server != t.server || home.workspace != t.workspace {
-		return fmt.Errorf("%s is in workspace %s on %s, not in %s on %s, "+
-			"so nothing in %s is under it. Leave out --workspace to work "+
-			"in %s", under, home.workspace, home.server, t.workspace,
-			t.server, t.workspace, home.workspace)
-	}
-	query.Set("under", under.String())
 	return nil
 }
 
@@ -668,6 +684,9 @@ func (c *client) addUnder(t target, p *parsedArgs, query url.Values) error {
 func searchQuery(p *parsedArgs) (url.Values, error) {
 	query := url.Values{}
 	for flag, values := range p.lists {
+		if flag == "--no-under" {
+			continue
+		}
 		if key, negate, ok := shorthandFor(flag); ok {
 			parameter := "meta"
 			if negate {
@@ -706,6 +725,9 @@ func listingHeader(p *parsedArgs, limit int, items api.Items) string {
 	text := fmt.Sprintf("Newest %d %s", limit, noun)
 	if p.has("--under") {
 		text += " under " + p.strs["--under"]
+	}
+	for _, ref := range p.lists["--no-under"] {
+		text += " not under " + ref
 	}
 	for _, flag := range []string{"--after", "--before"} {
 		if p.has(flag) {

@@ -305,6 +305,10 @@ check_equal "a top-level hit shows no path" "[$root]" \
         grep -v ' in ' | cut -d' ' -f1)"
 check_equal "search under a subtree stays inside it" "4" \
     "$(ws search --under "$recount" --id-only | wc -l | tr -d ' ')"
+check_equal "recent not under a subtree leaves it out" \
+    "$(ws recent --under "$root" -n 100 --id-only | grep -vxF -f <(
+        ws recent --under "$recount" --id-only))" \
+    "$(ws recent --under "$root" --no-under "$recount" -n 100 --id-only)"
 check "the tree indents grandchildren" "    [$recount] " \
     "$(ws tree "$root")"
 tree_output="$(ws tree "$root" --limit 3)"

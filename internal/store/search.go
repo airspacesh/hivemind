@@ -53,7 +53,9 @@ type Filter struct {
 	// messages in their chats, or both.
 	Items api.Items
 	// Under limits the search to a post and its descendants, when set.
-	Under             *Key
+	Under *Key
+	// NotUnder leaves out each of its posts and their descendants.
+	NotUnder          []Key
 	IncludeSuperseded bool
 	// IncludeDeleted keeps deleted posts and messages in a listing.
 	// Without it, the live posts under a deleted post and the live
@@ -754,6 +756,7 @@ func (v view) newestPosts(
 		revision, at = `e.revision`, `e.modified_utc`
 	}
 	where.addRanks(revision, filter)
+	where.addNotUnder(filter.NotUnder)
 	where.clauses = append(where.clauses, `e.workspace_id = ?`)
 	where.args = append(where.args, workspace)
 	v.addVisible(&where, filter)
@@ -786,6 +789,7 @@ func (v view) newestMessages(
 	count int,
 ) ([]match, error) {
 	where.addRanks(`m.posted_revision`, filter)
+	where.addNotUnder(filter.NotUnder)
 	where.clauses = append(where.clauses, `m.workspace_id = ?`)
 	where.args = append(where.args, workspace)
 	v.addVisible(&where, filter)
@@ -916,6 +920,21 @@ func (v view) readPage(
 	return page, nil
 }
 
+// checkSubtreesExist refuses a filter under or not under a post that
+// does not exist, or that the reader cannot read.
+func (v view) checkSubtreesExist(ctx context.Context, filter Filter) error {
+	keys := filter.NotUnder
+	if filter.Under != nil {
+		keys = append([]Key{*filter.Under}, keys...)
+	}
+	for _, key := range keys {
+		if err := v.checkPostExists(ctx, key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Search lists a page of the newest posts of a workspace that match a
 // filter, of the newest messages, or of both, as the filter's Items
 // says. A post matches when it meets every filter itself, and a message
@@ -943,10 +962,8 @@ func (s *Store) Search(
 		return api.MatchPage{}, fmt.Errorf("starting search: %w", err)
 	}
 	defer v.tx.Rollback()
-	if filter.Under != nil {
-		if err := v.checkPostExists(ctx, *filter.Under); err != nil {
-			return api.MatchPage{}, err
-		}
+	if err := v.checkSubtreesExist(ctx, filter); err != nil {
+		return api.MatchPage{}, err
 	}
 	revision, err := revisionSeen(ctx, v.tx)
 	if err != nil {

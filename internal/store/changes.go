@@ -69,13 +69,38 @@ func (builder *whereBuilder) excludeOrigin(alias string, key *OriginKey) {
 }
 
 // addUnder keeps to posts e that are the post under or lie beneath it,
-// when there is one. It walks up from each post rather than down from
-// under, so its cost follows the changes read, not the subtree.
+// when there is one.
 func (builder *whereBuilder) addUnder(under *Key) {
 	if under == nil {
 		return
 	}
-	builder.clauses = append(builder.clauses, `EXISTS (
+	clause, args := beneathClause([]Key{*under})
+	builder.clauses = append(builder.clauses, clause)
+	builder.args = append(builder.args, args...)
+}
+
+// addNotUnder leaves out the posts e that are one of the posts notUnder
+// or lie beneath one, and so the messages in their chats.
+func (builder *whereBuilder) addNotUnder(notUnder []Key) {
+	if len(notUnder) == 0 {
+		return
+	}
+	clause, args := beneathClause(notUnder)
+	builder.clauses = append(builder.clauses, `NOT `+clause)
+	builder.args = append(builder.args, args...)
+}
+
+// beneathClause holds when a post e is one of the posts keys or lies
+// beneath one. It walks up from e rather than down from keys, so its
+// cost follows the posts read and their depth, not the subtrees.
+func beneathClause(keys []Key) (string, []any) {
+	matches := make([]string, len(keys))
+	var args []any
+	for i, key := range keys {
+		matches[i] = `(above.workspace_id = ? AND above.id = ?)`
+		args = append(args, key.Workspace, key.ID)
+	}
+	return `EXISTS (
 		WITH RECURSIVE above(workspace_id, id) AS (
 			SELECT e.workspace_id, e.id
 			UNION ALL
@@ -84,9 +109,8 @@ func (builder *whereBuilder) addUnder(under *Key) {
 				ON l.source_workspace_id = above.workspace_id
 				AND l.source_id = above.id AND l.name = 'parent'
 		)
-		SELECT 1 FROM above WHERE above.workspace_id = ? AND above.id = ?
-	)`)
-	builder.args = append(builder.args, under.Workspace, under.ID)
+		SELECT 1 FROM above WHERE ` + strings.Join(matches, ` OR `) + `
+	)`, args
 }
 
 // changeKey names a change by its revision and the post or message that
@@ -118,6 +142,7 @@ func (v view) readChangeKeys(
 		return nil, err
 	}
 	postWhere.addUnder(filter.Under)
+	postWhere.addNotUnder(filter.NotUnder)
 	postWhere.excludeOrigin("e", exclude)
 	postWhere.clauses = append(postWhere.clauses, `e.workspace_id = ?`,
 		`e.revision > ?`, `e.revision <= ?`, visibleClause("e"))
@@ -129,6 +154,7 @@ func (v view) readChangeKeys(
 		return nil, err
 	}
 	messageWhere.addUnder(filter.Under)
+	messageWhere.addNotUnder(filter.NotUnder)
 	messageWhere.excludeOrigin("m", exclude)
 	messageWhere.clauses = append(messageWhere.clauses,
 		`m.workspace_id = ?`, `m.revision > ?`, `m.revision <= ?`,
@@ -183,7 +209,8 @@ func (v view) readChangeKeys(
 // Changes returns up to limit changes in a workspace after the
 // revision since that match a filter, oldest first, leaving out those
 // whose origin has the key exclude, when there is one. The filter's
-// conditions, Under and Items apply, and its other fields are ignored.
+// conditions, Under, NotUnder and Items apply, and its other fields
+// are ignored.
 //
 // The page's cursor is the highest revision the read checked. Every
 // change up to it is in the page or did not match, so a read from the
@@ -217,10 +244,8 @@ func (s *Store) changes(
 		return api.ChangesPage{}, fmt.Errorf("reading changes: %w", err)
 	}
 	defer v.tx.Rollback()
-	if filter.Under != nil {
-		if err := v.checkPostExists(ctx, *filter.Under); err != nil {
-			return api.ChangesPage{}, err
-		}
+	if err := v.checkSubtreesExist(ctx, filter); err != nil {
+		return api.ChangesPage{}, err
 	}
 
 	// The latest revision and the changes come from one snapshot, so
