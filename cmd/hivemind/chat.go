@@ -300,33 +300,6 @@ func cmdChatSend(c *client, args []string) error {
 	return nil
 }
 
-func cmdChatEdit(c *client, args []string) error {
-	if len(args) != 2 {
-		return usageError("chat edit <ref>-m<n> <message>")
-	}
-	ref, err := api.ParseMessageRef(args[0])
-	if err != nil {
-		return err
-	}
-	request := api.EditMessageRequest{Body: args[1], User: currentUser()}
-	if err := request.Validate(); err != nil {
-		return err
-	}
-	t, err := c.resolve(ref.Post)
-	if err != nil {
-		return err
-	}
-
-	var message api.Message
-	path := postPath(ref.Post, fmt.Sprintf("/messages/%d", ref.Number))
-	if err := c.do(t, "PATCH", path, request, &message); err != nil {
-		return uncertainWrite(explainNotOwner(err, ref.Post), "The edit",
-			programName+" chat recent "+ref.Post.String())
-	}
-	fmt.Printf("Edited [%s].\n", message.Ref())
-	return nil
-}
-
 func cmdChatDelete(c *client, args []string) error {
 	if len(args) != 1 {
 		return usageError("chat delete <ref>-m<n>")
@@ -613,14 +586,13 @@ func cmdChatWait(c *client, args []string) error {
 
 func cmdChat(c *client, args []string) error {
 	if len(args) == 0 {
-		return usageError("chat send|recent|read|wait|edit|delete ...")
+		return usageError("chat send|recent|read|wait|delete ...")
 	}
 	commands := map[string]func(*client, []string) error{
 		"send":   cmdChatSend,
 		"recent": cmdChatRecent,
 		"read":   cmdChatRead,
 		"wait":   cmdChatWait,
-		"edit":   cmdChatEdit,
 		"delete": cmdChatDelete,
 	}
 	command, ok := commands[args[0]]

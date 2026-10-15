@@ -78,31 +78,6 @@ func (h *handler) getMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, detail)
 }
 
-func (h *handler) editMessage(w http.ResponseWriter, r *http.Request) {
-	if !requireNoQuery(w, r) {
-		return
-	}
-	access, post, number, ok := h.pathMessage(w, r)
-	if !ok {
-		return
-	}
-	var request api.EditMessageRequest
-	if !decodeBody(w, r, &request) {
-		return
-	}
-	if err := request.Validate(); err != nil {
-		writeBadRequest(w, err.Error())
-		return
-	}
-	message, _, err := h.store.EditMessage(
-		r.Context(), access, post, number, request)
-	if err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, message)
-}
-
 func (h *handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 	if !requireNoQuery(w, r) {
 		return

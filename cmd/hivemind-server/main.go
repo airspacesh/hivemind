@@ -200,7 +200,6 @@ func (h *handler) routes() http.Handler {
 	route("POST /api/posts/{ref}/messages", h.postMessage)
 	route("GET /api/posts/{ref}/messages", h.listMessages)
 	route("GET /api/posts/{ref}/messages/{n}", h.getMessage)
-	route("PATCH /api/posts/{ref}/messages/{n}", h.editMessage)
 	route("DELETE /api/posts/{ref}/messages/{n}", h.deleteMessage)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, api.CodeRouteNotFound,

@@ -16,7 +16,7 @@ import (
 )
 
 // activityExpr is when post e last changed by definition: an edit to
-// it, or a message posted or edited in its chat. activity_utc must
+// it, or a message posted or deleted in its chat. activity_utc must
 // always equal it.
 const activityExpr = `max(e.modified_utc, coalesce((
 	SELECT max(m.modified_utc) FROM post_messages AS m
@@ -24,7 +24,8 @@ const activityExpr = `max(e.modified_utc, coalesce((
 
 // forestWriter makes random writes to two workspaces: posts with random
 // parents in the same workspace, supersessions across them, origins,
-// metadata, messages, and edits and deletes of both.
+// metadata, messages, edits and deletes of posts, and deletes of
+// messages.
 type forestWriter struct {
 	t           *testing.T
 	store       *Store
@@ -121,30 +122,18 @@ func (w *forestWriter) write() {
 			w.t.Fatal(err)
 		}
 		w.deleted[post.Ref.String()] = true
-	case choice < 8 && len(w.messages) > 0:
+	case choice < 5 && len(w.messages) > 0:
 		message := w.messages[w.random.Intn(len(w.messages))]
-		messageKey := w.store.mustKey(message.Post)
 		if w.deleted[message.Ref().String()] {
 			return
 		}
-		if choice == 7 {
-			if _, err := w.store.DeleteMessage(ctx, everyAccess(w.store),
-				messageKey,
-				message.Number, api.DeleteRequest{
-					User: message.Origin.User}); err != nil {
-				w.t.Fatal(err)
-			}
-			w.deleted[message.Ref().String()] = true
-			return
-		}
-		if _, _, err := w.store.EditMessage(ctx, everyAccess(w.store),
-			messageKey,
-			message.Number, api.EditMessageRequest{
-				Body: fmt.Sprintf("edited %d %s", w.writes, w.word()),
-				User: message.Origin.User,
-			}); err != nil {
+		if _, err := w.store.DeleteMessage(ctx, everyAccess(w.store),
+			w.store.mustKey(message.Post),
+			message.Number, api.DeleteRequest{
+				User: message.Origin.User}); err != nil {
 			w.t.Fatal(err)
 		}
+		w.deleted[message.Ref().String()] = true
 	default:
 		user := []string{"ines", "omar"}[w.random.Intn(2)]
 		message, _, err := w.store.PostMessage(ctx, everyAccess(w.store),

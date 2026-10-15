@@ -375,8 +375,8 @@ func checkEditor(posted fmt.Stringer, owner, editor, action string) error {
 	return nil
 }
 
-// DeletedError refuses an edit of a deleted post or message, which
-// would bring back what the delete removed.
+// DeletedError refuses an edit of a deleted post, which would bring
+// back what the delete removed.
 type DeletedError struct {
 	deleted string
 }

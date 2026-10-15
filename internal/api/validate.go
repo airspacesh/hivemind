@@ -221,13 +221,6 @@ func validateEditor(user string) error {
 	return ValidateUser(user)
 }
 
-func (r EditMessageRequest) Validate() error {
-	if err := validateMessageBody(r.Body); err != nil {
-		return err
-	}
-	return validateEditor(r.User)
-}
-
 func (r DeleteRequest) Validate() error {
 	return validateEditor(r.User)
 }

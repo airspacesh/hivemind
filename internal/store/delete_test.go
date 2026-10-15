@@ -167,16 +167,14 @@ func TestDeleteMessageKeepsItsPlace(t *testing.T) {
 	}
 }
 
-// An edit of a deleted post or message would bring back what the delete
-// removed, so even the poster cannot make one.
+// An edit of a deleted post would bring back what the delete removed,
+// so even the poster cannot make one.
 func TestNobodyCanEditWhatIsDeleted(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	other := mustAdd(t, store, "other", "", nil)
 	post := mustAdd(t, store, "topic", "", nil)
-	message := mustPostMessage(t, store, post.Ref, "hi")
 	deleted := mustDelete(t, store, post.Ref)
-	mustDeleteMessage(t, store, message.Ref())
 	key := store.mustKey(post.Ref)
 
 	subject := "back"
@@ -195,21 +193,6 @@ func TestNobodyCanEditWhatIsDeleted(t *testing.T) {
 		got.Subject != "" || len(got.Links) != 0 ||
 		!got.Modified.Equal(deleted.Modified) {
 		t.Fatalf("a refused edit changed the deleted post: %+v", got)
-	}
-
-	for _, body := range []string{"back", ""} {
-		_, _, err := store.EditMessage(ctx, everyAccess(store), key,
-			message.Number,
-			api.EditMessageRequest{Body: body, User: testUser})
-		var refused *DeletedError
-		if !errors.As(err, &refused) {
-			t.Fatalf("editing a deleted message to %q = %v, want a "+
-				"refusal", body, err)
-		}
-	}
-	if got := readChatWithDeleted(t, store, post.Ref, 0,
-		10).Messages[0]; !got.Deleted || got.Body != "" {
-		t.Fatalf("a refused edit changed the deleted message: %+v", got)
 	}
 }
 

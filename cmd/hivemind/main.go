@@ -67,7 +67,6 @@ Usage:
          [--include-deleted|--exclude-deleted]
          [--exclude-mine|--include-mine]
          [--content <pattern>]... [--origin-user <pattern>]...
-  {program} chat edit <ref>-m<n> <message>
   {program} chat delete <ref>-m<n>
   {program} wait [--after <bound>] [--timeout 10m]
          [--include-chat|--exclude-chat] [--include-posts|--exclude-posts]
@@ -135,7 +134,7 @@ Editing and deleting:
   links, origin and chat stay, and the posts under it stay in place. A
   message deleted with '{program} chat delete <ref>-m<n>' loses its
   text for good, and keeps its number and place. Deleting again changes
-  nothing. A deleted post or message cannot be edited.
+  nothing. A deleted post cannot be edited.
 
   Deleted posts and messages drop out of every listing, but the posts
   under a deleted post and the messages in its chat stay. A tree keeps a
@@ -146,8 +145,9 @@ Editing and deleting:
 
   Anyone can edit a public post. Only the user who wrote a post can
   delete it, make it private or public, or edit it while it is private.
-  Only the user who wrote a message can edit or delete it. To suggest a
-  change you cannot make, send a message in the post's chat.
+  Only the user who wrote a message can delete it, and messages cannot
+  be edited. To suggest a change you cannot make, send a message in the
+  post's chat.
 
 Private posts:
   'add --private' adds a post only you can read, and 'edit <ref>
@@ -301,7 +301,7 @@ Bounds:
 Chat:
   Every post has a chat. A message's id is the post id, -m, and a number
   counted from 1 in that post, like e40-m3. Messages stay in the order
-  they were sent, and an edit overwrites one in place. Your cursor is
+  they were sent. Your cursor is
   the id of the last message you read, like e40-m3. Pass it as --after
   to read only later messages, and keep it, since the server keeps no
   read state. --after e40-m0 starts before the first message. A read's
@@ -337,9 +337,8 @@ Chat:
   retries a failed connection with backoff, up to 6 times in a row.
 
 Changes:
-  A change is a post added, edited, moved or deleted, or a message sent,
-  edited or deleted. Editing only links other than the parent is not a
-  change. Each change takes the next revision, a number counted across
+  A change is a post added, edited, moved or deleted, or a message sent
+  or deleted. Editing only links other than the parent is not a change. Each change takes the next revision, a number counted across
   the whole server. A change cursor is the revision of the last change
   read, like @812345. Pass it as --after to read only later changes, and
   keep it, since the server keeps no read state. --after @0 starts
@@ -360,8 +359,7 @@ Changes:
   An add or edit of a post counts as the user and session that made it,
   so another user's edit of your post wakes your wait. A delete of a
   post, or making it private or public, counts as the session that added
-  the post. A message's edit or delete counts as the session that sent
-  it. The cursor passes every change the wait checked, matching or not,
+  the post. A message's delete counts as the session that sent it. The cursor passes every change the wait checked, matching or not,
   so wait on from it. It polls as chat wait does.
   '{program} firehose' prints every change that matches its filters as
   it arrives, each batch followed by its cursor, until interrupted or

@@ -579,7 +579,7 @@ func TestListingShowsAMatchALine(t *testing.T) {
 			{Post: api.Post{Ref: ref(6), Origin: by("lena")},
 				Ancestors: []api.PostRef{releases, release},
 				Message: &api.Message{Post: ref(6), Number: 4,
-					Created: at(58), Modified: at(59), Body: "two\nlines",
+					Created: at(58), Modified: at(58), Body: "two\nlines",
 					Origin: by("lena")}, Revision: 89, At: at(58)},
 			{Post: api.Post{Ref: ref(7), Deleted: true,
 				Origin: by("omar")}, Ancestors: []api.PostRef{releases},
@@ -597,7 +597,7 @@ func TestListingShowsAMatchALine(t *testing.T) {
 	got := hivemind(t, config, "recent", "-n", "4", "--project", "ai",
 		"--after", "@12")
 	want := `[f21] 2026-10-09 08:59 ruth: Fixture rules (4 new messages)
-[f6-m4] 2026-10-09 08:58 lena in f4.f5.f6 (edited): two
+[f6-m4] 2026-10-09 08:58 lena in f4.f5.f6: two
     lines
 [f7] 2026-10-09 08:40 omar in f4 (deleted) (1 new message)
 [f6-m2] 2026-10-09 08:38 ines in f4.f5.f6 (deleted)
@@ -1224,8 +1224,8 @@ func TestChatWaitReadsOnWithItsFilters(t *testing.T) {
 	}
 }
 
-// A change shows at the time it was made, so an edited or deleted
-// message shows when it was edited or deleted, as a post does.
+// A change shows at the time it was made, so a deleted message shows
+// when it was deleted, as a post does.
 func TestChangesShowEachAtItsLatestChange(t *testing.T) {
 	at := func(minute int) time.Time {
 		return time.Date(2026, 10, 9, 5, minute, 0, 0, time.UTC)
@@ -1239,7 +1239,7 @@ func TestChangesShowEachAtItsLatestChange(t *testing.T) {
 		reply(w, http.StatusOK, api.ChangesPage{Changes: []api.Change{
 			{Post: post},
 			{Post: post, Message: &api.Message{Post: pond, Number: 2,
-				Created: at(20), Modified: at(41), Body: "quack",
+				Created: at(41), Modified: at(41), Body: "quack",
 				Origin: duck}},
 			{Post: post, Message: &api.Message{Post: pond, Number: 3,
 				Created: at(22), Modified: at(45), Deleted: true,
@@ -1250,7 +1250,7 @@ func TestChangesShowEachAtItsLatestChange(t *testing.T) {
 		server.URL+"\n", 0o600)
 	got := hivemind(t, config, "wait", "--after", "@3")
 	want := "[e1] 2026-10-09 05:30 duck: Pond\n" +
-		"[e1-m2] 2026-10-09 05:41 duck in e1 (edited): quack\n" +
+		"[e1-m2] 2026-10-09 05:41 duck in e1: quack\n" +
 		"[e1-m3] 2026-10-09 05:45 duck in e1 (deleted)\n"
 	if !got.ok || !strings.HasPrefix(got.stdout, want) {
 		t.Fatalf("wait =\n%s\nwant it to begin\n%s (%+v)", got.stdout,

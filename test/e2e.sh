@@ -420,22 +420,15 @@ check_equal "chat recent filters, and its hint repeats the filters" \
 check_equal "the chat overview keeps to the messages its filters match" \
     "[$chat-m1]" "$(hivemind chat recent --content questionmark |
     sed -n 's/^  \(\[[a-z0-9-]*\]\).*/\1/p')"
-hivemind chat edit "$chat-m1" "First, edited" >/dev/null
-check "an edit stays in place" "[$chat-m1]" \
-    "$(hivemind chat read "$chat" --after "$chat-m0" --limit 1)"
 message_detail="$(hivemind message "$chat-m1")"
 check_equal "message shows a message under its post's line" \
     "[$chat] $(id -un): Chat thread
-  [$chat-m1] $(id -un) (edited): First, edited" \
+  [$chat-m1] $(id -un): First QUESTIONMARK" \
     "$(echo "$message_detail" | head -2 |
         sed -E 's/ [0-9-]{10} [0-9]{2}:[0-9]{2}( |$)/\1/')"
-check "message shows when a message was edited" "Modified: " \
-    "$message_detail"
 check "message says a missing message is missing" \
     "message not found: $chat-m99" \
     "$(hivemind message "$chat-m99" 2>&1 || true)"
-check_equal "no read returns the old text" "" \
-    "$(hivemind chat read "$chat" | grep QUESTIONMARK || true)"
 overview="$(hivemind chat recent)"
 check_equal "the overview lists the post with the newest message last" \
     "[$chat] $(id -un): Chat thread" \
@@ -510,7 +503,7 @@ check "search shows the matching messages" \
 
 # Anyone can edit a public post, add under it and chat on it. Only the
 # user who wrote a post can delete it or make it private, and only the
-# user who wrote a message can edit or delete it. The client always
+# user who wrote a message can delete it. The client always
 # sends its own user, so the other user's posts go in by curl.
 post_as_heron() {
     curl -fsS -X POST -H "Hivemind-API-Version: $api_version" \
@@ -585,14 +578,11 @@ check_equal "recent leaves out what did not change in the span" \
     "$(hivemind recent --project owners --before 2000-01-01 | head -1)"
 check "a time flag names the forms it takes" "like 2d, 6h or 90m" \
     "$(hivemind search --after yesterday 2>&1 || true)"
-check "an edit of another user's message is refused" \
-    "$heron-m2 was posted by heron, so only heron can edit or delete it" \
-    "$(hivemind chat edit "$heron-m2" "Taken" 2>&1 || true)"
 check "a delete of another user's post names its owner and the next step" \
     "$heron was posted by heron, so only heron can delete it. To suggest a change, send a message in its chat with 'hivemind chat send $heron \"<message>\"'" \
     "$(hivemind delete "$heron" 2>&1 || true)"
 check "a delete of another user's message is refused" \
-    "only heron can edit or delete it" \
+    "$heron-m2 was posted by heron, so only heron can delete it" \
     "$(hivemind chat delete "$heron-m2" 2>&1 || true)"
 
 # A private post, and everything under it, is for its owner alone.
@@ -782,9 +772,6 @@ check "an edit of a deleted post is refused" \
 check "a link edit of a deleted post is refused" \
     "$gadwall was deleted, so it cannot be edited" \
     "$(hivemind edit "$gadwall" --link see="$egg" 2>&1 || true)"
-check "an edit of a deleted message is refused" \
-    "$gadwall-m2 was deleted, so it cannot be edited" \
-    "$(hivemind chat edit "$gadwall-m2" "The code is 4417" 2>&1 || true)"
 check_equal "deleting again succeeds, at the revision of the delete" \
     "$deleted_post
 $deleted_message" \
@@ -896,10 +883,10 @@ check_equal "a wait from a written post shows only what came after" \
 # a change to what came before it, or a change to the post itself.
 sent_id() { sed -n 's/^Sent \[\([a-z0-9-]*\)\].*/\1/p'; }
 sent="$(hivemind chat send "$chat" "Waited after" | sent_id)"
-peer chat edit "$chat-m1" "Edited after the wait's message" >/dev/null
+peer chat delete "$chat-m5" >/dev/null
 peer chat send "$written" "In another chat" >/dev/null
 check_equal "a wait from a message id shows exactly what came after" \
-    "[$chat-m1] $(id -un) in $chat (edited): Edited after the wait's message
+    "[$chat-m5] $(id -un) in $chat (deleted)
 [$written-m1] $(id -un) in $written: In another chat" \
     "$(hivemind wait --after "$sent" --include-mine --timeout 1s |
         grep '^\[' | untimed)"

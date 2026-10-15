@@ -44,11 +44,6 @@ func mustPostMessage(
 	return postAs(t, store, testUser, post, body)
 }
 
-// ownEdit is an edit to a message by the user mustPostMessage posts as.
-func ownEdit(body string) api.EditMessageRequest {
-	return api.EditMessageRequest{Body: body, User: testUser}
-}
-
 func readChat(
 	t *testing.T, store *Store, post api.Ref, since int64, limit int,
 ) api.ChatPage {
@@ -263,45 +258,6 @@ func TestChatReadFromATime(t *testing.T) {
 	}
 }
 
-func TestEditsKeepTheirPlaceAndAreNotReadAgain(t *testing.T) {
-	ctx := context.Background()
-	store := openTestStore(t)
-	post := mustAdd(t, store, "thread", "", nil)
-	question := mustPostMessage(t, store, post.Ref, "question")
-	mustPostMessage(t, store, post.Ref, "answer")
-	cursor := readChat(t, store, post.Ref, 0, 20).Cursor
-
-	edited, changed, err := store.EditMessage(ctx, everyAccess(store),
-		store.mustKey(post.Ref),
-		question.Number, ownEdit("question, edited"))
-	if err != nil || !changed {
-		t.Fatalf("edit = %v, %v", changed, err)
-	}
-	if !edited.Created.Equal(question.Created) ||
-		!edited.Modified.After(question.Modified) {
-		t.Fatalf("edited times = %v, %v", edited.Created, edited.Modified)
-	}
-	if got := chatText(readChat(t, store, post.Ref, cursor, 20)); got !=
-		" cursor=2 remaining=0" {
-		t.Fatalf("read after an edit = %q, want nothing new", got)
-	}
-	if got := chatText(readChat(t, store, post.Ref, 0, 20)); got !=
-		"e1-m1:question, edited e1-m2:answer cursor=2 remaining=0" {
-		t.Fatalf("full read = %q, want the edit in its place", got)
-	}
-
-	if _, changed, err := store.EditMessage(ctx, everyAccess(store),
-		store.mustKey(post.Ref),
-		question.Number, ownEdit("question, edited")); err != nil || changed {
-		t.Fatalf("repeating an edit = %v, %v; want no change", changed, err)
-	}
-	if _, _, err := store.EditMessage(ctx, everyAccess(store),
-		store.mustKey(post.Ref), 9,
-		ownEdit("text")); !errors.Is(err, ErrMessageNotFound) {
-		t.Fatalf("editing a missing message = %v", err)
-	}
-}
-
 // Each write sets the activity time itself, so after every kind of
 // write it must still be the latest change to the post or its chat.
 func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
@@ -321,25 +277,17 @@ func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
 				stale)
 		}
 	}
-	editMessage := func(post api.Ref, body string) {
-		t.Helper()
-		if _, _, err := store.EditMessage(ctx, everyAccess(store),
-			store.mustKey(post), 1,
-			ownEdit(body)); err != nil {
-			t.Fatal(err)
-		}
-	}
 	pond := mustAdd(t, store, "pond", "", nil)
 	nest := mustAdd(t, store, "nest", "", nil)
 	checkActivity("adding")
 
-	mustPostMessage(t, store, pond.Ref, "first")
+	first := mustPostMessage(t, store, pond.Ref, "first")
 	mustPostMessage(t, store, nest.Ref, "second")
 	checkActivity("posting")
-	editMessage(pond.Ref, "first, edited")
-	checkActivity("editing a message")
-	editMessage(pond.Ref, "first, edited")
-	checkActivity("repeating a message edit")
+	mustDeleteMessage(t, store, first.Ref())
+	checkActivity("deleting a message")
+	mustDeleteMessage(t, store, first.Ref())
+	checkActivity("repeating a message delete")
 
 	project := "lake"
 	if _, err := store.Edit(ctx, everyAccess(store), store.mustKey(nest.Ref),
@@ -363,17 +311,12 @@ func TestOverviewGroupsTheNewestMessagesByPost(t *testing.T) {
 	c := mustAdd(t, store, "c", "", nil)
 	private := addTo(t, store, "personal",
 		api.AddPostRequest{Subject: "private"})
-	first := mustPostMessage(t, store, a.Ref, "a1")
+	mustPostMessage(t, store, a.Ref, "a1")
 	mustPostMessage(t, store, b.Ref, "b1")
 	mustPostMessage(t, store, a.Ref, "a2")
 	mustPostMessage(t, store, c.Ref, "c1")
 	mustPostMessage(t, store, private.Ref, "private")
 	mustPostMessage(t, store, b.Ref, "b2")
-	if _, _, err := store.EditMessage(ctx, everyAccess(store),
-		store.mustKey(a.Ref),
-		first.Number, ownEdit("a1 edited")); err != nil {
-		t.Fatal(err)
-	}
 
 	overview, err := store.Overview(ctx, everyAccess(store),
 		workspaceID(t, store, "general"), Filter{}, 4)
@@ -395,14 +338,14 @@ func TestOverviewGroupsTheNewestMessagesByPost(t *testing.T) {
 }
 
 // An edit keeps a post's earlier text in its versions, until a delete
-// clears them, but keeps no earlier text of a message.
+// clears them, and a delete keeps no earlier text of a message.
 func TestOverwrittenTextLeavesNoCopyInTheDatabase(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	store := openStoreAt(t, filepath.Join(dir, "hivemind.db"), testBusyTimeout)
 	post := mustAdd(t, store, "SUBJECTMARK "+
 		strings.Repeat("x", 100), "", nil)
-	message := mustPostMessage(t, store, post.Ref, "EDITEDAWAYMARK "+
+	message := mustPostMessage(t, store, post.Ref, "DELETEDMARK "+
 		strings.Repeat("x", 200))
 	subject := "short"
 	if _, err := store.Edit(ctx, everyAccess(store),
@@ -412,11 +355,7 @@ func TestOverwrittenTextLeavesNoCopyInTheDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustDelete(t, store, post.Ref)
-	if _, _, err := store.EditMessage(ctx, everyAccess(store),
-		store.mustKey(post.Ref),
-		message.Number, ownEdit("short")); err != nil {
-		t.Fatal(err)
-	}
+	mustDeleteMessage(t, store, message.Ref())
 	if _, err := store.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +368,7 @@ func TestOverwrittenTextLeavesNoCopyInTheDatabase(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, mark := range []string{"SUBJECTMARK", "EDITEDAWAYMARK"} {
+		for _, mark := range []string{"SUBJECTMARK", "DELETEDMARK"} {
 			if bytes.Contains(data, []byte(mark)) {
 				t.Fatalf("%s still holds overwritten text %s", name, mark)
 			}

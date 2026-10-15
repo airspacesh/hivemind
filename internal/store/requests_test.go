@@ -95,15 +95,10 @@ func TestRepeatedRequestReturnsTheMessageItSent(t *testing.T) {
 	}
 
 	// A repeat matches the request, not the message's current text.
-	edited, _, err := store.EditMessage(ctx, everyAccess(store),
-		store.mustKey(pond.Ref),
-		first.Number, ownEdit("quack quack"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	deleted := mustDeleteMessage(t, store, first.Ref())
 	third, created, err := send(pond.Ref, "quack", "r1")
-	if err != nil || created || !reflect.DeepEqual(third, edited) {
-		t.Fatalf("repeat after an edit: created %v, %v, got %+v", created,
+	if err != nil || created || !reflect.DeepEqual(third, deleted) {
+		t.Fatalf("repeat after a delete: created %v, %v, got %+v", created,
 			err, third)
 	}
 
@@ -120,7 +115,7 @@ func TestRepeatedRequestReturnsTheMessageItSent(t *testing.T) {
 		}
 	}
 	if got := chatText(readChat(t, store, pond.Ref, 0, 10)); got !=
-		"e1-m1:quack quack e1-m2:quack e1-m3:quack cursor=3 remaining=0" {
+		"e1-m2:quack e1-m3:quack cursor=3 remaining=0" {
 		t.Fatalf("chat holds %s", got)
 	}
 }

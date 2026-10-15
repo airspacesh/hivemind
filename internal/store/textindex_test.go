@@ -134,7 +134,6 @@ func TestTextIndexFollowsEdits(t *testing.T) {
 	store := openTestStore(t)
 	ctx := context.Background()
 	post := mustAdd(t, store, "Count the herons", "In the reeds", nil)
-	message := mustPostMessage(t, store, post.Ref, "Saw an egret")
 	subject, body := "Count the ducks", "On the pond"
 	if _, err := store.Edit(ctx, everyAccess(store),
 		store.mustKey(post.Ref), api.EditPostRequest{
@@ -142,16 +141,10 @@ func TestTextIndexFollowsEdits(t *testing.T) {
 		}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.EditMessage(ctx, everyAccess(store),
-		store.mustKey(post.Ref),
-		message.Number, ownEdit("Saw a swan")); err != nil {
-		t.Fatal(err)
-	}
 	addFiller(t, store)
 
 	for text, found := range map[string]bool{
-		"herons": false, "reeds": false, "egret": false,
-		"ducks": true, "pond": true, "swan": true,
+		"herons": false, "reeds": false, "ducks": true, "pond": true,
 	} {
 		result := runSearch(t, store, Filter{
 			Content: []FieldCond{{Value: text}}, Items: api.PostsAndChat,
@@ -163,8 +156,8 @@ func TestTextIndexFollowsEdits(t *testing.T) {
 	}
 }
 
-// An edit overwrites text so it is gone, so the trigrams of the old
-// text must leave the index rather than wait in it for a merge.
+// An edit or delete overwrites text so it is gone, so the trigrams of
+// the old text must leave the index rather than wait in it for a merge.
 func TestTextIndexForgetsOverwrittenText(t *testing.T) {
 	store := openTestStore(t)
 	ctx := context.Background()
@@ -180,11 +173,7 @@ func TestTextIndexForgetsOverwrittenText(t *testing.T) {
 		}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.EditMessage(ctx, everyAccess(store),
-		store.mustKey(post.Ref),
-		message.Number, ownEdit("Egret")); err != nil {
-		t.Fatal(err)
-	}
+	mustDeleteMessage(t, store, message.Ref())
 
 	for _, index := range []string{"post_text", "message_text"} {
 		var blocks int

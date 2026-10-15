@@ -96,11 +96,7 @@ func TestChangesListAChangeAgainOnlyWhenItChangesAfterTheCursor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, _, err := store.EditMessage(ctx, everyAccess(store),
-		store.mustKey(seen.Ref),
-		message.Number, ownEdit("edited")); err != nil {
-		t.Fatal(err)
-	}
+	mustDeleteMessage(t, store, message.Ref())
 
 	got, _ := readAllChanges(t, store, cursor, 10)
 	want := []string{"e1", "e2", "e1-m1"}
@@ -197,11 +193,10 @@ func TestRefusedEditsTakeNoRevision(t *testing.T) {
 			Private: &private, Origin: api.Origin{User: "heron"}}); err == nil {
 		t.Fatal("another user made the post private")
 	}
-	if _, _, err := store.EditMessage(ctx, everyAccess(store),
-		store.mustKey(post.Ref),
-		message.Number, api.EditMessageRequest{
-			Body: "taken", User: "heron"}); err == nil {
-		t.Fatal("another user edited the message")
+	if _, err := store.DeleteMessage(ctx, everyAccess(store),
+		store.mustKey(post.Ref), message.Number,
+		api.DeleteRequest{User: "heron"}); err == nil {
+		t.Fatal("another user deleted the message")
 	}
 	after, err := store.LatestRevision(ctx)
 	if err != nil {
@@ -809,7 +804,6 @@ func postedRevision(
 // what came before it included, even once it has been edited or
 // deleted.
 func TestChangesAfterAPostedRevisionMissNothingAfterIt(t *testing.T) {
-	ctx := context.Background()
 	store := openTestStore(t)
 	earlier := mustAdd(t, store, "earlier", "", nil)
 	old := mustPostMessage(t, store, earlier.Ref, "old")
@@ -818,11 +812,7 @@ func TestChangesAfterAPostedRevisionMissNothingAfterIt(t *testing.T) {
 
 	other := mustAdd(t, store, "other", "", nil)
 	mustPostMessage(t, store, other.Ref, "elsewhere")
-	if _, _, err := store.EditMessage(ctx, everyAccess(store),
-		store.mustKey(earlier.Ref),
-		old.Number, ownEdit("old, edited")); err != nil {
-		t.Fatal(err)
-	}
+	mustDeleteMessage(t, store, old.Ref())
 	mustDeleteMessage(t, store, message.Ref())
 	mustDelete(t, store, post.Ref)
 

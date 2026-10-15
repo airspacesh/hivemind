@@ -226,58 +226,6 @@ func overwriteMessage(
 	return recordChatActivity(ctx, tx, post, now, revision)
 }
 
-// EditMessage overwrites a message's text, and reports whether it
-// changed. The message keeps its number and its place in the chat, and
-// no earlier text is kept. Text that equals the current text changes
-// nothing, so repeating an edit is harmless. Only the user who posted
-// the message can edit it, and nobody can edit a deleted message.
-func (s *Store) EditMessage(
-	ctx context.Context,
-	access Access,
-	post Key,
-	number int64,
-	req api.EditMessageRequest,
-) (api.Message, bool, error) {
-	v, err := s.begin(ctx, access, false)
-	if err != nil {
-		return api.Message{}, false, fmt.Errorf("editing message: %w", err)
-	}
-	tx := v.tx
-	defer tx.Rollback()
-	if err := v.checkPostExists(ctx, post); err != nil {
-		return api.Message{}, false, err
-	}
-	message, err := s.getMessage(ctx, tx, post, number)
-	if err != nil {
-		return api.Message{}, false, err
-	}
-	if err := checkEditor(message.Ref(), message.Origin.User,
-		req.User, "edit or delete it"); err != nil {
-		return api.Message{}, false, err
-	}
-	if message.Deleted {
-		return api.Message{}, false,
-			&DeletedError{deleted: message.Ref().String()}
-	}
-	if message.Body == req.Body {
-		return message, false, nil
-	}
-
-	if err := overwriteMessage(ctx, tx, post, number, req.Body,
-		false); err != nil {
-		return api.Message{}, false, err
-	}
-	message, err = s.getMessage(ctx, tx, post, number)
-	if err != nil {
-		return api.Message{}, false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return api.Message{}, false, fmt.Errorf(
-			"committing message edit: %w", err)
-	}
-	return message, true, nil
-}
-
 // DeleteMessage clears a message's text and marks it deleted, and no
 // earlier text is kept. The message keeps its number and its place in
 // the chat. Deleting a deleted message changes nothing. Only the user
@@ -303,7 +251,7 @@ func (s *Store) DeleteMessage(
 		return api.Message{}, err
 	}
 	if err := checkEditor(message.Ref(), message.Origin.User,
-		req.User, "edit or delete it"); err != nil {
+		req.User, "delete it"); err != nil {
 		return api.Message{}, err
 	}
 	if message.Deleted {

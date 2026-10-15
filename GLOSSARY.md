@@ -47,8 +47,8 @@ Use these words, and no others for the same things.
   it. Only that owner can read it. Everyone else gets post not found for
   it, as if it did not exist.
 - **change**: a post added, edited, moved, deleted, or made private or
-  public, or a message sent, edited or deleted. Editing only links other
-  than the parent is not a change.
+  public, or a message sent or deleted. Editing only links other than
+  the parent is not a change.
 - **revision**: the number a change takes, counted from 1 across the
   whole server, so a later change has a higher revision. A post or
   message keeps the revision of its latest change.

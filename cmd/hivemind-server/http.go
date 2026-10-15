@@ -295,8 +295,8 @@ func (h *handler) postKey(
 // ref with a configured prefix, a message or version number, the names
 // of known query parameters, the status, and the sizes. It never logs a
 // body, a query value, a raw path, or an error message, because each
-// can carry text a client sent, and a delete, or an edit of a message,
-// must leave no copy of what it overwrote.
+// can carry text a client sent, and a delete must leave no copy of what
+// it overwrote.
 func (h *handler) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := &countingReader{ReadCloser: r.Body}

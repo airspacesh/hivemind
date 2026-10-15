@@ -332,8 +332,6 @@ func printMessageDetail(d api.MessageDetail) {
 	fmt.Println("Created: " + localTimeDetail(m.Created))
 	if m.Deleted {
 		fmt.Println("Deleted: " + localTimeDetail(m.Modified))
-	} else {
-		fmt.Println("Modified: " + localTimeDetail(m.Modified))
 	}
 	printOrigin(m.Origin)
 	if len(d.Ancestors) > 0 {
@@ -394,12 +392,8 @@ func printMessage(
 		return
 	}
 
-	edited := ""
-	if !m.Modified.Equal(m.Created) {
-		edited = " (edited)"
-	}
 	lines := strings.Split(m.Body, "\n")
-	fmt.Printf("%s%s: %s\n", head, edited, lines[0])
+	fmt.Printf("%s: %s\n", head, lines[0])
 	for _, line := range lines[1:] {
 		fmt.Printf("%s    %s\n", indent, line)
 	}

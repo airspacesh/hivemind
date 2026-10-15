@@ -334,7 +334,6 @@ func messageBodies(messages []api.Message) []string {
 // Each matching message is a match of its own, ranked by when it was
 // posted, beside the matching posts.
 func TestSearchMatchesChatMessages(t *testing.T) {
-	ctx := context.Background()
 	store := openTestStore(t)
 	pond := mustAdd(t, store, "Pond notes", "", nil)
 	sighting := mustAdd(t, store, "Heron sighting", "", nil)
@@ -381,16 +380,6 @@ func TestSearchMatchesChatMessages(t *testing.T) {
 	})
 	assertMatches(t, without, messageRef(quiet.Ref, 1),
 		messageRef(pond.Ref, 2), quiet.Ref.String(), pond.Ref.String())
-
-	// An edit lifts the post, but the message keeps its place as the
-	// first posted.
-	if _, _, err := store.EditMessage(ctx, everyAccess(store),
-		store.mustKey(pond.Ref), 1,
-		ownEdit("heron at dawn")); err != nil {
-		t.Fatal(err)
-	}
-	assertMatches(t, runSearch(t, store, Filter{Content: heron,
-		Items: api.PostsAndChat}), chatMatches...)
 }
 
 // A message matches when it matches every text filter, required and

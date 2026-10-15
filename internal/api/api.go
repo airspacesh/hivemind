@@ -162,9 +162,8 @@ type TreeResponse struct {
 }
 
 // Message is one message in a post's chat, numbered from 1 within it in
-// the order they were posted. An edit overwrites Body, keeps the
-// message's place, and no earlier text is kept. A deleted message has
-// no body, and cannot be edited. Revision is the revision of the
+// the order they were posted. A delete clears Body, keeps the message's
+// place, and no earlier text is kept. Revision is the revision of the
 // message's latest change, which set Modified.
 type Message struct {
 	Post     Ref       `json:"post"`
@@ -196,13 +195,6 @@ type PostMessageRequest struct {
 	Body      string `json:"body"`
 	Origin    Origin `json:"origin"`
 	RequestID string `json:"request_id,omitempty"`
-}
-
-// EditMessageRequest carries the user making the edit, who must be
-// the user that posted the message.
-type EditMessageRequest struct {
-	Body string `json:"body"`
-	User string `json:"user"`
 }
 
 // DeleteRequest carries the user deleting a post or message, who must
@@ -245,11 +237,10 @@ type ChatOverview struct {
 	Revision int64      `json:"revision"`
 }
 
-// Change is a post added, edited or deleted, or a message posted,
-// edited or deleted in a post's chat. Message is nil for a change to
-// the post itself. Each carries its current content, so a post or
-// message changed twice after a cursor appears once, at its latest
-// change.
+// Change is a post added, edited or deleted, or a message posted or
+// deleted in a post's chat. Message is nil for a change to the post
+// itself. Each carries its current content, so a post or message
+// changed twice after a cursor appears once, at its latest change.
 type Change struct {
 	Post    ListedPost `json:"post"`
 	Message *Message   `json:"message,omitempty"`

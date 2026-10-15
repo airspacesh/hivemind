@@ -220,13 +220,12 @@ ON post_links(source_workspace_id, source_id) WHERE name = 'parent'`
 // createMessages defines the chat attached to posts. A message's id
 // counts from 1 within its post. post_order numbers every message on
 // the server, so the message text index and a search's candidates name
-// a message by one number. An edit overwrites the body, so no earlier
-// text is kept. revision is the revision of the posting or of the
-// latest edit, and posted_revision the revision of the posting, which
-// edits leave alone. deleted is 1 once a delete has cleared the body,
-// and 0 before. origin_user has a lowered twin for
-// createMessageOriginUserIndex to hold. request_id and request_digest
-// are as in posts.
+// a message by one number. revision is the revision of the posting or
+// of the delete, and posted_revision the revision of the posting, which
+// a delete leaves alone. deleted is 1 once a delete has cleared the
+// body, so no earlier text is kept, and 0 before. origin_user has a
+// lowered twin for createMessageOriginUserIndex to hold. request_id and
+// request_digest are as in posts.
 const createMessages = `
 CREATE TABLE post_messages (
 	post_order INTEGER PRIMARY KEY,

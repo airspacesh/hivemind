@@ -223,9 +223,6 @@ func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 		{"GET", "/api/posts/e1/messages?after=e1-m0", "", 200, ""},
 		{"GET", "/api/posts/x1/messages", "", 404, api.CodeUnknownPrefix},
 		{"GET", "/api/posts/e9/tree", "", 404, api.CodePostNotFound},
-		{"PATCH", "/api/posts/e1/messages/3",
-			`{"body":"x","user":"duck"}`, 404,
-			api.CodeMessageNotFound},
 		{"DELETE", "/api/posts/e1/messages/3", `{"user":"duck"}`, 404,
 			api.CodeMessageNotFound},
 		{"DELETE", "/api/posts/e9", `{"user":"duck"}`, 404,
@@ -372,23 +369,17 @@ func TestRefusedEditsAndDeletesOverHTTP(t *testing.T) {
 		{"PATCH", "/api/posts/e1",
 			`{"private":true,"origin":{"user":"heron"}}`, 403,
 			api.CodeNotOwner},
-		{"PATCH", "/api/posts/e1/messages/1",
-			`{"body":"taken","user":"heron"}`, 403, api.CodeNotOwner},
 		{"DELETE", "/api/posts/e1", `{"user":"heron"}`, 403,
 			api.CodeNotOwner},
 		{"DELETE", "/api/posts/e1/messages/1", `{"user":"heron"}`, 403,
 			api.CodeNotOwner},
 		{"PATCH", "/api/posts/e1", `{"subject":"taken"}`, 400,
 			api.CodeBadRequest},
-		{"PATCH", "/api/posts/e1/messages/1", `{"body":"taken"}`, 400,
-			api.CodeBadRequest},
 		{"DELETE", "/api/posts/e1", `{}`, 400, api.CodeBadRequest},
 		{"DELETE", "/api/posts/e1/messages/1", `{}`, 400,
 			api.CodeBadRequest},
 		{"PATCH", "/api/posts/e1",
 			`{"subject":"kept","origin":{"user":"duck"}}`, 200, ""},
-		{"PATCH", "/api/posts/e1/messages/1",
-			`{"body":"kept","user":"duck"}`, 200, ""},
 		{"DELETE", "/api/posts/e1", `{"user":"duck"}`, 200, ""},
 		{"DELETE", "/api/posts/e1/messages/1", `{"user":"duck"}`, 200,
 			""},
@@ -398,8 +389,6 @@ func TestRefusedEditsAndDeletesOverHTTP(t *testing.T) {
 		{"PATCH", "/api/posts/e1",
 			`{"remove_link_names":["see"],"origin":{"user":"duck"}}`,
 			409, api.CodeDeleted},
-		{"PATCH", "/api/posts/e1/messages/1",
-			`{"body":"back","user":"duck"}`, 409, api.CodeDeleted},
 		{"PATCH", "/api/posts/e1",
 			`{"subject":"back","origin":{"user":"heron"}}`, 409,
 			api.CodeDeleted},
@@ -450,7 +439,6 @@ func TestNoRequestChangesAnOriginOverHTTP(t *testing.T) {
 			path   string
 			body   string
 		}{
-			{"PATCH", "/api/posts/e1/messages/1", `"body":"x","user":"duck"`},
 			{"DELETE", "/api/posts/e1", `"user":"duck"`},
 			{"DELETE", "/api/posts/e1/messages/1", `"user":"duck"`},
 		} {
@@ -509,8 +497,6 @@ func TestChatReadsOverHTTP(t *testing.T) {
 		posted = append(posted,
 			url.QueryEscape(message.Created.Format(time.RFC3339Nano)))
 	}
-	s.must(t, "PATCH", "/api/posts/e1/messages/1",
-		`{"body":"one!","user":"duck"}`, "", http.StatusOK)
 
 	read := func(query string) string {
 		t.Helper()
@@ -529,18 +515,18 @@ func TestChatReadsOverHTTP(t *testing.T) {
 			strconv.Itoa(page.Remaining)
 	}
 	for query, want := range map[string]string{
-		"?after=e1-m0&limit=2": "e1-m1:one! e1-m2:two cursor=2 remaining=1",
+		"?after=e1-m0&limit=2": "e1-m1:one e1-m2:two cursor=2 remaining=1",
 		"?after=e1-m2":         "e1-m3:three cursor=3 remaining=0",
-		"?after=e1": "e1-m1:one! e1-m2:two e1-m3:three cursor=3 " +
+		"?after=e1": "e1-m1:one e1-m2:two e1-m3:three cursor=3 " +
 			"remaining=0",
-		"?after=2000-01-01T00:00:00Z&limit=1": "e1-m1:one! cursor=1 " +
+		"?after=2000-01-01T00:00:00Z&limit=1": "e1-m1:one cursor=1 " +
 			"remaining=2",
 		"?after=@2":              "e1-m2:two e1-m3:three cursor=3 remaining=0",
 		"?after=" + posted[1]:    "e1-m2:two e1-m3:three cursor=3 remaining=0",
-		"?before=" + posted[1]:   "e1-m1:one! cursor=1 remaining=0",
-		"?before=e1-m3":          "e1-m1:one! e1-m2:two cursor=2 remaining=0",
+		"?before=" + posted[1]:   "e1-m1:one cursor=1 remaining=0",
+		"?before=e1-m3":          "e1-m1:one e1-m2:two cursor=2 remaining=0",
 		"?after=e1-m1&before=@4": "e1-m2:two cursor=2 remaining=0",
-		"?before=e1-m3&limit=1":  "e1-m1:one! cursor=1 remaining=1",
+		"?before=e1-m3&limit=1":  "e1-m1:one cursor=1 remaining=1",
 		"?latest=2":              "e1-m2:two e1-m3:three cursor=3 remaining=0",
 		"?latest=2&after=e1-m2":  "e1-m3:three cursor=3 remaining=0",
 		"?latest=1&before=e1-m3": "e1-m2:two cursor=2 remaining=0",
@@ -772,8 +758,8 @@ func TestRequestLogKeepsNoClientText(t *testing.T) {
 		{"POST", "/api/posts/e1/messages",
 			`{"body":"MESSAGEMARK","origin":{"user":"duck"}}`, "",
 			http.StatusCreated},
-		{"PATCH", "/api/posts/e1/messages/1",
-			`{"body":"EDITMARK","user":"duck"}`, "", http.StatusOK},
+		{"DELETE", "/api/posts/e1/messages/1", `{"user":"duck"}`, "",
+			http.StatusOK},
 		{"POST", "/api/workspaces/general/posts", `{"FIELDMARK":1}`, "",
 			http.StatusBadRequest},
 		{"GET", "/api/workspaces/general/posts?subject=SEARCHMARK&limit=5",
@@ -803,7 +789,7 @@ func TestRequestLogKeepsNoClientText(t *testing.T) {
 		"issued e1\n",
 		"issued e1-m1\n",
 		"PATCH /api/posts/{ref} ref=e1 -> 200",
-		"PATCH /api/posts/{ref}/messages/{n} ref=e1 n=1 -> 200",
+		"DELETE /api/posts/{ref}/messages/{n} ref=e1 n=1 -> 200",
 		"GET /api/workspaces/{workspace}/posts workspace=general " +
 			"query=limit,subject -> 200",
 		"GET /api/workspaces/{workspace}/posts workspace=general " +

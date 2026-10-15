@@ -114,38 +114,28 @@ func TestOthersCanStillAddUnderAPostAndChatOnIt(t *testing.T) {
 	}
 }
 
-func TestOnlyThePosterCanEditOrDeleteAMessage(t *testing.T) {
+func TestOnlyThePosterCanDeleteAMessage(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	topic := addAs(t, store, "bob", "topic")
 	message := postAs(t, store, "alice", topic.Ref, "the answer")
 	key := store.mustKey(topic.Ref)
-	refusal := "e1-m1 was posted by alice, so only alice can edit or " +
-		"delete it"
 
-	// The post's own poster cannot edit its chat either, even with text
-	// that would change nothing.
-	for _, body := range []string{"a different answer", "the answer"} {
-		_, _, err := store.EditMessage(ctx, everyAccess(store), key,
-			message.Number,
-			api.EditMessageRequest{Body: body, User: "bob"})
-		assertNotOwner(t, err, refusal)
-	}
+	// The post's own poster cannot delete from its chat either.
 	_, err := store.DeleteMessage(ctx, everyAccess(store), key, message.Number,
 		api.DeleteRequest{User: "bob"})
-	assertNotOwner(t, err, refusal)
+	assertNotOwner(t, err, "e1-m1 was posted by alice, so only alice can "+
+		"delete it")
 	if got := readChat(t, store, topic.Ref, 0, 20); got.Messages[0].Body !=
 		"the answer" {
-		t.Fatalf("a refused change changed the message: %+v",
+		t.Fatalf("a refused delete changed the message: %+v",
 			got.Messages)
 	}
 
-	edited, changed, err := store.EditMessage(ctx, everyAccess(store), key,
-		message.Number,
-		api.EditMessageRequest{Body: "Retracted", User: "alice"})
-	if err != nil || !changed || edited.Body != "Retracted" {
-		t.Fatalf("the poster's own edit = %+v, %v, %v", edited, changed,
-			err)
+	deleted, err := store.DeleteMessage(ctx, everyAccess(store), key,
+		message.Number, api.DeleteRequest{User: "alice"})
+	if err != nil || !deleted.Deleted {
+		t.Fatalf("the poster's own delete = %+v, %v", deleted, err)
 	}
 }
 
@@ -162,16 +152,11 @@ func TestNobodyCanDeleteWhatRecordsNoUser(t *testing.T) {
 	key := store.mustKey(post.Ref)
 
 	postRefusal := "e1 records no user, so nobody can delete it"
-	messageRefusal := "e1-m1 records no user, so nobody can edit or " +
-		"delete it"
+	messageRefusal := "e1-m1 records no user, so nobody can delete it"
 	for _, user := range []string{"duck", ""} {
 		_, err := store.Delete(ctx, everyAccess(store), key,
 			api.DeleteRequest{User: user})
 		assertNotOwner(t, err, postRefusal)
-		_, _, err = store.EditMessage(ctx, everyAccess(store), key,
-			message.Number,
-			api.EditMessageRequest{Body: "claimed", User: user})
-		assertNotOwner(t, err, messageRefusal)
 		_, err = store.DeleteMessage(ctx, everyAccess(store), key,
 			message.Number,
 			api.DeleteRequest{User: user})

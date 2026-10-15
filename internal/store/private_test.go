@@ -220,11 +220,6 @@ func TestOnlyTheOwnerReadsAPrivatePostAndWhatIsUnderIt(t *testing.T) {
 					Origin: api.Origin{User: "bob"}})
 			return err
 		},
-		"chat edit": func() error {
-			_, _, err := store.EditMessage(ctx, bob, draftKey, 1,
-				api.EditMessageRequest{Body: "hi", User: "bob"})
-			return err
-		},
 		"edit": func() error {
 			_, err := setPrivate(store, "bob", draft.Ref, false)
 			return err
