@@ -141,6 +141,17 @@ func explainNotOwner(err error, post api.Ref) error {
 		post)
 }
 
+// explainVersionConflict adds the next step to an edit refused because
+// the post is at another version than it expected.
+func explainVersionConflict(err error, post api.Ref) error {
+	var refused *serverError
+	if !errors.As(err, &refused) || refused.code != api.CodeVersionConflict {
+		return err
+	}
+	return fmt.Errorf("%w. Re-read it with '%s post %s' before editing "+
+		"it again", err, programName, post)
+}
+
 func postPath(ref api.Ref, rest string) string {
 	return "/api/posts/" + ref.String() + rest
 }
@@ -435,7 +446,8 @@ func cmdAdd(c *client, args []string) error {
 
 func cmdEdit(c *client, args []string) error {
 	p, err := parseArgs(args, flagSpec{
-		strs:  []string{"--project", "--subject", "--body", "--parent"},
+		strs: []string{"--project", "--subject", "--body", "--parent",
+			"--expected-version"},
 		bools: []string{"--private", "--public"},
 		repeat: append(
 			[]string{"--meta", "--supersedes", "--link", "--unlink"},
@@ -449,7 +461,7 @@ func cmdEdit(c *client, args []string) error {
 			"[--body <b>] [--meta <key>=<value>]... " +
 			"[--parent <ref>|\"\"] [--supersedes <ref>]... " +
 			"[--link <name>=<ref>]... [--unlink <name>[=<ref>]]... " +
-			"[--private|--public]")
+			"[--private|--public] [--expected-version <n>]")
 	}
 	ref, err := api.ParseRef(p.pos[0])
 	if err != nil {
@@ -481,6 +493,15 @@ func cmdEdit(c *client, args []string) error {
 	if p.bools["--private"] || p.bools["--public"] {
 		private := p.bools["--private"]
 		request.Private = &private
+	}
+	if p.has("--expected-version") {
+		expected, err := parsePositive("--expected-version",
+			p.strs["--expected-version"])
+		if err != nil {
+			return err
+		}
+		version := int64(expected)
+		request.ExpectedVersion = &version
 	}
 	metadata, err := collectMetadata(p)
 	if err != nil {
@@ -520,8 +541,8 @@ func cmdEdit(c *client, args []string) error {
 	}
 	var post api.Post
 	if err := c.do(t, "PATCH", postPath(ref, ""), request, &post); err != nil {
-		return uncertainWrite(explainNotOwner(err, ref), "The edit",
-			programName+" post "+ref.String())
+		return uncertainWrite(explainVersionConflict(explainNotOwner(err,
+			ref), ref), "The edit", programName+" post "+ref.String())
 	}
 	fmt.Printf("Edited post [%s], now at version %d.\n", post.Ref,
 		post.Version.Number)

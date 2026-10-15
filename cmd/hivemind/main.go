@@ -35,6 +35,7 @@ Usage:
          [--meta <key>=<value>]... [--parent <ref>|""]
          [--supersedes <ref>]... [--link <name>=<ref>]...
          [--unlink <name>[=<ref>]]... [--private|--public]
+         [--expected-version <n>]
   {program} delete <ref>
   {program} post <ref> [--version <n>]
   {program} message <ref>-m<n>
@@ -123,7 +124,10 @@ Editing and deleting:
   version. '{program} post <ref>' shows the current version and who
   made it when, and '{program} post <ref> --version <n>' shows an
   earlier one in full. A version's links leave out the posts you cannot
-  read now.
+  read now. 'edit --expected-version <n>' refuses the edit unless the
+  post is still at version n, so an edit made from what you read cannot
+  overwrite an edit made since. Without it, an edit applies to whatever
+  version the post is at.
 
   '{program} delete <ref>' deletes a post. Its subject, body and
   metadata are removed for good, from every version. Its id, project,

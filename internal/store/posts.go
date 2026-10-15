@@ -363,6 +363,19 @@ func (e *DeletedError) Error() string {
 	return e.deleted + " was deleted, so it cannot be edited"
 }
 
+// VersionConflictError refuses an edit that expected the post at
+// another version than its current one.
+type VersionConflictError struct {
+	post     string
+	current  int64
+	expected int64
+}
+
+func (e *VersionConflictError) Error() string {
+	return fmt.Sprintf("%s is at version %d, not %d", e.post, e.current,
+		e.expected)
+}
+
 // postState is what decides whether a post can be changed, and how a
 // change to its visibility goes: the user who posted it, whether it is
 // deleted, whether its owner made it private, and who alone can read
@@ -577,6 +590,16 @@ func (s *Store) Edit(
 	}
 	if state.deleted {
 		return api.Post{}, &DeletedError{deleted: ref.String()}
+	}
+	if req.ExpectedVersion != nil {
+		current, err := v.currentVersion(ctx, key)
+		if err != nil {
+			return api.Post{}, err
+		}
+		if current.Number != *req.ExpectedVersion {
+			return api.Post{}, &VersionConflictError{post: ref.String(),
+				current: current.Number, expected: *req.ExpectedVersion}
+		}
 	}
 	if len(req.Metadata) > 0 {
 		if err := v.writeMetadata(ctx, key, req.Metadata); err != nil {

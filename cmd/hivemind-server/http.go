@@ -68,6 +68,7 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	var notOwner *store.NotOwnerError
 	var deleted *store.DeletedError
 	var shared *store.SharedError
+	var conflict *store.VersionConflictError
 	switch {
 	case errors.Is(err, store.ErrInvalidFilter),
 		errors.Is(err, store.ErrInvalidTreeLimit),
@@ -110,6 +111,9 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	case errors.As(err, &shared):
 		status, code, message = http.StatusConflict,
 			api.CodeConflict, err.Error()
+	case errors.As(err, &conflict):
+		status, code, message = http.StatusConflict,
+			api.CodeVersionConflict, err.Error()
 	case errors.Is(err, context.DeadlineExceeded), store.IsBusy(err):
 		status, code, message = http.StatusServiceUnavailable,
 			api.CodeUnavailable, "server is busy or the request timed out"

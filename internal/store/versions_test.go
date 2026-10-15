@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -92,5 +93,39 @@ func TestAVersionReadsBackAsItWas(t *testing.T) {
 	if current := mustGet(t, store, added.Ref).Version; *current !=
 		mustVersion(t, store, added.Ref, 3).Version {
 		t.Fatalf("the post is at %+v, want version 3", current)
+	}
+}
+
+func TestAnEditExpectingAnotherVersionIsRefused(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	post := mustAdd(t, store, "plan", "", nil)
+	key := store.mustKey(post.Ref)
+	edit := func(subject string, expected int64) (api.Post, error) {
+		return store.Edit(ctx, everyAccess(store), key, api.EditPostRequest{
+			Subject: &subject, ExpectedVersion: &expected,
+			Origin: api.Origin{User: "bob"},
+		})
+	}
+	if _, err := edit("plan, revised", 1); err != nil {
+		t.Fatal(err)
+	}
+	before := mustGet(t, store, post.Ref)
+
+	_, err := edit("plan, from a stale read", 1)
+	var conflict *VersionConflictError
+	if !errors.As(err, &conflict) ||
+		err.Error() != "e1 is at version 2, not 1" {
+		t.Fatalf("a stale edit = %v, want a refusal naming version 2", err)
+	}
+	if after := mustGet(t, store, post.Ref); !reflect.DeepEqual(after,
+		before) {
+		t.Fatalf("a refused edit changed the post:\n%+v\nwas\n%+v", after,
+			before)
+	}
+	if edited, err := edit("plan, from a fresh read", 2); err != nil ||
+		edited.Version.Number != 3 {
+		t.Fatalf("an edit expecting the current version = %+v, %v",
+			edited.Version, err)
 	}
 }

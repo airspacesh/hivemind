@@ -298,6 +298,9 @@ type EditPostRequest struct {
 	RemoveLinkNames []string `json:"remove_link_names,omitempty"`
 	// Private makes the post private when true, and public when false.
 	Private *bool `json:"private,omitempty"`
+	// ExpectedVersion, when set, refuses the edit unless the post is at
+	// that version.
+	ExpectedVersion *int64 `json:"expected_version,omitempty"`
 	// Origin records who makes the edit, and where, as the version it
 	// makes keeps it. Only the user who wrote the post can edit it while
 	// it is private, or make it private or public.
@@ -412,6 +415,7 @@ const (
 	CodeLinkNotFound       ErrorCode = "link_not_found"
 	CodeLinkTargetNotFound ErrorCode = "link_target_not_found"
 	CodeConflict           ErrorCode = "conflict"
+	CodeVersionConflict    ErrorCode = "version_conflict"
 	CodeNotOwner           ErrorCode = "not_owner"
 	CodeDeleted            ErrorCode = "deleted"
 	CodeTooLarge           ErrorCode = "too_large"

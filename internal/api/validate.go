@@ -359,6 +359,9 @@ func (r EditPostRequest) Validate() error {
 	if err := validateMetadataEdits(r.Metadata); err != nil {
 		return err
 	}
+	if r.ExpectedVersion != nil && *r.ExpectedVersion < 1 {
+		return fmt.Errorf("the expected version must be 1 or more")
+	}
 	if err := validateEditor(r.Origin.User); err != nil {
 		return err
 	}

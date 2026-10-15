@@ -529,9 +529,16 @@ check "an earlier version shows who made it" "Version: 1, by heron at " \
     "$heron_v1"
 check_equal "an earlier version keeps its own text" "" \
     "$(echo "$heron_v1" | grep 'Detail from another user' || true)"
+check "an edit expecting an older version is refused" \
+    "$heron is at version 2, not 1. Re-read it with 'hivemind post $heron' before editing it again" \
+    "$(hivemind edit "$heron" --body "Stale" --expected-version 1 2>&1 ||
+        true)"
+check_equal "an edit expecting the current version applies" \
+    "Edited post [$heron], now at version 3." \
+    "$(hivemind edit "$heron" --body "Fresh" --expected-version 2)"
 check "a version past the current one is not found" \
-    "$heron has no version 3" \
-    "$(hivemind post "$heron" --version 3 2>&1 || true)"
+    "$heron has no version 4" \
+    "$(hivemind post "$heron" --version 4 2>&1 || true)"
 check "only the owner makes a post private" \
     "$heron was posted by heron, so only heron can make it private or public" \
     "$(hivemind edit "$heron" --private 2>&1 || true)"
