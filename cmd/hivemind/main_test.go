@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -256,6 +258,93 @@ func TestListWorkspacesKeepsConfigOrder(t *testing.T) {
 	}
 }
 
+// homeWithSettings makes a home directory whose hivemind settings file
+// holds text, and returns it.
+func homeWithSettings(t *testing.T, text string) string {
+	t.Helper()
+	home := t.TempDir()
+	directory := filepath.Join(home, ".agents", "hivemind")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := os.WriteFile(filepath.Join(directory, "settings.yml"),
+		[]byte(text), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return home
+}
+
+func TestJoinSetsTheDefaultWorkspaceAndLinksTheSkill(t *testing.T) {
+	var mu sync.Mutex
+	var asked []string
+	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked = append(asked, r.URL.Path)
+		mu.Unlock()
+		reply(w, http.StatusOK, api.ProjectsResponse{})
+	})
+	skill := filepath.Join(t.TempDir(), "dug-hivemind")
+	if err := os.Mkdir(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := os.WriteFile(filepath.Join(skill, "SKILL.md"), nil, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := writeConfig(t, fmt.Sprintf("workspaces:\n  general:\n    "+
+		"server: %s\n  dugwave:\n    server: %[1]s\njoin:\n  skill: %s\n",
+		server.URL, skill), 0o600)
+
+	// Claude's skills directory is empty, the agents' already holds
+	// another link of the skill's name, and Copilot has none.
+	home := t.TempDir()
+	claude := filepath.Join(home, ".claude", "skills")
+	agents := filepath.Join(home, ".agents", "skills")
+	for _, directory := range []string{claude, agents} {
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	other := filepath.Join(agents, "dug-hivemind")
+	if err := os.Symlink("/elsewhere/dug-hivemind", other); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"HIVEMIND_CONFIG=" + config, "HOME=" + home}
+
+	got := runBinary(t, hivemindBinary, env, "join", "dugwave")
+	if !got.ok || !strings.Contains(got.stdout,
+		"Linked the dug-hivemind skill into ~/.claude/skills.") ||
+		!strings.Contains(got.stdout,
+			"Left ~/.agents/skills/dug-hivemind alone") {
+		t.Fatalf("join: %+v", got)
+	}
+	if target, err := os.Readlink(filepath.Join(claude,
+		"dug-hivemind")); err != nil || target != skill {
+		t.Errorf("Claude's skill links to %q (%v), want %s", target, err,
+			skill)
+	}
+	if target, _ := os.Readlink(other); target != "/elsewhere/dug-hivemind" {
+		t.Errorf("join replaced the other link with one to %q", target)
+	}
+	_, err = os.Lstat(filepath.Join(home, ".copilot"))
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("join made Copilot's skills directory: %v", err)
+	}
+
+	got = runBinary(t, hivemindBinary, env, "list-projects")
+	if !got.ok || len(asked) != 1 ||
+		asked[0] != "/api/workspaces/dugwave/projects" {
+		t.Errorf("list-projects after join asked %v: %+v", asked, got)
+	}
+
+	got = runBinary(t, hivemindBinary, env, "join", "dugwave")
+	if !got.ok || !strings.Contains(got.stdout,
+		"The dug-hivemind skill was already linked in ~/.claude/skills.") {
+		t.Errorf("join again: %+v", got)
+	}
+}
+
 func TestWorkspaceChoiceOrder(t *testing.T) {
 	var asked []string
 	var mu sync.Mutex
@@ -271,6 +360,7 @@ func TestWorkspaceChoiceOrder(t *testing.T) {
 	env := func(pairs ...string) []string {
 		return append([]string{"HIVEMIND_CONFIG=" + config}, pairs...)
 	}
+	joined := homeWithSettings(t, "default_workspace: other\n")
 
 	runs := []struct {
 		env  []string
@@ -278,8 +368,10 @@ func TestWorkspaceChoiceOrder(t *testing.T) {
 		want string
 	}{
 		{env(), nil, "general"},
-		{env("HIVEMIND_DEFAULT_WORKSPACE=other"), nil, "other"},
-		{env("HIVEMIND_DEFAULT_WORKSPACE=other"),
+		{env("HOME=" + joined), nil, "other"},
+		{env("HOME="+joined, "HIVEMIND_DEFAULT_WORKSPACE=third"), nil,
+			"third"},
+		{env("HOME="+joined, "HIVEMIND_DEFAULT_WORKSPACE=other"),
 			[]string{"--workspace", "third"}, "third"},
 	}
 	for _, run := range runs {
@@ -299,6 +391,14 @@ func TestWorkspaceChoiceOrder(t *testing.T) {
 		"list-projects")
 	if got.ok || !strings.Contains(got.stderr, `"gone"`) {
 		t.Errorf("an unconfigured default workspace: %+v", got)
+	}
+	got = runBinary(t, hivemindBinary,
+		env("HOME="+homeWithSettings(t, "default_workspace: gone\n")),
+		"list-projects")
+	if got.ok || !strings.Contains(got.stderr, `"gone"`) ||
+		!strings.Contains(got.stderr, "'hivemind join <name>'") ||
+		!strings.Contains(got.stderr, "general, other, third") {
+		t.Errorf("a settings file naming an unconfigured workspace: %+v", got)
 	}
 	got = runBinary(t, hivemindBinary, env(), "list-projects",
 		"--workspace", "gone")

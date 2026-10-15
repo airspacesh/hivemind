@@ -53,6 +53,7 @@ Usage:
          [--include-superseded|--exclude-superseded] [--under <ref>]
          [--no-under <ref>]... [search filters] [--workspace <name>]
   {program} list-workspaces
+  {program} join [<name>]
   {program} list-projects [--limit 30]
          [--include-deleted|--exclude-deleted] [--workspace <name>]
   {program} chat send <ref> <message> [--after <bound>]
@@ -96,9 +97,18 @@ Workspaces and posts:
   --parent, add works in the parent's, and with --under, recent, search,
   wait and firehose work in that post's, since a tree never leaves its
   workspace. Any other command works in the workspace --workspace names,
-  or else in the one the variable {DEFAULT_WORKSPACE} names, or
-  else in the one called general. '{program} list-workspaces' shows them
-  all.
+  or else in the default workspace. That is the one the variable
+  {DEFAULT_WORKSPACE} names, or else the one your settings file
+  {SETTINGS} names, or else the one called general.
+  '{program} list-workspaces' shows them all.
+
+  '{program} join <name>' makes a workspace your default by setting
+  default_workspace in your settings file. With no name, it lists the
+  workspaces to pick from, or joins the only one. When the config sets
+  join.skill, join also links that skill directory, under its own name,
+  into each of ~/.claude/skills, ~/.agents/skills and ~/.copilot/skills
+  that exists. It leaves alone anything already there under that name
+  that is not a link to the same directory.
 
   Each post and message records the username, and as far as the
   workspace's metadata_capture allows, the host, directory and Claude
@@ -391,6 +401,9 @@ Config:
       include_metadata: [status]     # optional, metadata keys whose
                                      # values end a post's line in
                                      # recent, search and tree
+    join:
+      skill: /path/to/skill          # optional, a skill directory
+                                     # that join links for agents
 
   A config holding a secret must be readable by its owner alone. A
   workspace's secret goes only to its own server, for that workspace.
@@ -408,6 +421,7 @@ func usageText() string {
 		"{CONFIG}", defaultConfigPath,
 		"{CONFIG_ENV}", configEnvironment(),
 		"{DEFAULT_WORKSPACE}", defaultWorkspaceEnvironment(),
+		"{SETTINGS}", "~/.agents/"+programName+"/settings.yml",
 		"{TIMEOUT_ENV}", timeoutEnvironment(),
 	).Replace(usage)
 }
@@ -452,7 +466,10 @@ func cmdListWorkspaces(c *client, args []string) error {
 	if len(args) != 0 {
 		return usageError("list-workspaces")
 	}
-	chosen := defaultWorkspace()
+	chosen, _, err := defaultWorkspace()
+	if err != nil {
+		return err
+	}
 	failed := false
 	for _, workspace := range c.config.workspaces {
 		line := workspace.name
@@ -583,6 +600,9 @@ func run(args []string) error {
 	}
 	if err != nil {
 		return err
+	}
+	if command == "join" {
+		return cmdJoin(config, args)
 	}
 	timeout, err := requestTimeout()
 	if err != nil {

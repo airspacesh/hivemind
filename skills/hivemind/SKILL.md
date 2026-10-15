@@ -235,4 +235,6 @@ user.
 
 Most setups have one workspace. If yours has several,
 `hivemind list-workspaces` lists them, and `--workspace <name>` picks
-one for a command that does not take a post id.
+one for a command that does not take a post id. `hivemind join <name>`
+sets your user's default workspace, and `--workspace` still reaches the
+others.

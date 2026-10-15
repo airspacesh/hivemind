@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -71,12 +72,20 @@ func (m *metadataCapture) UnmarshalYAML(node *yaml.Node) error {
 type configFile struct {
 	Workspaces map[string]workspaceFile `yaml:"workspaces"`
 	Listings   listingsFile             `yaml:"listings"`
+	Join       joinFile                 `yaml:"join"`
 }
 
 // listingsFile is how listings show posts. IncludeMetadata names the
 // metadata keys whose values end a post's line, in that order.
 type listingsFile struct {
 	IncludeMetadata []string `yaml:"include_metadata"`
+}
+
+// joinFile is what 'join' does beyond setting the default workspace.
+// Skill is a skill's directory to link into each agent's skills
+// directory.
+type joinFile struct {
+	Skill string `yaml:"skill"`
 }
 
 type workspaceFile struct {
@@ -108,6 +117,8 @@ type clientConfig struct {
 	// listingMetadata names the metadata keys whose values end a post's
 	// line in recent, search and tree, in order.
 	listingMetadata []string
+	// joinSkill is the skill directory 'join' links, or empty for none.
+	joinSkill string
 }
 
 var errNoConfig = errors.New("no config file")
@@ -262,8 +273,14 @@ func loadConfig(path string) (clientConfig, error) {
 			"must name at least one workspace", path)
 	}
 
+	if file.Join.Skill != "" && !filepath.IsAbs(file.Join.Skill) {
+		return clientConfig{}, fmt.Errorf("invalid config %s: join.skill "+
+			"must be an absolute path", path)
+	}
+
 	config := clientConfig{path: path,
-		listingMetadata: file.Listings.IncludeMetadata}
+		listingMetadata: file.Listings.IncludeMetadata,
+		joinSkill:       file.Join.Skill}
 	owners := map[string]string{}
 	holdsSecret := false
 	for _, name := range names {
@@ -315,42 +332,114 @@ func (c clientConfig) names() string {
 	return strings.Join(names, ", ")
 }
 
-// fallbackWorkspace is the default workspace when
-// <PREFIX>_DEFAULT_WORKSPACE names none.
+// fallbackWorkspace is the default workspace when neither
+// <PREFIX>_DEFAULT_WORKSPACE nor the settings file names one.
 const fallbackWorkspace = "general"
 
-// defaultWorkspace names the workspace a command uses when it is given
-// no --workspace: the one <PREFIX>_DEFAULT_WORKSPACE names, or
-// fallbackWorkspace.
-func defaultWorkspace() string {
-	if name := os.Getenv(defaultWorkspaceEnvironment()); name != "" {
-		return name
+// settingsFile is the user's own settings, which 'join' writes.
+type settingsFile struct {
+	DefaultWorkspace string `yaml:"default_workspace"`
+}
+
+func settingsPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("finding the settings file: %w", err)
 	}
-	return fallbackWorkspace
+	return filepath.Join(home, ".agents", programName, "settings.yml"), nil
+}
+
+// readSettings reads the settings at path, which are empty when there
+// is no file.
+func readSettings(path string) (settingsFile, error) {
+	text, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return settingsFile{}, nil
+	}
+	if err != nil {
+		return settingsFile{}, fmt.Errorf("reading the settings: %w", err)
+	}
+	var settings settingsFile
+	decoder := yaml.NewDecoder(bytes.NewReader(text))
+	decoder.KnownFields(true)
+	err = decoder.Decode(&settings)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return settingsFile{}, fmt.Errorf("invalid settings %s: %w", path, err)
+	}
+	return settings, nil
+}
+
+func writeSettings(path string, settings settingsFile) error {
+	text, err := yaml.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("writing the settings: %w", err)
+	}
+	if err := os.WriteFile(path, text, 0o644); err != nil {
+		return fmt.Errorf("writing the settings: %w", err)
+	}
+	return nil
+}
+
+// defaultWorkspace names the workspace a command uses when it is given
+// no --workspace, and where that name came from: the variable
+// <PREFIX>_DEFAULT_WORKSPACE, or else the settings file, or else
+// nowhere, for fallbackWorkspace.
+func defaultWorkspace() (name, source string, err error) {
+	if name := os.Getenv(defaultWorkspaceEnvironment()); name != "" {
+		return name, defaultWorkspaceEnvironment(), nil
+	}
+	path, err := settingsPath()
+	if err != nil {
+		return "", "", err
+	}
+	settings, err := readSettings(path)
+	if err != nil {
+		return "", "", err
+	}
+	if settings.DefaultWorkspace != "" {
+		return settings.DefaultWorkspace, path, nil
+	}
+	return fallbackWorkspace, "", nil
 }
 
 // chooseWorkspace finds the workspace for a command that takes no post
 // id: the one --workspace names, or else the default.
 func (c clientConfig) chooseWorkspace(flag string) (workspaceConfig, error) {
-	name := flag
-	source := "--workspace"
-	if name == "" {
-		name = defaultWorkspace()
-		source = defaultWorkspaceEnvironment()
+	if flag != "" {
+		if workspace, ok := c.find(flag); ok {
+			return workspace, nil
+		}
+		return workspaceConfig{}, fmt.Errorf("--workspace names workspace "+
+			"%q, which %s does not configure (configured: %s)", flag, c.path,
+			c.names())
+	}
+
+	name, source, err := defaultWorkspace()
+	if err != nil {
+		return workspaceConfig{}, err
 	}
 	if workspace, ok := c.find(name); ok {
 		return workspace, nil
 	}
-
-	if flag == "" && os.Getenv(defaultWorkspaceEnvironment()) == "" {
+	switch source {
+	case "":
 		return workspaceConfig{}, fmt.Errorf("%s configures no workspace "+
-			"called %s. Pass --workspace <name> or set %s (configured: %s)",
-			c.path, fallbackWorkspace, defaultWorkspaceEnvironment(),
+			"called %s. Pick a default workspace with '%s join <name>', or "+
+			"pass --workspace <name> (configured: %s)", c.path,
+			fallbackWorkspace, programName, c.names())
+	case defaultWorkspaceEnvironment():
+		return workspaceConfig{}, fmt.Errorf("%s names workspace %q, which "+
+			"%s does not configure (configured: %s)", source, name, c.path,
+			c.names())
+	default:
+		return workspaceConfig{}, fmt.Errorf("%s names default workspace "+
+			"%q, which %s does not configure. Pick another with '%s join "+
+			"<name>' (configured: %s)", source, name, c.path, programName,
 			c.names())
 	}
-	return workspaceConfig{}, fmt.Errorf("%s names workspace %q, which %s "+
-		"does not configure (configured: %s)", source, name, c.path,
-		c.names())
 }
 
 // missingConfigHelp explains how to write the config at path.

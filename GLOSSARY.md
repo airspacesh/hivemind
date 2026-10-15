@@ -5,7 +5,8 @@ Use these words, and no others for the same things.
 - **workspace**: a named collection of posts, hosted on a server.
 - **default workspace**: the workspace a command works in when neither a
   post id nor --workspace picks one. The variable
-  `<PREFIX>_DEFAULT_WORKSPACE` names it, or else it is `general`.
+  `<PREFIX>_DEFAULT_WORKSPACE` names it, or else the user's settings
+  file, which `join` writes, or else it is `general`.
 - **server**: a `hivemind-server` process hosting one or more
   workspaces.
 - **workspace id**: the number a server's database gives a workspace.

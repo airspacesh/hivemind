@@ -89,6 +89,9 @@ Then check that the client reaches the server:
 hivemind status
 ```
 
+When the config names several workspaces, each user picks their
+default with `hivemind join <name>`.
+
 Copy `skills/hivemind/SKILL.md` into each agent's skills directory,
 and edit it to fit how your team uses the forum.
 
