@@ -349,20 +349,30 @@ func (v view) touchPost(ctx context.Context, key Key, now string) (int64,
 // NotOwnerError refuses a change that only the user who wrote the post
 // or message can make, by anyone else. Nobody can make it to one that
 // records no user. action says what the change does to it, like
-// "delete it".
+// "delete it". byWorkspace says the post's workspace is what allows
+// only its owner to make the change.
 type NotOwnerError struct {
-	posted string
-	owner  string
-	action string
+	posted      string
+	owner       string
+	action      string
+	byWorkspace bool
 }
 
 func (e *NotOwnerError) Error() string {
+	posted := fmt.Sprintf("%s was posted by %s", e.posted, e.owner)
 	if e.owner == "" {
-		return fmt.Sprintf("%s records no user, so nobody can %s",
-			e.posted, e.action)
+		posted = e.posted + " records no user"
 	}
-	return fmt.Sprintf("%s was posted by %s, so only %s can %s",
-		e.posted, e.owner, e.owner, e.action)
+	switch {
+	case e.byWorkspace:
+		return fmt.Sprintf("%s, and this workspace lets only a post's "+
+			"own user %s", posted, e.action)
+	case e.owner == "":
+		return fmt.Sprintf("%s, so nobody can %s", posted, e.action)
+	default:
+		return fmt.Sprintf("%s, so only %s can %s", posted, e.owner,
+			e.action)
+	}
 }
 
 // checkEditor refuses a change by editor to something owner posted,
@@ -570,18 +580,30 @@ func (v view) writeVisibility(
 	return true, nil
 }
 
+// PostEditors says who can edit the public posts of a workspace.
+type PostEditors string
+
+const (
+	// PostEditorsAnyone lets anyone edit a public post.
+	PostEditorsAnyone PostEditors = "anyone"
+	// PostEditorsOwner lets only the user who wrote a post edit it.
+	PostEditorsOwner PostEditors = "owner"
+)
+
 // Edit overwrites a post's fields and changes its metadata and links.
 // An edit that changes its fields, metadata or parent makes the post's
 // next version, and the versions before keep what it overwrote. Other
 // links are not versioned. An edit that changes nothing a version
 // records, nor who can read the post, makes no version and no change.
-// Anyone can edit a public post. Only the user who wrote the post can
-// edit it while it is private or under a private post, or make it
-// private or public. Nobody can edit a deleted post.
+// editors says who can edit a public post, the post's workspace's
+// post_editors. Only the user who wrote the post can edit it while it
+// is private or under a private post, or make it private or public.
+// Nobody can edit a deleted post.
 func (s *Store) Edit(
 	ctx context.Context,
 	access Access,
 	key Key,
+	editors PostEditors,
 	req api.EditPostRequest,
 ) (api.Post, error) {
 	if req.EditsNothing() {
@@ -598,11 +620,20 @@ func (s *Store) Edit(
 		return api.Post{}, err
 	}
 	ref := v.store.mustRef(key)
-	if state.privateTo != "" {
+	switch {
+	case state.privateTo != "":
 		if err := checkEditor(ref, state.owner, req.Origin.User,
 			"edit it"); err != nil {
 			return api.Post{}, err
 		}
+	case editors == PostEditorsOwner:
+		if err := checkEditor(ref, state.owner, req.Origin.User,
+			"edit it"); err != nil {
+			return api.Post{}, &NotOwnerError{posted: ref.String(),
+				owner: state.owner, action: "edit it", byWorkspace: true}
+		}
+	case editors != PostEditorsAnyone:
+		panic(fmt.Sprintf("unknown post editors %q", editors))
 	}
 	if req.Private != nil {
 		if err := checkEditor(ref, state.owner, req.Origin.User,

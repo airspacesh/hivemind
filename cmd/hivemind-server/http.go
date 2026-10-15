@@ -168,10 +168,11 @@ func limitRequestBody(next http.Handler) http.Handler {
 
 // serverWorkspace is a workspace this server hosts, with the hash of
 // the Authorization header that grants access to it, or nil when it is
-// open.
+// open, and who can edit its public posts.
 type serverWorkspace struct {
 	store.Workspace
-	credential *[sha256.Size]byte
+	credential  *[sha256.Size]byte
+	postEditors store.PostEditors
 }
 
 func newServerWorkspaces(
@@ -180,6 +181,7 @@ func newServerWorkspaces(
 	hosted := make([]serverWorkspace, len(workspaces))
 	for i, workspace := range workspaces {
 		hosted[i].Workspace = workspace
+		hosted[i].postEditors = config.Workspaces[workspace.Name].PostEditors
 		auth := config.Workspaces[workspace.Name].Auth
 		if auth != nil {
 			credential := sha256.Sum256([]byte("Bearer " + auth.Secret))
@@ -288,6 +290,17 @@ func (h *handler) postKey(
 		}
 	}
 	return key, true
+}
+
+// postEditors says who can edit the public posts of a workspace the
+// server hosts.
+func (h *handler) postEditors(workspace int64) store.PostEditors {
+	for _, hosted := range h.workspaces {
+		if hosted.ID == workspace {
+			return hosted.postEditors
+		}
+	}
+	panic(fmt.Sprintf("workspace %d is not hosted", workspace))
 }
 
 // logRequests logs one line per request from facts the server

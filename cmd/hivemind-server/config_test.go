@@ -88,6 +88,13 @@ workspaces:
   other:
     prefix: e
 `, "both have prefix e"},
+		{"unknown post_editors", `
+db: /srv/hivemind/hivemind.db
+workspaces:
+  general:
+    prefix: e
+    post_editors: owners
+`, `workspace general: post_editors must be anyone or owner, not "owners"`},
 		{"empty secret", `
 db: /srv/hivemind/hivemind.db
 workspaces:

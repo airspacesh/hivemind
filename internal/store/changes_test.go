@@ -89,7 +89,7 @@ func TestChangesListAChangeAgainOnlyWhenItChangesAfterTheCursor(t *testing.T) {
 	for i, post := range []api.Post{unseen, seen, unseen} {
 		subject := fmt.Sprintf("edited %d", i)
 		if _, err := store.Edit(ctx, everyAccess(store),
-			store.mustKey(post.Ref),
+			store.mustKey(post.Ref), PostEditorsAnyone,
 			api.EditPostRequest{Subject: &subject,
 				Origin: api.Origin{User: testUser}},
 		); err != nil {
@@ -120,7 +120,7 @@ func TestAMoveIsAChangeButOtherLinksAreNot(t *testing.T) {
 	edit := func(add api.Link) api.Post {
 		t.Helper()
 		edited, err := store.Edit(context.Background(), everyAccess(store),
-			store.mustKey(post.Ref), api.EditPostRequest{
+			store.mustKey(post.Ref), PostEditorsAnyone, api.EditPostRequest{
 				AddLinks: []api.Link{add}, Origin: bob})
 		if err != nil {
 			t.Fatal(err)
@@ -189,7 +189,7 @@ func TestRefusedEditsTakeNoRevision(t *testing.T) {
 
 	private := true
 	if _, err := store.Edit(ctx, everyAccess(store),
-		store.mustKey(post.Ref), api.EditPostRequest{
+		store.mustKey(post.Ref), PostEditorsAnyone, api.EditPostRequest{
 			Private: &private, Origin: api.Origin{User: "heron"}}); err == nil {
 		t.Fatal("another user made the post private")
 	}
@@ -269,7 +269,7 @@ func TestChangesStayInTheirWorkspace(t *testing.T) {
 	})
 	mustPostMessage(t, store, private.Ref, "PRIVATEMARK")
 	if _, err := store.Edit(context.Background(), everyAccess(store),
-		store.mustKey(open.Ref), api.EditPostRequest{
+		store.mustKey(open.Ref), PostEditorsAnyone, api.EditPostRequest{
 			AddLinks: []api.Link{link("see", private.Ref)},
 			Origin:   api.Origin{User: testUser},
 		}); err != nil {
@@ -409,7 +409,7 @@ func TestFilteredChangesShowEachMatchOnceAtAnyLimitAndSpan(t *testing.T) {
 	// The edit's origin, not the post's, decides whose change it is.
 	subject := "pond, edited"
 	if _, err := store.Edit(context.Background(), everyAccess(store),
-		store.mustKey(pond.Ref), api.EditPostRequest{
+		store.mustKey(pond.Ref), PostEditorsAnyone, api.EditPostRequest{
 			Subject: &subject,
 			Origin:  bare}); err != nil {
 		t.Fatal(err)
@@ -586,12 +586,13 @@ func TestAPostChangeIsMineByWhoeverMadeIt(t *testing.T) {
 		{"alice adds", func() error { return nil }, alice},
 		{"bob edits", func() error {
 			_, err := store.Edit(ctx, everyAccess(store), key,
+				PostEditorsAnyone,
 				api.EditPostRequest{Subject: &subject, Origin: bob})
 			return err
 		}, bob},
 		{"alice links", func() error {
 			_, err := store.Edit(ctx, everyAccess(store), key,
-				api.EditPostRequest{Origin: alice,
+				PostEditorsAnyone, api.EditPostRequest{Origin: alice,
 					AddLinks: []api.Link{link("see", other.Ref)}})
 			return err
 		}, bob},

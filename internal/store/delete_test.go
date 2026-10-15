@@ -65,7 +65,8 @@ func TestDeleteClearsAPostButKeepsItsPlace(t *testing.T) {
 	message := mustPostMessage(t, store, post.Ref, "hi")
 	body := "more details"
 	if _, err := store.Edit(context.Background(), everyAccess(store),
-		store.mustKey(post.Ref), api.EditPostRequest{Body: &body,
+		store.mustKey(post.Ref), PostEditorsAnyone,
+		api.EditPostRequest{Body: &body,
 			Origin: api.Origin{User: "heron"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +184,8 @@ func TestNobodyCanEditWhatIsDeleted(t *testing.T) {
 		{AddLinks: []api.Link{link("see", other.Ref)},
 			Origin: api.Origin{User: testUser}},
 	} {
-		_, err := store.Edit(ctx, everyAccess(store), key, req)
+		_, err := store.Edit(ctx, everyAccess(store), key,
+			PostEditorsAnyone, req)
 		var refused *DeletedError
 		if !errors.As(err, &refused) {
 			t.Fatalf("editing a deleted post = %v, want a refusal", err)

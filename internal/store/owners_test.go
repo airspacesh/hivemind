@@ -44,7 +44,7 @@ func TestAnyoneCanEditAPublicPostButOnlyThePosterCanDeleteIt(t *testing.T) {
 			Origin: api.Origin{User: "Alice"}},
 	} {
 		if _, err := store.Edit(ctx, everyAccess(store), key,
-			req); err != nil {
+			PostEditorsAnyone, req); err != nil {
 			t.Fatalf("another user's edit %+v = %v", req, err)
 		}
 	}
@@ -57,7 +57,7 @@ func TestAnyoneCanEditAPublicPostButOnlyThePosterCanDeleteIt(t *testing.T) {
 	}
 
 	private := true
-	_, err := store.Edit(ctx, everyAccess(store), key,
+	_, err := store.Edit(ctx, everyAccess(store), key, PostEditorsAnyone,
 		api.EditPostRequest{Private: &private, Origin: api.Origin{User: "bob"}})
 	assertNotOwner(t, err,
 		"e1 was posted by alice, so only alice can make it private or public")
@@ -83,7 +83,7 @@ func TestOnlyThePosterCanEditAPrivatePost(t *testing.T) {
 	for _, post := range []api.Post{private, child} {
 		_, err := store.Edit(ctx, accessAs(store, "alice"),
 			store.mustKey(post.Ref),
-			api.EditPostRequest{Subject: &subject,
+			PostEditorsAnyone, api.EditPostRequest{Subject: &subject,
 				Origin: api.Origin{User: "bob"}})
 		assertNotOwner(t, err, post.Ref.String()+
 			" was posted by alice, so only alice can edit it")

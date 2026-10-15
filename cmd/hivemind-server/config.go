@@ -15,6 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/airspacesh/hivemind/internal/api"
+	"github.com/airspacesh/hivemind/internal/store"
 )
 
 const (
@@ -33,8 +34,9 @@ type serverConfig struct {
 }
 
 type workspaceConfig struct {
-	Prefix string      `yaml:"prefix"`
-	Auth   *authConfig `yaml:"auth"`
+	Prefix      string            `yaml:"prefix"`
+	PostEditors store.PostEditors `yaml:"post_editors"`
+	Auth        *authConfig       `yaml:"auth"`
 }
 
 type authConfig struct {
@@ -138,6 +140,16 @@ func (c *serverConfig) validate() error {
 				owner, name, workspace.Prefix)
 		}
 		owners[workspace.Prefix] = name
+		switch workspace.PostEditors {
+		case "":
+			workspace.PostEditors = store.PostEditorsAnyone
+			c.Workspaces[name] = workspace
+		case store.PostEditorsAnyone, store.PostEditorsOwner:
+		default:
+			return fmt.Errorf("workspace %s: post_editors must be %s or "+
+				"%s, not %q", name, store.PostEditorsAnyone,
+				store.PostEditorsOwner, workspace.PostEditors)
+		}
 		if workspace.Auth == nil {
 			continue
 		}

@@ -40,7 +40,8 @@ func TestAVersionReadsBackAsItWas(t *testing.T) {
 	edit := func(user string, req api.EditPostRequest) api.Post {
 		t.Helper()
 		req.Origin = api.Origin{User: user, ClaudeSession: user + "-session"}
-		post, err := store.Edit(ctx, everyAccess(store), key, req)
+		post, err := store.Edit(ctx, everyAccess(store), key,
+			PostEditorsAnyone, req)
 		if err != nil {
 			t.Fatalf("editing as %s: %v", user, err)
 		}
@@ -108,7 +109,8 @@ func TestAnEditExpectingAnotherVersionIsRefused(t *testing.T) {
 	edit := func(req api.EditPostRequest, expected int64) (api.Post, error) {
 		req.ExpectedVersion = &expected
 		req.Origin = api.Origin{User: "bob"}
-		return store.Edit(ctx, everyAccess(store), key, req)
+		return store.Edit(ctx, everyAccess(store), key, PostEditorsAnyone,
+			req)
 	}
 	subject := func(text string) api.EditPostRequest {
 		return api.EditPostRequest{Subject: &text}
@@ -159,7 +161,7 @@ func TestAnEditThatChangesNothingIsNoChange(t *testing.T) {
 	project, subject, body, private := "pond", "plan, revised", "draft",
 		false
 	if _, err := store.Edit(ctx, everyAccess(store), key,
-		api.EditPostRequest{Subject: &subject,
+		PostEditorsAnyone, api.EditPostRequest{Subject: &subject,
 			Origin: api.Origin{User: "bob"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +174,8 @@ func TestAnEditThatChangesNothingIsNoChange(t *testing.T) {
 		Private:  &private, Origin: api.Origin{User: "alice"},
 	}
 
-	edited, err := store.Edit(ctx, everyAccess(store), key, same)
+	edited, err := store.Edit(ctx, everyAccess(store), key,
+		PostEditorsAnyone, same)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +199,7 @@ func TestAnEditThatChangesNothingIsNoChange(t *testing.T) {
 	same.ExpectedVersion = &stale
 	var conflict *VersionConflictError
 	if _, err := store.Edit(ctx, everyAccess(store), key,
-		same); !errors.As(err, &conflict) {
+		PostEditorsAnyone, same); !errors.As(err, &conflict) {
 		t.Fatalf("an edit that changes nothing, expecting version 1 = %v, "+
 			"want a refusal", err)
 	}

@@ -100,8 +100,9 @@ func describeWorkspaces(workspaces []serverWorkspace) string {
 		if workspace.credential != nil {
 			access = "secret"
 		}
-		described = append(described, fmt.Sprintf("%s (prefix %s, %s)",
-			workspace.Name, workspace.Prefix, access))
+		described = append(described, fmt.Sprintf(
+			"%s (prefix %s, %s, post_editors %s)", workspace.Name,
+			workspace.Prefix, access, workspace.postEditors))
 	}
 	return strings.Join(described, ", ")
 }
@@ -391,7 +392,8 @@ func (h *handler) editPost(w http.ResponseWriter, r *http.Request) {
 		writeBadRequest(w, err.Error())
 		return
 	}
-	post, err := h.store.Edit(r.Context(), access, key, request)
+	post, err := h.store.Edit(r.Context(), access, key,
+		h.postEditors(key.Workspace), request)
 	if err != nil {
 		writeStoreError(w, err)
 		return

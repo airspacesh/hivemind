@@ -197,7 +197,8 @@ func TestSearchRanksAnEditedPostFirst(t *testing.T) {
 	}
 	if _, err := posts.store.Edit(
 		context.Background(), everyAccess(posts.store),
-		posts.store.mustKey(posts.first.Ref), api.EditPostRequest{
+		posts.store.mustKey(posts.first.Ref), PostEditorsAnyone,
+		api.EditPostRequest{
 			Metadata: map[string]string{"jira": "QUACK-9"},
 			Origin:   api.Origin{User: testUser},
 		},

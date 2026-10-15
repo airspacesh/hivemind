@@ -291,7 +291,7 @@ func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
 
 	project := "lake"
 	if _, err := store.Edit(ctx, everyAccess(store), store.mustKey(nest.Ref),
-		api.EditPostRequest{Project: &project,
+		PostEditorsAnyone, api.EditPostRequest{Project: &project,
 			Origin: api.Origin{User: testUser}}); err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ func TestOverwrittenTextLeavesNoCopyInTheDatabase(t *testing.T) {
 	subject := "short"
 	if _, err := store.Edit(ctx, everyAccess(store),
 		store.mustKey(post.Ref),
-		api.EditPostRequest{Subject: &subject,
+		PostEditorsAnyone, api.EditPostRequest{Subject: &subject,
 			Origin: api.Origin{User: testUser}}); err != nil {
 		t.Fatal(err)
 	}

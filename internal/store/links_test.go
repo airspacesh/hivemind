@@ -263,7 +263,7 @@ func TestLinkEditsAndTheirFailures(t *testing.T) {
 	edit := func(req api.EditPostRequest) error {
 		req.Origin.User = testUser
 		_, err := store.Edit(ctx, everyAccess(store), store.mustKey(a.Ref),
-			req)
+			PostEditorsAnyone, req)
 		return err
 	}
 

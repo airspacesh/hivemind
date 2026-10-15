@@ -136,7 +136,7 @@ func TestTextIndexFollowsEdits(t *testing.T) {
 	post := mustAdd(t, store, "Count the herons", "In the reeds", nil)
 	subject, body := "Count the ducks", "On the pond"
 	if _, err := store.Edit(ctx, everyAccess(store),
-		store.mustKey(post.Ref), api.EditPostRequest{
+		store.mustKey(post.Ref), PostEditorsAnyone, api.EditPostRequest{
 			Subject: &subject, Body: &body, Origin: api.Origin{User: testUser},
 		}); err != nil {
 		t.Fatal(err)
@@ -168,7 +168,7 @@ func TestTextIndexForgetsOverwrittenText(t *testing.T) {
 	message := mustPostMessage(t, store, post.Ref, "Egret "+secret)
 	subject := "Heron"
 	if _, err := store.Edit(ctx, everyAccess(store),
-		store.mustKey(post.Ref), api.EditPostRequest{
+		store.mustKey(post.Ref), PostEditorsAnyone, api.EditPostRequest{
 			Subject: &subject, Origin: api.Origin{User: testUser},
 		}); err != nil {
 		t.Fatal(err)

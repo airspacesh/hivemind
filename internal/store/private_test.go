@@ -16,7 +16,8 @@ func setPrivate(
 	store *Store, user string, ref api.Ref, private bool,
 ) (api.Post, error) {
 	return store.Edit(context.Background(), accessAs(store, user),
-		store.mustKey(ref), api.EditPostRequest{Private: &private,
+		store.mustKey(ref), PostEditorsAnyone,
+		api.EditPostRequest{Private: &private,
 			Origin: api.Origin{User: user}})
 }
 
@@ -104,7 +105,7 @@ func TestOnlyTheOwnerReadsAPrivatePostAndWhatIsUnderIt(t *testing.T) {
 		false)
 	postAs(t, store, "alice", draft.Ref, "SECRET message")
 	if _, err := store.Edit(ctx, accessAs(store, "alice"),
-		store.mustKey(topic.Ref), api.EditPostRequest{
+		store.mustKey(topic.Ref), PostEditorsAnyone, api.EditPostRequest{
 			AddLinks: []api.Link{link("see", draft.Ref)},
 			Origin:   api.Origin{User: "alice"},
 		}); err != nil {
@@ -296,7 +297,7 @@ func TestMovingAPostTakesTheVisibilityOfItsNewParent(t *testing.T) {
 			req.RemoveLinkNames = []string{api.ParentLink}
 		}
 		return store.Edit(ctx, accessAs(store, "alice"),
-			store.mustKey(moved.Ref), req)
+			store.mustKey(moved.Ref), PostEditorsAnyone, req)
 	}
 
 	if _, err := move(&private.Ref); err != nil {

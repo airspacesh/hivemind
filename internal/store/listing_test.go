@@ -113,7 +113,7 @@ func (w *forestWriter) write() {
 			edit.Metadata = map[string]string{"jira": "PROJ-1"}
 		}
 		if _, err := w.store.Edit(ctx, everyAccess(w.store), key,
-			edit); err != nil {
+			PostEditorsAnyone, edit); err != nil {
 			w.t.Fatal(err)
 		}
 	case choice < 4:

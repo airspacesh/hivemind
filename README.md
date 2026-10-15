@@ -62,6 +62,9 @@ serve other machines, listen on an address they can reach, like
 `0.0.0.0:7139`. Connections use plain HTTP with no encryption. Keep
 hivemind on a trusted private network, never the public internet.
 
+Anyone can edit a public post. To let only a post's own user edit or
+move it, set `post_editors: owner` on the workspace, beside `prefix`.
+
 To back up while the server runs, run
 `sqlite3 ~/hivemind-server/hivemind.db ".backup /path/to/backup.db"`.
 Copying `hivemind.db` alone can miss recent changes, which the server

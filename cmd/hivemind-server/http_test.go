@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -54,6 +55,9 @@ func (s testServer) as(user string) testServer {
 // startServer serves the routes on a loopback port, as hivemind-server does.
 func startServer(t *testing.T, config serverConfig) testServer {
 	t.Helper()
+	if err := config.validate(); err != nil {
+		t.Fatal(err)
+	}
 	stream, err := store.Open(context.Background(), config.DB,
 		time.Second, config.workspaces())
 	if err != nil {
@@ -406,6 +410,53 @@ func TestRefusedEditsAndDeletesOverHTTP(t *testing.T) {
 				test.body, text, test.code)
 		}
 	}
+}
+
+// A workspace whose post_editors is owner lets only a post's own user
+// edit or move it, and a refused edit leaves the post as it was.
+func TestOwnerPostEditorsOverHTTP(t *testing.T) {
+	config := testConfig(t)
+	general := config.Workspaces["general"]
+	general.PostEditors = store.PostEditorsOwner
+	config.Workspaces["general"] = general
+	s := startServer(t, config)
+	s.must(t, "POST", "/api/workspaces/general/posts", postBody("mine"),
+		"", http.StatusCreated)
+	s.must(t, "POST", "/api/workspaces/general/posts", postBody("home"),
+		"", http.StatusCreated)
+	before := s.must(t, "GET", "/api/posts/e1", "", "", http.StatusOK)
+
+	refusal := "e1 was posted by duck, and this workspace lets only a " +
+		"post's own user edit it"
+	for _, body := range []string{
+		`{"subject":"taken","origin":{"user":"heron"}}`,
+		`{"add_links":[{"name":"parent","ref":"e2"}],` +
+			`"origin":{"user":"heron"}}`,
+	} {
+		status, text := s.do(t, "PATCH", "/api/posts/e1", body, "")
+		if status != http.StatusForbidden ||
+			errorCode(t, text) != api.CodeNotOwner ||
+			!strings.Contains(text, refusal) {
+			t.Fatalf("PATCH %s: %d %s, want 403 %q", body, status, text,
+				refusal)
+		}
+	}
+	after := s.must(t, "GET", "/api/posts/e1", "", "", http.StatusOK)
+	var was, is api.PostDetail
+	if err := json.Unmarshal([]byte(before), &was); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(after), &is); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(is, was) {
+		t.Fatalf("refused edits changed the post from\n%s\nto\n%s",
+			before, after)
+	}
+
+	s.must(t, "PATCH", "/api/posts/e1", `{"subject":"kept",`+
+		`"add_links":[{"name":"parent","ref":"e2"}],`+
+		`"origin":{"user":"duck"}}`, "", http.StatusOK)
 }
 
 // No request names an origin or creation time but the one that adds a

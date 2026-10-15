@@ -138,7 +138,7 @@ func addLinks(
 	t.Helper()
 	_, err := store.Edit(context.Background(), everyAccess(store),
 		store.mustKey(ref),
-		api.EditPostRequest{AddLinks: links,
+		PostEditorsAnyone, api.EditPostRequest{AddLinks: links,
 			Origin: api.Origin{User: testUser}})
 	return err
 }
@@ -267,7 +267,7 @@ func TestGeneratedColumnsFollowWrites(t *testing.T) {
 	subject := "CHANGED Æ"
 	body := "CHANGED Σ"
 	if _, err := store.Edit(ctx, everyAccess(store),
-		store.mustKey(post.Ref), api.EditPostRequest{
+		store.mustKey(post.Ref), PostEditorsAnyone, api.EditPostRequest{
 			Subject: &subject, Body: &body,
 			Metadata: map[string]string{"jira": "CHANGED Æ"},
 			Origin:   api.Origin{User: testUser},
@@ -352,7 +352,7 @@ func TestMetadataEditsRefreshModifiedAndApply(t *testing.T) {
 			}
 			got, err := store.Edit(ctx, everyAccess(store),
 				store.mustKey(post.Ref),
-				api.EditPostRequest{Metadata: test.set,
+				PostEditorsAnyone, api.EditPostRequest{Metadata: test.set,
 					Origin: api.Origin{User: testUser}})
 			if err != nil {
 				t.Fatalf("changing metadata: %v", err)
@@ -426,16 +426,17 @@ func TestMetadataLimitStopsPostGrowth(t *testing.T) {
 	post := mustAdd(t, store, "bounded", "", metadata)
 	ctx := context.Background()
 	key := store.mustKey(post.Ref)
-	_, err := store.Edit(ctx, everyAccess(store), key, api.EditPostRequest{
-		Metadata: map[string]string{"overflow": "value"},
-		Origin:   api.Origin{User: testUser},
-	})
+	_, err := store.Edit(ctx, everyAccess(store), key, PostEditorsAnyone,
+		api.EditPostRequest{
+			Metadata: map[string]string{"overflow": "value"},
+			Origin:   api.Origin{User: testUser},
+		})
 	if !errors.Is(err, ErrMetadataLimit) {
 		t.Fatalf("Edit error = %v, want ErrMetadataLimit", err)
 	}
 
 	edited, err := store.Edit(ctx, everyAccess(store), key,
-		api.EditPostRequest{
+		PostEditorsAnyone, api.EditPostRequest{
 			Metadata: map[string]string{"key-0": "replaced"},
 			Origin:   api.Origin{User: testUser},
 		})
