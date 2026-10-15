@@ -90,7 +90,8 @@ func TestDeleteClearsAPostButKeepsItsPlace(t *testing.T) {
 		if !version.Deleted || version.Subject != "" ||
 			version.Body != "" || len(version.Metadata) != 0 ||
 			version.Project != post.Project ||
-			!reflect.DeepEqual(version.Links, post.Links) {
+			!reflect.DeepEqual(version.Links,
+				[]api.Link{link(api.ParentLink, parent.Ref)}) {
 			t.Fatalf("version %d of the deleted post is %+v", number,
 				version)
 		}

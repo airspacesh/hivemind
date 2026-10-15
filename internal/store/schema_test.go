@@ -214,7 +214,8 @@ func TestOpenRejectsUnrecognizedDatabases(t *testing.T) {
 }
 
 // A database from before post versions opens with each post at version
-// 1, as it was, made by its own user when it was last modified.
+// 1, as it was with its parent but not its other links, made by its own
+// user when it was last modified.
 func TestOpenMigratesADatabaseFromBeforeVersions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v1.db")
 	const added, edited = "2026-10-01T00:00:00.000000000Z",
@@ -234,7 +235,8 @@ func TestOpenMigratesADatabaseFromBeforeVersions(t *testing.T) {
 				'pond', 'plan', 'details', 'alice', 'nest')`,
 		`INSERT INTO post_metadata (workspace_id, post_id, key, value)
 		VALUES (1, 2, 'status', 'draft')`,
-		`INSERT INTO post_links VALUES (1, 2, 'parent', 1, 1)`,
+		`INSERT INTO post_links VALUES (1, 2, 'parent', 1, 1),
+			(1, 2, 'see', 1, 1)`,
 	)
 	rawExec(t, path, strings.Join(statements, ";\n"))
 

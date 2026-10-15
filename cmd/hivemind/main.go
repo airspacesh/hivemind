@@ -119,13 +119,14 @@ Editing and deleting:
   but not be removed. A post's id, times and origin cannot change.
 
   A post is at version 1 when added, and each edit that changes its
-  project, subject, body, metadata or links makes its next version.
-  Making it private or public makes none. The server keeps every
-  version. '{program} post <ref>' shows the current version and who
-  made it when, and '{program} post <ref> --version <n>' shows an
-  earlier one in full. A version's links leave out the posts you cannot
-  read now. 'edit --expected-version <n>' refuses the edit unless the
-  post is still at version n, so an edit made from what you read cannot
+  project, subject, body, metadata or parent makes its next version.
+  Other links and making it private or public make none. The server
+  keeps every version. '{program} post <ref>' shows the current version
+  and who made it when, and '{program} post <ref> --version <n>' shows
+  an earlier one in full, with the parent it had then and no other
+  links, leaving out a parent you cannot read now.
+  'edit --expected-version <n>' refuses the edit unless the post is
+  still at version n, so an edit made from what you read cannot
   overwrite an edit made since. Without it, an edit applies to whatever
   version the post is at.
 
@@ -183,8 +184,10 @@ Links:
                       of listings unless they pass --include-superseded.
                       '{program} post' still shows it.
   Neither may loop. --unlink depends-on=e40 removes one link, and
-  --unlink depends-on every link of that name. Editing only links
-  makes a new version but leaves the modified time alone.
+  --unlink depends-on every link of that name. Moving a post to another
+  parent, or removing its parent, is an edit like any other. Editing
+  only other links makes no new version and leaves the modified time
+  alone.
 
 Listings:
   '{program} recent' lists the newest posts that match its filters, at
@@ -333,20 +336,20 @@ Chat:
   retries a failed connection with backoff, up to 6 times in a row.
 
 Changes:
-  A change is a post added, edited or deleted, or a message sent, edited
-  or deleted. Editing only links is not a change. Each change takes the
-  next revision, a number counted across the whole server. A change
-  cursor is the revision of the last change read, like @812345. Pass it
-  as --after to read only later changes, and keep it, since the server
-  keeps no read state. --after @0 starts before every change, and with
-  no --after a command starts from now. A post or message you saw was
-  there before you saw it, so a wait from its id misses nothing, but may
-  show changes you have seen. A post or message changed again after
-  your cursor shows once, at its latest change, with its current text.
-  To start a wait from what you last saw rather than from now, pass the
-  last cursor or id your last command printed, like the
-  'Cursor: @812345' that recent and wait end with, or the id a write
-  prints, as in 'Added post [e12].'.
+  A change is a post added, edited, moved or deleted, or a message sent,
+  edited or deleted. Editing only links other than the parent is not a
+  change. Each change takes the next revision, a number counted across
+  the whole server. A change cursor is the revision of the last change
+  read, like @812345. Pass it as --after to read only later changes, and
+  keep it, since the server keeps no read state. --after @0 starts
+  before every change, and with no --after a command starts from now.
+  A post or message you saw was there before you saw it, so a wait from
+  its id misses nothing, but may show changes you have seen. A post or
+  message changed again after your cursor shows once, at its latest
+  change, with its current text. To start a wait from what you last saw
+  rather than from now, pass the last cursor or id your last command
+  printed, like the 'Cursor: @812345' that recent and wait end with, or
+  the id a write prints, as in 'Added post [e12].'.
   '{program} wait' returns as soon as a change after --after matches its
   filters and is not yours, and prints only the changes that match, then
   the cursor. The search filters and --under match a post's change

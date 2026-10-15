@@ -22,8 +22,8 @@ func mustVersion(
 }
 
 // Each version reads back as the edit that made it left the post, its
-// parent and metadata included, and only an edit that changes what a
-// version holds makes one.
+// parent and metadata included and its other links left out, and only
+// an edit that changes what a version holds makes one.
 func TestAVersionReadsBackAsItWas(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
@@ -33,7 +33,8 @@ func TestAVersionReadsBackAsItWas(t *testing.T) {
 		Project: "pond", Subject: "plan", Body: "draft",
 		Metadata: map[string]string{"status": "draft", "jira": "QUACK-1"},
 		Origin:   api.Origin{User: "alice", Host: "nest"},
-		Links:    []api.Link{link(api.ParentLink, first.Ref)},
+		Links: []api.Link{link(api.ParentLink, first.Ref),
+			link("see", second.Ref)},
 	})
 	key := store.mustKey(added.Ref)
 	edit := func(user string, req api.EditPostRequest) api.Post {
@@ -96,35 +97,46 @@ func TestAVersionReadsBackAsItWas(t *testing.T) {
 	}
 }
 
+// An edit expecting an older version is refused, whether it edits the
+// post's fields or moves it.
 func TestAnEditExpectingAnotherVersionIsRefused(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	post := mustAdd(t, store, "plan", "", nil)
+	parent := mustAdd(t, store, "parent", "", nil)
 	key := store.mustKey(post.Ref)
-	edit := func(subject string, expected int64) (api.Post, error) {
-		return store.Edit(ctx, everyAccess(store), key, api.EditPostRequest{
-			Subject: &subject, ExpectedVersion: &expected,
-			Origin: api.Origin{User: "bob"},
-		})
+	edit := func(req api.EditPostRequest, expected int64) (api.Post, error) {
+		req.ExpectedVersion = &expected
+		req.Origin = api.Origin{User: "bob"}
+		return store.Edit(ctx, everyAccess(store), key, req)
 	}
-	if _, err := edit("plan, revised", 1); err != nil {
+	subject := func(text string) api.EditPostRequest {
+		return api.EditPostRequest{Subject: &text}
+	}
+	if _, err := edit(subject("plan, revised"), 1); err != nil {
 		t.Fatal(err)
 	}
 	before := mustGet(t, store, post.Ref)
 
-	_, err := edit("plan, from a stale read", 1)
-	var conflict *VersionConflictError
-	if !errors.As(err, &conflict) ||
-		err.Error() != "e1 is at version 2, not 1" {
-		t.Fatalf("a stale edit = %v, want a refusal naming version 2", err)
+	for _, stale := range []api.EditPostRequest{
+		subject("plan, from a stale read"),
+		{AddLinks: []api.Link{link(api.ParentLink, parent.Ref)}},
+	} {
+		_, err := edit(stale, 1)
+		var conflict *VersionConflictError
+		if !errors.As(err, &conflict) ||
+			err.Error() != "e1 is at version 2, not 1" {
+			t.Fatalf("a stale edit %+v = %v, want a refusal naming "+
+				"version 2", stale, err)
+		}
+		if after := mustGet(t, store, post.Ref); !reflect.DeepEqual(after,
+			before) {
+			t.Fatalf("a refused edit changed the post:\n%+v\nwas\n%+v",
+				after, before)
+		}
 	}
-	if after := mustGet(t, store, post.Ref); !reflect.DeepEqual(after,
-		before) {
-		t.Fatalf("a refused edit changed the post:\n%+v\nwas\n%+v", after,
-			before)
-	}
-	if edited, err := edit("plan, from a fresh read", 2); err != nil ||
-		edited.Version.Number != 3 {
+	if edited, err := edit(subject("plan, from a fresh read"),
+		2); err != nil || edited.Version.Number != 3 {
 		t.Fatalf("an edit expecting the current version = %+v, %v",
 			edited.Version, err)
 	}

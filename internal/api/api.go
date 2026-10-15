@@ -4,6 +4,7 @@ package api
 
 import (
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -58,7 +59,7 @@ type Origin struct {
 
 // Version is one version of a post: its number, counted from 1 when
 // the post was added, and who made it and when, by the add or edit that
-// changed the post's project, subject, body, metadata or links.
+// changed the post's project, subject, body, metadata or parent.
 type Version struct {
 	Number  int64     `json:"number"`
 	Created time.Time `json:"created"`
@@ -92,9 +93,9 @@ type Post struct {
 	Version *Version `json:"version,omitempty"`
 }
 
-// PostVersion is a post's project, subject, body, metadata and links as
-// one of its versions had them. A deleted post's versions have no
-// subject, body or metadata.
+// PostVersion is a post's project, subject, body, metadata and parent
+// as one of its versions had them. Links holds the parent alone. A
+// deleted post's versions have no subject, body or metadata.
 type PostVersion struct {
 	Ref      Ref               `json:"ref"`
 	Version  Version           `json:"version"`
@@ -307,11 +308,15 @@ type EditPostRequest struct {
 	Origin Origin `json:"origin"`
 }
 
-// ChangesContent reports whether the edit changes the post itself,
-// rather than only its links.
+// ChangesContent reports whether the edit changes what a version of the
+// post records, its project, subject, body, metadata or parent, rather
+// than only its other links.
 func (r EditPostRequest) ChangesContent() bool {
+	isParent := func(link Link) bool { return link.Name == ParentLink }
 	return r.Project != nil || r.Subject != nil || r.Body != nil ||
-		len(r.Metadata) > 0
+		len(r.Metadata) > 0 || slices.ContainsFunc(r.AddLinks, isParent) ||
+		slices.ContainsFunc(r.RemoveLinks, isParent) ||
+		slices.Contains(r.RemoveLinkNames, ParentLink)
 }
 
 // Match is a match on a page of a listing. It is a post, or a message

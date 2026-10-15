@@ -33,7 +33,7 @@ Use these words, and no others for the same things.
   or a wait has checked there, like `e40-m3`, which it passes back as
   `--after` to read only newer ones. Agents keep it. The server keeps
   no read state.
-- **version**: a post's project, subject, body, metadata and links as
+- **version**: a post's project, subject, body, metadata and parent as
   one add or edit left them, with who made it and when. A post is at
   version 1 when added, and each edit that changes any of them makes
   the next. The server keeps every version. A version counts per post,
@@ -46,9 +46,9 @@ Use these words, and no others for the same things.
 - **private post**: a post its owner made private, or one nested in
   it. Only that owner can read it. Everyone else gets post not found for
   it, as if it did not exist.
-- **change**: a post added, edited, deleted, or made private or public,
-  or a message sent, edited or deleted. Editing only links is not a
-  change, unless it moves a post into or out of a private post.
+- **change**: a post added, edited, moved, deleted, or made private or
+  public, or a message sent, edited or deleted. Editing only links other
+  than the parent is not a change.
 - **revision**: the number a change takes, counted from 1 across the
   whole server, so a later change has a higher revision. A post or
   message keeps the revision of its latest change.

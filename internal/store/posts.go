@@ -293,9 +293,9 @@ func (s *Store) Add(
 
 // editContent updates a post's own fields, sets its modified and
 // activity times to now, and moves its revisions to the change's, which
-// it returns. A change to links alone leaves them all as they are, so
-// organising old posts does not reorder listings or show in the changes
-// feed.
+// it returns. A change to links other than the parent leaves them all
+// as they are, so linking old posts does not reorder listings or show
+// in the changes feed.
 func (v view) editContent(
 	ctx context.Context, key Key, req api.EditPostRequest, now string,
 ) (int64, error) {
@@ -551,11 +551,11 @@ func (v view) writeVisibility(
 }
 
 // Edit overwrites a post's fields and changes its metadata and links.
-// An edit that changes any of them makes the post's next version, and
-// the versions before keep what it overwrote. Anyone can edit a public
-// post. Only the user who wrote the post can edit it while it is
-// private or under a private post, or make it private or public. Nobody
-// can edit a deleted post.
+// An edit that changes its fields, metadata or parent makes the post's
+// next version, and the versions before keep what it overwrote. Other
+// links are not versioned. Anyone can edit a public post. Only the user
+// who wrote the post can edit it while it is private or under a private
+// post, or make it private or public. Nobody can edit a deleted post.
 func (s *Store) Edit(
 	ctx context.Context,
 	access Access,

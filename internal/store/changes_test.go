@@ -109,21 +109,55 @@ func TestChangesListAChangeAgainOnlyWhenItChangesAfterTheCursor(t *testing.T) {
 	}
 }
 
-func TestChangesLeaveOutEditsToLinksAlone(t *testing.T) {
+// An edit of links other than the parent is no change and makes no
+// version. A move is a change made by whoever moved the post, so its
+// owner's wait under the new parent sees another user move it there.
+func TestAMoveIsAChangeButOtherLinksAreNot(t *testing.T) {
 	store := openTestStore(t)
-	parent := mustAdd(t, store, "parent", "", nil)
-	child := mustAdd(t, store, "child", "", nil)
+	alice := api.Origin{User: "alice", ClaudeSession: "a"}
+	bob := api.Origin{User: "bob", ClaudeSession: "b"}
+	parent := addTo(t, store, "general",
+		api.AddPostRequest{Subject: "parent", Origin: alice})
+	post := addTo(t, store, "general",
+		api.AddPostRequest{Subject: "post", Origin: alice})
 	_, cursor := readAllChanges(t, store, 0, 10)
+	edit := func(add api.Link) api.Post {
+		t.Helper()
+		edited, err := store.Edit(context.Background(), everyAccess(store),
+			store.mustKey(post.Ref), api.EditPostRequest{
+				AddLinks: []api.Link{add}, Origin: bob})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return edited
+	}
 
-	if _, err := store.Edit(context.Background(), everyAccess(store),
-		store.mustKey(child.Ref), api.EditPostRequest{
-			AddLinks: []api.Link{link("parent", parent.Ref)},
-			Origin:   api.Origin{User: testUser},
-		}); err != nil {
-		t.Fatal(err)
+	linked := edit(link("see", parent.Ref))
+	if linked.Version.Number != 1 || linked.Revision != post.Revision ||
+		!linked.Modified.Equal(post.Modified) {
+		t.Fatalf("a link edit left version %d, revision %d and modified "+
+			"%v, want 1, %d and %v", linked.Version.Number,
+			linked.Revision, linked.Modified, post.Revision, post.Modified)
 	}
 	if got := changeIDs(readChanges(t, store, cursor, 10)); len(got) != 0 {
 		t.Fatalf("a link edit showed as changes %v", got)
+	}
+
+	moved := edit(link(api.ParentLink, parent.Ref))
+	if moved.Version.Number != 2 || moved.Version.Origin != bob ||
+		moved.Revision <= post.Revision ||
+		!moved.Modified.After(post.Modified) {
+		t.Fatalf("a move left version %+v, revision %d and modified %v",
+			moved.Version, moved.Revision, moved.Modified)
+	}
+	under := store.mustKey(parent.Ref)
+	got, _ := readAllMatching(t, store, cursor,
+		Filter{Items: api.PostsOnly, Under: &under},
+		&OriginKey{User: alice.User, ClaudeSession: alice.ClaudeSession},
+		10, revisionsPerRead)
+	if !reflect.DeepEqual(got, []string{post.Ref.String()}) {
+		t.Fatalf("alice's wait under %s read %v, want the moved %s",
+			parent.Ref, got, post.Ref)
 	}
 }
 

@@ -243,8 +243,9 @@ func TestChildOfASupersededParentStaysVisible(t *testing.T) {
 
 	result := runSearch(t, store, Filter{})
 	if refs := matchRefs(result); !reflect.DeepEqual(
-		refs, refStrings(replacement.Ref, child.Ref)) {
-		t.Fatalf("listing = %v, want the replacement and the child", refs)
+		refs, refStrings(child.Ref, replacement.Ref)) {
+		t.Fatalf("listing = %v, want the moved child and the replacement",
+			refs)
 	}
 	path := mustGet(t, store, child.Ref).Ancestors
 	if len(path) != 1 || path[0].Ref != parent.Ref ||
@@ -285,6 +286,7 @@ func TestLinkEditsAndTheirFailures(t *testing.T) {
 		t.Fatalf("removing every parent of an unparented post: %v", err)
 	}
 
+	before := mustGet(t, store, a.Ref)
 	for range 2 {
 		if err := addLinks(t, store, a.Ref, link("see", b.Ref)); err != nil {
 			t.Fatal(err)
@@ -294,7 +296,7 @@ func TestLinkEditsAndTheirFailures(t *testing.T) {
 	if len(edited.Links) != 1 {
 		t.Fatalf("a repeated link was stored twice: %v", edited.Links)
 	}
-	if !edited.Modified.Equal(a.Modified) {
+	if !edited.Modified.Equal(before.Modified) {
 		t.Fatal("a link-only edit changed the modified time")
 	}
 

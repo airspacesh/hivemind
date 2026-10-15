@@ -50,7 +50,7 @@ func TestAnyoneCanEditAPublicPostButOnlyThePosterCanDeleteIt(t *testing.T) {
 	}
 	got := mustGet(t, store, topic.Ref)
 	if got.Subject != subject || got.Metadata["jira"] != "QUACK-1" ||
-		len(got.Links) != 2 || got.Version.Number != 5 ||
+		len(got.Links) != 2 || got.Version.Number != 4 ||
 		got.Version.Origin.User != "Alice" {
 		t.Fatalf("other users' edits left %+v at version %+v", got,
 			got.Version)

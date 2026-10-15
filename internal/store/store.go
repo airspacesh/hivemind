@@ -345,9 +345,10 @@ END`
 // one included, which the posts row holds too. A row holds what
 // versionContent selects of the post as that version left it, and the
 // origin and time of the add or edit that made it. revision is the
-// revision of that change, or 0 for an edit of links alone, which is no
-// change. A delete clears the subject, body and metadata of all of a
-// post's versions.
+// revision of that change. parent_id is the id of the post's parent,
+// which is in the post's own workspace, or NULL for a top-level post. A
+// delete clears the subject, body and metadata of all of a post's
+// versions.
 const createPostVersions = `
 CREATE TABLE post_versions (
 	workspace_id INTEGER NOT NULL,
@@ -363,9 +364,10 @@ CREATE TABLE post_versions (
 	subject TEXT NOT NULL,
 	body TEXT NOT NULL,
 	metadata TEXT NOT NULL,
-	links TEXT NOT NULL,
+	parent_id INTEGER,
 	PRIMARY KEY (workspace_id, post_id, version),
-	FOREIGN KEY (workspace_id, post_id) REFERENCES posts(workspace_id, id)
+	FOREIGN KEY (workspace_id, post_id) REFERENCES posts(workspace_id, id),
+	FOREIGN KEY (workspace_id, parent_id) REFERENCES posts(workspace_id, id)
 )`
 
 // startPostVersions gives each post of a database that predates
@@ -374,7 +376,7 @@ CREATE TABLE post_versions (
 const startPostVersions = `
 INSERT INTO post_versions (workspace_id, post_id, version, revision,
 	created_utc, origin_user, origin_host, origin_dir,
-	origin_claude_session, project, subject, body, metadata, links)
+	origin_claude_session, project, subject, body, metadata, parent_id)
 SELECT e.workspace_id, e.id, 1, e.revision, e.modified_utc, e.origin_user,
 	e.origin_host, e.origin_dir, e.origin_claude_session, ` +
 	versionContent + `
