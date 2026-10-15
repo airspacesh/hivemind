@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/airspacesh/workstream/internal/api"
-	"github.com/airspacesh/workstream/internal/store"
+	"github.com/airspacesh/hivemind/internal/api"
+	"github.com/airspacesh/hivemind/internal/store"
 )
 
 const (

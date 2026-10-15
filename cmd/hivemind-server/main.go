@@ -1,5 +1,5 @@
-// ws-server hosts the workspaces of one workstream database for remote
-// ws clients.
+// hivemind-server hosts the workspaces of one hivemind database for remote
+// hivemind clients.
 package main
 
 import (
@@ -17,9 +17,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/airspacesh/workstream/internal/api"
-	"github.com/airspacesh/workstream/internal/store"
-	"github.com/airspacesh/workstream/internal/version"
+	"github.com/airspacesh/hivemind/internal/api"
+	"github.com/airspacesh/hivemind/internal/store"
+	"github.com/airspacesh/hivemind/internal/version"
 )
 
 func main() {
@@ -29,7 +29,7 @@ func main() {
 }
 
 func run(args []string) error {
-	flags := flag.NewFlagSet("ws-server", flag.ContinueOnError)
+	flags := flag.NewFlagSet("hivemind-server", flag.ContinueOnError)
 	configPath := flags.String("config", defaultConfigPath,
 		"server config file, where a leading ~/ names the home directory")
 	if err := flags.Parse(args); err != nil {
@@ -79,7 +79,7 @@ func run(args []string) error {
 		context.Background(), os.Interrupt, syscall.SIGTERM,
 	)
 	defer stopSignals()
-	log.Printf("ws-server %s listening on %s (db: %s, workspaces: %s)",
+	log.Printf("hivemind-server %s listening on %s (db: %s, workspaces: %s)",
 		version.Software, listener.Addr(), config.DB,
 		describeWorkspaces(h.workspaces))
 	for _, warning := range startupWarnings(

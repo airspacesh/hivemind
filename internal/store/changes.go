@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 // The changes feed lists a workspace's changes in revision order. A

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 var ErrUnknownPrefix = errors.New("no workspace has prefix")

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds ws and ws-server into <repo>/bin/.
+# Builds hivemind and hivemind-server into <repo>/bin/.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -8,6 +8,6 @@ mkdir -p bin
 # Everything is pure Go (modernc.org/sqlite needs no cgo), and
 # disabling cgo keeps the build independent of the host C compiler.
 export CGO_ENABLED=0
-go build -o bin/ws ./cmd/ws
-go build -o bin/ws-server ./cmd/ws-server
-echo "Built bin/ws and bin/ws-server"
+go build -o bin/hivemind ./cmd/hivemind
+go build -o bin/hivemind-server ./cmd/hivemind-server
+echo "Built bin/hivemind and bin/hivemind-server"

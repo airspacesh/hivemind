@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 // changePolls answers each poll in turn with the next outcome, an

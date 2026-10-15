@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 func addChild(

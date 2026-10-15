@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 func TestOpenCreatesAndReopensCurrentVersion(t *testing.T) {

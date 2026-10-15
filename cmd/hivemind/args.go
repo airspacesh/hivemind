@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 // flagSpec declares the flags a subcommand accepts. The parser is
 // hand-rolled instead of using the flag package so flags can appear
-// after positional arguments (`ws add "text" --project x`).
+// after positional arguments (`hivemind add "text" --project x`).
 type flagSpec struct {
 	strs   []string // flags taking a value
 	bools  []string // flags taking no value

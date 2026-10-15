@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 // activityExpr is when post e last changed by definition: an edit to

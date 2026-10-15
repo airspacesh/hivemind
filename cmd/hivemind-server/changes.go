@@ -3,7 +3,7 @@ package main
 import (
 	"net/http"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 const (

@@ -21,9 +21,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/airspacesh/workstream/internal/api"
-	"github.com/airspacesh/workstream/internal/store"
-	"github.com/airspacesh/workstream/internal/version"
+	"github.com/airspacesh/hivemind/internal/api"
+	"github.com/airspacesh/hivemind/internal/store"
+	"github.com/airspacesh/hivemind/internal/version"
 )
 
 const maxRequestBytes = int64(1 << 20)
@@ -57,7 +57,7 @@ func writeBadRequest(w http.ResponseWriter, message string) {
 }
 
 func writeUnauthorized(w http.ResponseWriter, message string) {
-	w.Header().Set("WWW-Authenticate", `Bearer realm="workstream"`)
+	w.Header().Set("WWW-Authenticate", `Bearer realm="hivemind"`)
 	writeError(w, http.StatusUnauthorized, api.CodeUnauthorized, message)
 }
 

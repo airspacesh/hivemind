@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/airspacesh/workstream/internal/api"
-	"github.com/airspacesh/workstream/internal/store"
-	"github.com/airspacesh/workstream/internal/version"
+	"github.com/airspacesh/hivemind/internal/api"
+	"github.com/airspacesh/hivemind/internal/store"
+	"github.com/airspacesh/hivemind/internal/version"
 )
 
 const (
@@ -28,7 +28,7 @@ const (
 // testConfig hosts an open workspace and two protected ones.
 func testConfig(t *testing.T) serverConfig {
 	return serverConfig{
-		DB:      filepath.Join(t.TempDir(), "ws.db"),
+		DB:      filepath.Join(t.TempDir(), "hivemind.db"),
 		Timeout: 5 * time.Second,
 		Workspaces: map[string]workspaceConfig{
 			"general": {Prefix: "e"},
@@ -51,7 +51,7 @@ func (s testServer) as(user string) testServer {
 	return s
 }
 
-// startServer serves the routes on a loopback port, as ws-server does.
+// startServer serves the routes on a loopback port, as hivemind-server does.
 func startServer(t *testing.T, config serverConfig) testServer {
 	t.Helper()
 	stream, err := store.Open(context.Background(), config.DB,

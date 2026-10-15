@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 // fakeClock moves time only when the code under test sleeps.

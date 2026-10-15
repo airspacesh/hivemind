@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 // lineTimeLayout is how a post or message line shows its time, in a

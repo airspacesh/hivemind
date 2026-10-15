@@ -9,7 +9,7 @@ import (
 	"math"
 	"slices"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 var ErrMessageNotFound = errors.New("message not found")

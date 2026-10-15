@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 const defaultWaitTimeout = 10 * time.Minute

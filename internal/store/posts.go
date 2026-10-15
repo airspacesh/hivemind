@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 // view is one transaction seen through one request's access.

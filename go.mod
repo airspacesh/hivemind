@@ -1,4 +1,4 @@
-module github.com/airspacesh/workstream
+module github.com/airspacesh/hivemind
 
 go 1.25.0
 

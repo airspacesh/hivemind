@@ -1,5 +1,5 @@
-// Package api defines the JSON types shared between the ws CLI and
-// the ws-server HTTP API.
+// Package api defines the JSON types shared between the hivemind CLI and
+// the hivemind-server HTTP API.
 package api
 
 import (
@@ -12,7 +12,7 @@ const MaxResponseBytes = 64 << 20
 // UserHeader carries the user a request reads as, who can read the
 // posts private to them as well as the public ones. The server takes
 // the client's word for it.
-const UserHeader = "Workstream-User"
+const UserHeader = "Hivemind-User"
 
 // ProjectKey is reserved as a metadata key, since every post has a
 // project field, and a pair of that name would read as a second one.

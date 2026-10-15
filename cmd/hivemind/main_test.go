@@ -19,23 +19,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/airspacesh/workstream/internal/api"
-	"github.com/airspacesh/workstream/internal/version"
+	"github.com/airspacesh/hivemind/internal/api"
+	"github.com/airspacesh/hivemind/internal/version"
 )
 
 // The binaries under test, built once by TestMain: the default build,
 // and a build under another name, with its three settings.
-var wsBinary, forumBinary string
+var hivemindBinary, forumBinary string
 
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "ws-test-")
+	dir, err := os.MkdirTemp("", "hivemind-test-")
 	if err != nil {
 		panic(err)
 	}
-	wsBinary = filepath.Join(dir, "ws")
+	hivemindBinary = filepath.Join(dir, "hivemind")
 	forumBinary = filepath.Join(dir, "forum")
 	builds := [][]string{
-		{"build", "-o", wsBinary, "."},
+		{"build", "-o", hivemindBinary, "."},
 		{"build", "-o", forumBinary, "-ldflags",
 			"-X main.programName=forum -X main.envPrefix=FORUM " +
 				"-X main.defaultConfigPath=~/.config/forum/config.yml", "."},
@@ -89,10 +89,10 @@ func writeConfig(t *testing.T, text string, mode os.FileMode) string {
 	return path
 }
 
-// ws runs the default build against the config at path.
-func ws(t *testing.T, config string, args ...string) result {
+// hivemind runs the default build against the config at path.
+func hivemind(t *testing.T, config string, args ...string) result {
 	t.Helper()
-	return runBinary(t, wsBinary, []string{"WORKSTREAM_CONFIG=" + config},
+	return runBinary(t, hivemindBinary, []string{"HIVEMIND_CONFIG=" + config},
 		args...)
 }
 
@@ -211,7 +211,8 @@ func TestConfigRefusesWhatItDoesNotKnow(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			got := ws(t, writeConfig(t, test.config, 0o600), "list-workspaces")
+			got := hivemind(t, writeConfig(t, test.config, 0o600),
+				"list-workspaces")
 			if got.ok || !strings.Contains(got.stderr, test.want) {
 				t.Fatalf("got %+v, want an error with %q", got, test.want)
 			}
@@ -224,10 +225,11 @@ func TestConfigHoldingSecretMustBeOwnerOnly(t *testing.T) {
 	open := "workspaces:\n  general:\n    server: " + server.URL + "\n"
 	secret := open + "    auth:\n      secret: quack\n"
 
-	if got := ws(t, writeConfig(t, open, 0o644), "list-workspaces"); !got.ok {
+	got := hivemind(t, writeConfig(t, open, 0o644), "list-workspaces")
+	if !got.ok {
 		t.Fatalf("a readable config without a secret: %+v", got)
 	}
-	got := ws(t, writeConfig(t, secret, 0o640), "list-workspaces")
+	got = hivemind(t, writeConfig(t, secret, 0o640), "list-workspaces")
 	if got.ok || !strings.Contains(got.stderr, "holds a secret") ||
 		!strings.Contains(got.stderr, "chmod 600") {
 		t.Fatalf("a group-readable config with a secret: %+v", got)
@@ -242,7 +244,7 @@ func TestListWorkspacesKeepsConfigOrder(t *testing.T) {
 	config := writeConfig(t, fmt.Sprintf("workspaces:\n  z:\n    server: %s"+
 		"\n  a:\n    server: %[1]s\n  m:\n    server: %[1]s\n", server.URL),
 		0o600)
-	got := ws(t, config, "list-workspaces")
+	got := hivemind(t, config, "list-workspaces")
 	names := []string{}
 	for _, line := range strings.Split(strings.TrimSpace(got.stdout), "\n") {
 		names = append(names, strings.Fields(line)[0])
@@ -266,7 +268,7 @@ func TestWorkspaceChoiceOrder(t *testing.T) {
 		"server: %s\n  other:\n    server: %[1]s\n  third:\n    "+
 		"server: %[1]s\n", server.URL), 0o600)
 	env := func(pairs ...string) []string {
-		return append([]string{"WORKSTREAM_CONFIG=" + config}, pairs...)
+		return append([]string{"HIVEMIND_CONFIG=" + config}, pairs...)
 	}
 
 	runs := []struct {
@@ -275,8 +277,8 @@ func TestWorkspaceChoiceOrder(t *testing.T) {
 		want string
 	}{
 		{env(), nil, "general"},
-		{env("WORKSTREAM_DEFAULT_WORKSPACE=other"), nil, "other"},
-		{env("WORKSTREAM_DEFAULT_WORKSPACE=other"),
+		{env("HIVEMIND_DEFAULT_WORKSPACE=other"), nil, "other"},
+		{env("HIVEMIND_DEFAULT_WORKSPACE=other"),
 			[]string{"--workspace", "third"}, "third"},
 	}
 	for _, run := range runs {
@@ -284,7 +286,7 @@ func TestWorkspaceChoiceOrder(t *testing.T) {
 		asked = nil
 		mu.Unlock()
 		args := append([]string{"list-projects"}, run.args...)
-		got := runBinary(t, wsBinary, run.env, args...)
+		got := runBinary(t, hivemindBinary, run.env, args...)
 		want := "/api/workspaces/" + run.want + "/projects"
 		if !got.ok || len(asked) != 1 || asked[0] != want {
 			t.Errorf("%v %v asked %v, want %s: %+v", run.env[1:], run.args,
@@ -292,12 +294,13 @@ func TestWorkspaceChoiceOrder(t *testing.T) {
 		}
 	}
 
-	got := runBinary(t, wsBinary, env("WORKSTREAM_DEFAULT_WORKSPACE=gone"),
+	got := runBinary(t, hivemindBinary, env("HIVEMIND_DEFAULT_WORKSPACE=gone"),
 		"list-projects")
 	if got.ok || !strings.Contains(got.stderr, `"gone"`) {
 		t.Errorf("an unconfigured default workspace: %+v", got)
 	}
-	got = runBinary(t, wsBinary, env(), "list-projects", "--workspace", "gone")
+	got = runBinary(t, hivemindBinary, env(), "list-projects",
+		"--workspace", "gone")
 	if got.ok || !strings.Contains(got.stderr, `--workspace names workspace "gone"`) {
 		t.Errorf("an unconfigured --workspace: %+v", got)
 	}
@@ -330,13 +333,13 @@ func TestListProjectsShowsSharesOfRecentPosts(t *testing.T) {
 	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
 
-	got := ws(t, config, "list-projects", "--limit", "4")
+	got := hivemind(t, config, "list-projects", "--limit", "4")
 	want := `Projects by latest activity, with posts from the last 90 days:
 duck-pond   2026-10-10 20:41   1,204 posts   38%
 heron       2026-10-09 14:10       4 posts   <1%
 nest        2026-10-08 09:15       1 post    <1%
 old-lake    2026-05-01 10:00       0 posts    0%
-Next: ws list-projects --limit 6 --workspace general (2 more projects)
+Next: hivemind list-projects --limit 6 --workspace general (2 more projects)
 `
 	if !got.ok || got.stdout != want {
 		t.Fatalf("list-projects printed\n%s\nwant\n%s%s", got.stdout, want,
@@ -350,7 +353,7 @@ func TestConfiguredPrefixSkipsAskingServers(t *testing.T) {
 	config := writeConfig(t, fmt.Sprintf("workspaces:\n  general:\n    "+
 		"server: %s\n  remote:\n    server: %s\n    prefix: r\n",
 		first.URL, second.URL), 0o600)
-	if got := ws(t, config, "post", "r7"); !got.ok {
+	if got := hivemind(t, config, "post", "r7"); !got.ok {
 		t.Fatal(got)
 	}
 	if got := second.recorded(); len(got) != 1 || got[0].path != "/api/posts/r7" {
@@ -376,7 +379,7 @@ func TestAddTakesItsParentsWorkspace(t *testing.T) {
 	config := writeConfig(t, fmt.Sprintf("workspaces:\n  general:\n    "+
 		"server: %s\n    prefix: e\n  personal:\n    server: %s\n    "+
 		"prefix: p\n", server.URL, server.URL), 0o600)
-	got := ws(t, config, "add", "Answer", "--project", "pond",
+	got := hivemind(t, config, "add", "Answer", "--project", "pond",
 		"--parent", "p3")
 	if !got.ok || !strings.Contains(got.stdout, "Added post [p4].") {
 		t.Fatal(got)
@@ -403,13 +406,13 @@ func TestSearchUnderTakesItsPostsWorkspace(t *testing.T) {
 		"server: %s\n    prefix: e\n  personal:\n    server: %s\n    "+
 		"prefix: p\n", server.URL, server.URL), 0o600)
 	for _, command := range []string{"search", "recent"} {
-		got := ws(t, config, command, "--under", "p3")
+		got := hivemind(t, config, command, "--under", "p3")
 		if !got.ok {
 			t.Fatalf("%s --under p3: %+v", command, got)
 		}
 	}
 	for _, command := range []string{"search", "recent", "wait"} {
-		got := ws(t, config, command, "--under", "p3", "--workspace",
+		got := hivemind(t, config, command, "--under", "p3", "--workspace",
 			"general")
 		if got.ok || !strings.Contains(got.stderr, "workspace personal") {
 			t.Errorf("%s --under p3 --workspace general: %+v", command, got)
@@ -437,9 +440,9 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 	})
 	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
-	got := ws(t, config, "chat", "recent")
+	got := hivemind(t, config, "chat", "recent")
 	want := "[e1] 2026-10-09 05:20 heron: Why?\n" +
-		"  ... 6 earlier (ws chat read e1 --after e1-m0)\n" +
+		"  ... 6 earlier (hivemind chat read e1 --after e1-m0)\n" +
 		"  [e1-m7] 2026-10-09 05:20 duck: quack\n" +
 		"  [e1-m8] 2026-10-09 05:20 duck: quack\n" +
 		"Cursor: @31\n"
@@ -495,7 +498,8 @@ func sendAfterServer(t *testing.T, sent, newest int64) string {
 // last message shown neither repeats nor skips a message.
 func TestSendAfterShowsMessagesThatRaceIt(t *testing.T) {
 	config := sendAfterServer(t, 3, 4)
-	got := ws(t, config, "chat", "send", "e1", "quack", "--after", "e1-m1")
+	got := hivemind(t, config, "chat", "send", "e1", "quack",
+		"--after", "e1-m1")
 	want := "Sent [e1-m3].\n" +
 		"[e1-m2] 2026-10-09 05:20 heron: quack\n" +
 		"[e1-m3] 2026-10-09 05:20 duck: quack\n" +
@@ -509,14 +513,15 @@ func TestSendAfterShowsMessagesThatRaceIt(t *testing.T) {
 // newest 20 and says how to read the ones it left out.
 func TestSendAfterLeavesOutOlderMessages(t *testing.T) {
 	config := sendAfterServer(t, 24, 25)
-	got := ws(t, config, "chat", "send", "e1", "quack", "--after", "e1-m1")
+	got := hivemind(t, config, "chat", "send", "e1", "quack",
+		"--after", "e1-m1")
 	lines := strings.Split(strings.TrimSuffix(got.stdout, "\n"), "\n")
 	if !got.ok || len(lines) != 22 {
 		t.Fatalf("send printed %d lines, want 22:\n%s (%+v)",
 			len(lines), got.stdout, got)
 	}
 	want := []string{"Sent [e1-m24].",
-		"... 4 earlier (ws chat read e1 --after e1-m1)",
+		"... 4 earlier (hivemind chat read e1 --after e1-m1)",
 		"[e1-m6] 2026-10-09 05:20 heron: quack"}
 	if !slices.Equal(lines[:3], want) {
 		t.Fatalf("send began\n%s\nwant\n%s", strings.Join(lines[:3], "\n"),
@@ -588,14 +593,14 @@ func TestListingShowsAMatchALine(t *testing.T) {
 		Revision: 93,
 	})
 
-	got := ws(t, config, "recent", "-n", "4", "--project", "ai",
+	got := hivemind(t, config, "recent", "-n", "4", "--project", "ai",
 		"--after", "@12")
 	want := `[f21] 2026-10-09 08:59 ruth: Fixture rules (4 new messages)
 [f6-m4] 2026-10-09 08:58 lena in f4.f5.f6 (edited): two
     lines
 [f7] 2026-10-09 08:40 omar in f4 (deleted) (1 new message)
 [f6-m2] 2026-10-09 08:38 ines in f4.f5.f6 (deleted)
-Next: ws recent --before @81 --workspace general --after @12 --limit 4 --project ai (more older matches)
+Next: hivemind recent --before @81 --workspace general --after @12 --limit 4 --project ai (more older matches)
 Cursor: @93
 `
 	if !got.ok || got.stdout != want {
@@ -606,13 +611,13 @@ Cursor: @93
 		t.Fatalf("recent said %q on stderr, want %q", got.stderr, header)
 	}
 
-	got = ws(t, config, "search", "hook", "--id-only")
+	got = hivemind(t, config, "search", "hook", "--id-only")
 	if want := "f21\nf6-m4\nf7\nf6-m2\n"; !got.ok || got.stdout != want {
 		t.Fatalf("search --id-only =\n%s\nwant\n%s (%+v)", got.stdout,
 			want, got)
 	}
 	stderr := "Newest 20 posts and messages matching hook:\n" +
-		"Next: ws search hook --before @81 --workspace general " +
+		"Next: hivemind search hook --before @81 --workspace general " +
 		"(more older matches)\n"
 	if got.stderr != stderr {
 		t.Fatalf("search --id-only said %q on stderr, want %q",
@@ -642,7 +647,8 @@ Cursor: @93
 		{[]string{"search", "--exclude-posts"}, "chat",
 			"Newest 1 message:\n"},
 	} {
-		got = ws(t, config, append(listing.args, "-n", "1", "--id-only")...)
+		got = hivemind(t, config,
+			append(listing.args, "-n", "1", "--id-only")...)
 		sent := queries()
 		if items := sent[len(sent)-1].Get("items"); items != listing.items {
 			t.Errorf("%v sent items %q, want %q", listing.args, items,
@@ -702,13 +708,13 @@ func TestFooterAsksForTheNextPage(t *testing.T) {
 			Revision: 812345}},
 		More: true,
 	})
-	env := []string{"WORKSTREAM_CONFIG=" + config, "TZ=Asia/Singapore"}
+	env := []string{"HIVEMIND_CONFIG=" + config, "TZ=Asia/Singapore"}
 	for _, after := range []string{"2026-10-09T04:00:00.25Z", "2h"} {
-		first := runBinary(t, wsBinary, env, "search", "duck's pond",
+		first := runBinary(t, hivemindBinary, env, "search", "duck's pond",
 			"--exclude-chat", "--after", after, "--no-project", "x", "-n",
 			"1", "--include-superseded")
 		lines := strings.Split(strings.TrimSpace(first.stdout), "\n")
-		footer, ok := strings.CutPrefix(lines[len(lines)-1], "Next: ws ")
+		footer, ok := strings.CutPrefix(lines[len(lines)-1], "Next: hivemind ")
 		if !first.ok || !ok {
 			t.Fatalf("search printed no footer: %+v", first)
 		}
@@ -721,7 +727,7 @@ func TestFooterAsksForTheNextPage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if next := runBinary(t, wsBinary, env, words...); !next.ok {
+		if next := runBinary(t, hivemindBinary, env, words...); !next.ok {
 			t.Fatalf("the footer's command failed: %+v", next)
 		}
 
@@ -749,7 +755,7 @@ func TestResolutionMovesOnOnlyForAnAbsentPrefix(t *testing.T) {
 		"server: %s\n    auth:\n      secret: first-secret\n  personal:\n"+
 		"    server: %s\n    auth:\n      secret: second-secret\n",
 		first.URL, second.URL), 0o600)
-	if got := ws(t, config, "post", "p3"); !got.ok ||
+	if got := hivemind(t, config, "post", "p3"); !got.ok ||
 		!strings.Contains(got.stdout, "[p3]") {
 		t.Fatal(got)
 	}
@@ -775,7 +781,7 @@ func TestSecretNeverReachesAnotherServer(t *testing.T) {
 	config := writeConfig(t, fmt.Sprintf("workspaces:\n  general:\n    "+
 		"server: %s\n    auth:\n      secret: first-secret\n  other:\n"+
 		"    server: %s\n", first.URL, second.URL), 0o600)
-	if got := ws(t, config, "post", "p3"); !got.ok {
+	if got := hivemind(t, config, "post", "p3"); !got.ok {
 		t.Fatal(got)
 	}
 	for _, request := range second.recorded() {
@@ -806,9 +812,10 @@ func TestResolutionStopsOnAnyOtherFailure(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			first := newFakeServer(t, handler)
 			second := newFakeServer(t, hosting(answering("p3"), "personal=p"))
-			got := ws(t, writeConfig(t, fmt.Sprintf("workspaces:\n  a:\n    "+
+			config := writeConfig(t, fmt.Sprintf("workspaces:\n  a:\n    "+
 				"server: %s\n  b:\n    server: %s\n", first.URL, second.URL),
-				0o600), "post", "p3")
+				0o600)
+			got := hivemind(t, config, "post", "p3")
 			if got.ok || !strings.Contains(got.stderr, first.URL) {
 				t.Errorf("want an error naming %s: %+v", first.URL, got)
 			}
@@ -821,7 +828,7 @@ func TestResolutionStopsOnAnyOtherFailure(t *testing.T) {
 	t.Run("unreachable", func(t *testing.T) {
 		down := closedServer(t)
 		second := newFakeServer(t, hosting(answering("p3"), "personal=p"))
-		got := ws(t, writeConfig(t, fmt.Sprintf("workspaces:\n  a:\n    "+
+		got := hivemind(t, writeConfig(t, fmt.Sprintf("workspaces:\n  a:\n    "+
 			"server: %s\n  b:\n    server: %s\n", down, second.URL), 0o600),
 			"post", "p3")
 		if got.ok || !strings.Contains(got.stderr, down) {
@@ -853,9 +860,10 @@ func TestFailuresAreNeverAnUnknownPrefix(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			first := newFakeServer(t, hosting(failure.handler, "personal=p"))
 			second := newFakeServer(t, hosting(answering("p3"), "other=p"))
-			got := ws(t, writeConfig(t, fmt.Sprintf("workspaces:\n  a:\n    "+
+			config := writeConfig(t, fmt.Sprintf("workspaces:\n  a:\n    "+
 				"server: %s\n  b:\n    server: %s\n", first.URL, second.URL),
-				0o600), "post", "p3")
+				0o600)
+			got := hivemind(t, config, "post", "p3")
 			if got.ok || !strings.Contains(got.stderr, failure.want) ||
 				strings.Contains(got.stderr, "prefix") {
 				t.Errorf("want %q and no prefix error: %+v", failure.want, got)
@@ -873,7 +881,7 @@ func TestLinksCannotJoinServers(t *testing.T) {
 	config := writeConfig(t, fmt.Sprintf("workspaces:\n  general:\n    "+
 		"server: %s\n    prefix: e\n  remote:\n    server: %s\n    "+
 		"prefix: r\n", first.URL, second.URL), 0o600)
-	got := ws(t, config, "add", "Linked", "--project", "pond",
+	got := hivemind(t, config, "add", "Linked", "--project", "pond",
 		"--link", "see=r4")
 	if got.ok || !strings.Contains(got.stderr, "cannot join posts on "+
 		"different servers") {
@@ -949,13 +957,13 @@ func TestUncertainWritesGiveTheCommandThatRepeatsThem(t *testing.T) {
 				}, "general=e"))
 			config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 				server.URL+"\n", 0o600)
-			got := ws(t, config, "add", "Once more", "--project", "pond")
+			got := hivemind(t, config, "add", "Once more", "--project", "pond")
 			ids := writes.all()
 			if len(ids) != 1 || ids[0] == "" {
 				t.Fatalf("want one write with a request id, got %q", ids)
 			}
 			id := ids[0]
-			repeat := "\n  ws add --request-id " + id +
+			repeat := "\n  hivemind add --request-id " + id +
 				" 'Once more' --project pond\n"
 			if got.ok || !strings.Contains(got.stderr,
 				"may have taken effect") ||
@@ -964,7 +972,7 @@ func TestUncertainWritesGiveTheCommandThatRepeatsThem(t *testing.T) {
 					got)
 			}
 
-			got = ws(t, config, "add", "--request-id", id, "Once more",
+			got = hivemind(t, config, "add", "--request-id", id, "Once more",
 				"--project", "pond")
 			if ids := writes.all(); len(ids) != 2 || ids[1] != id {
 				t.Errorf("want the repeat under the same id, got %q", ids)
@@ -979,7 +987,7 @@ func TestUncertainWritesGiveTheCommandThatRepeatsThem(t *testing.T) {
 	t.Run("refused connection", func(t *testing.T) {
 		config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 			closedServer(t)+"\n", 0o600)
-		got := ws(t, config, "add", "Never sent", "--project", "pond")
+		got := hivemind(t, config, "add", "Never sent", "--project", "pond")
 		if got.ok || strings.Contains(got.stderr, "may have taken effect") {
 			t.Errorf("an unsent write is certain: %+v", got)
 		}
@@ -990,7 +998,7 @@ func TestUncertainWritesGiveTheCommandThatRepeatsThem(t *testing.T) {
 		})
 		config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 			server.URL+"\n", 0o600)
-		got := ws(t, config, "add", "Refused", "--project", "pond")
+		got := hivemind(t, config, "add", "Refused", "--project", "pond")
 		if got.ok || strings.Contains(got.stderr, "may have taken effect") {
 			t.Errorf("a refusal is certain: %+v", got)
 		}
@@ -1024,8 +1032,8 @@ func TestSendRepeatsUnderItsRequestID(t *testing.T) {
 				}, "general=e"))
 			config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 				server.URL+"\n", 0o600)
-			got := runBinary(t, wsBinary, []string{"WORKSTREAM_CONFIG=" +
-				config, "WORKSTREAM_TIMEOUT=300ms"}, "chat", "send", "e1",
+			got := runBinary(t, hivemindBinary, []string{"HIVEMIND_CONFIG=" +
+				config, "HIVEMIND_TIMEOUT=300ms"}, "chat", "send", "e1",
 				"quack")
 			if !got.ok || got.stdout != "Sent [e1-m1].\n" {
 				t.Errorf("want the send to land on its second try: %+v", got)
@@ -1061,8 +1069,8 @@ func TestTimesShowTheLocalDate(t *testing.T) {
 		time.Date(2025, 7, 23, 16, 0, 0, 0, time.UTC)))
 	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
-	got := runBinary(t, wsBinary, []string{"TZ=Asia/Singapore",
-		"WORKSTREAM_CONFIG=" + config}, "search")
+	got := runBinary(t, hivemindBinary, []string{"TZ=Asia/Singapore",
+		"HIVEMIND_CONFIG=" + config}, "search")
 	want := "[e1] 2025-07-23 09:00: Duck\n[e2] 2025-07-24 00:00: Duck"
 	if strings.TrimSpace(got.stdout) != want {
 		t.Errorf("got\n%s\nwant\n%s", got.stdout, want)
@@ -1074,14 +1082,14 @@ func TestForumNamesItselfAndReadsOnlyItsConfig(t *testing.T) {
 	server := newFakeServer(t, hosting(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(time.Second)
 	}, "general=e"))
-	wsConfig := writeConfig(t, "workspaces:\n  general:\n    server: "+
+	hivemindConfig := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
 	forum := func(env ...string) func(args ...string) result {
 		return func(args ...string) result {
 			t.Helper()
 			command := exec.Command(forumBinary, args...)
 			command.Env = append([]string{"PATH=" + os.Getenv("PATH"),
-				"HOME=" + home, "WORKSTREAM_CONFIG=" + wsConfig}, env...)
+				"HOME=" + home, "HIVEMIND_CONFIG=" + hivemindConfig}, env...)
 			var stdout, stderr strings.Builder
 			command.Stdout, command.Stderr = &stdout, &stderr
 			err := command.Run()
@@ -1096,7 +1104,7 @@ func TestForumNamesItselfAndReadsOnlyItsConfig(t *testing.T) {
 		t.Errorf("forum without its config: %+v", got)
 	}
 
-	withConfig := forum("FORUM_CONFIG="+wsConfig,
+	withConfig := forum("FORUM_CONFIG="+hivemindConfig,
 		"FORUM_TIMEOUT=200ms", "USER=duck")
 	got = withConfig("edit", "e1", "Lost")
 	if !strings.Contains(got.stderr, "Check 'forum post e1'") ||
@@ -1109,9 +1117,12 @@ func TestForumNamesItselfAndReadsOnlyItsConfig(t *testing.T) {
 		t.Errorf("forum's usage error: %+v", got)
 	}
 	help := withConfig("help").stdout
+	// The help may name the project, but not hivemind's commands,
+	// config path or variables.
 	for _, line := range strings.Split(help, "\n") {
-		if regexp.MustCompile(`\bws\b|WORKSTREAM`).MatchString(line) {
-			t.Errorf("forum help names ws: %q", line)
+		if regexp.MustCompile(`\bhivemind [a-z]|/hivemind/|HIVEMIND`).
+			MatchString(line) {
+			t.Errorf("forum help names hivemind: %q", line)
 		}
 	}
 	if !strings.Contains(help, "FORUM_DEFAULT_WORKSPACE") ||
@@ -1165,8 +1176,8 @@ func TestWaitsExcludeTheirOwnSession(t *testing.T) {
 			mu.Lock()
 			queries = nil
 			mu.Unlock()
-			got := runBinary(t, wsBinary, []string{
-				"WORKSTREAM_CONFIG=" + config(test.capture),
+			got := runBinary(t, hivemindBinary, []string{
+				"HIVEMIND_CONFIG=" + config(test.capture),
 				"CLAUDE_CODE_SESSION_ID=lead"},
 				append(test.args, "--timeout", "1ms")...)
 			if !got.ok || !strings.HasSuffix(got.stdout, test.cursor) {
@@ -1201,9 +1212,9 @@ func TestChatWaitReadsOnWithItsFilters(t *testing.T) {
 	}, "general=e"))
 	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
-	got := ws(t, config, "chat", "wait", "e1", "--after", "e1-m3",
+	got := hivemind(t, config, "chat", "wait", "e1", "--after", "e1-m3",
 		"--content", "quack")
-	want := "Next: ws chat wait e1 --after e1-m20 --content quack " +
+	want := "Next: hivemind chat wait e1 --after e1-m20 --content quack " +
 		"(more messages to check)\n"
 	if !got.ok || !strings.HasSuffix(got.stdout, want) {
 		t.Fatalf("got %+v, want it to end with %q", got, want)
@@ -1234,7 +1245,7 @@ func TestChangesShowEachAtItsLatestChange(t *testing.T) {
 	}, "general=e"))
 	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
 		server.URL+"\n", 0o600)
-	got := ws(t, config, "wait", "--after", "@3")
+	got := hivemind(t, config, "wait", "--after", "@3")
 	want := "[e1] 2026-10-09 05:30 duck: Pond\n" +
 		"[e1-m2] 2026-10-09 05:41 duck in e1 (edited): quack\n" +
 		"[e1-m3] 2026-10-09 05:45 duck in e1 (deleted)\n"

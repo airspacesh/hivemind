@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/airspacesh/workstream/internal/api"
-	"github.com/airspacesh/workstream/internal/version"
+	"github.com/airspacesh/hivemind/internal/api"
+	"github.com/airspacesh/hivemind/internal/version"
 )
 
 const defaultTimeout = 5 * time.Second
@@ -246,7 +246,7 @@ func checkAPIVersion(response *http.Response) error {
 		return nil
 	}
 	return fmt.Errorf("it sent %s %q, but this %s needs API %s. Update "+
-		"whichever of %s and ws-server is older", version.APIHeader,
+		"whichever of %s and hivemind-server is older", version.APIHeader,
 		values, programName, want, programName)
 }
 

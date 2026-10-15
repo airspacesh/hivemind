@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 func TestOneNameLinksSeveralTargetsButOneParent(t *testing.T) {
@@ -155,7 +155,7 @@ func TestOtherLinksMayLoop(t *testing.T) {
 }
 
 func TestConcurrentOppositeParentsLeaveNoLoop(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "ws.db")
+	path := filepath.Join(t.TempDir(), "hivemind.db")
 	first := openStoreAt(t, path, contendedOpenBusyTimeout)
 	second := openStoreAt(t, path, contendedOpenBusyTimeout)
 	a := mustAdd(t, first, "a", "", nil)

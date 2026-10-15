@@ -3,5 +3,5 @@ package version
 const (
 	Software  = "1.0.1"
 	API       = 7
-	APIHeader = "Workstream-API-Version"
+	APIHeader = "Hivemind-API-Version"
 )

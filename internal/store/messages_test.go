@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 // postFrom posts a message with the given origin.
@@ -396,7 +396,7 @@ func TestOverviewGroupsTheNewestMessagesByPost(t *testing.T) {
 func TestOverwrittenTextLeavesNoCopyInTheDatabase(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
-	store := openStoreAt(t, filepath.Join(dir, "ws.db"), testBusyTimeout)
+	store := openStoreAt(t, filepath.Join(dir, "hivemind.db"), testBusyTimeout)
 	post := mustAdd(t, store, "SUBJECTMARK "+
 		strings.Repeat("x", 100), "", nil)
 	message := mustPostMessage(t, store, post.Ref, "EDITEDAWAYMARK "+
@@ -416,7 +416,7 @@ func TestOverwrittenTextLeavesNoCopyInTheDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, name := range []string{"ws.db", "ws.db-wal"} {
+	for _, name := range []string{"hivemind.db", "hivemind.db-wal"} {
 		data, err := os.ReadFile(filepath.Join(dir, name))
 		if errors.Is(err, os.ErrNotExist) {
 			continue

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 const MaxTreeLimit = 500

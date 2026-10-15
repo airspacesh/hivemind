@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 func mustDelete(t *testing.T, store *Store, ref api.Ref) api.Post {

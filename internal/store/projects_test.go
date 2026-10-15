@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 // describeProjects lists each project as its name and recent posts, and

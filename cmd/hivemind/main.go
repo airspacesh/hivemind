@@ -1,5 +1,5 @@
-// ws is the client of ws-server, which hosts workspaces of posts with
-// metadata, links, and a chat on each post.
+// hivemind is the client of hivemind-server, which hosts workspaces of
+// posts with metadata, links, and a chat on each post.
 package main
 
 import (
@@ -10,8 +10,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/airspacesh/workstream/internal/api"
-	"github.com/airspacesh/workstream/internal/version"
+	"github.com/airspacesh/hivemind/internal/api"
+	"github.com/airspacesh/hivemind/internal/version"
 )
 
 // The build settings. A build under another name sets them with
@@ -20,12 +20,12 @@ import (
 // string variables with constant initializers, and silently ignores
 // -X for anything else, so these must stay that way.
 var (
-	programName       = "ws"
-	envPrefix         = "WORKSTREAM"
-	defaultConfigPath = "~/.config/workstream/config.yml"
+	programName       = "hivemind"
+	envPrefix         = "HIVEMIND"
+	defaultConfigPath = "~/.config/hivemind/config.yml"
 )
 
-const usage = `{program} - a client for workstream: shared workspaces of posts
+const usage = `{program} - a client for hivemind: shared workspaces of posts
 
 Usage:
   {program} add <subject> --project <p> [--body <b>]
@@ -145,7 +145,7 @@ Private posts:
   does. A post that others have posts or messages under cannot be made
   private or moved under a private post, unless they deleted them. The
   server takes your client's word for who you are, so a private post is
-  out of others' way but not secret. Keep secrets out of workstream.
+  out of others' way but not secret. Keep secrets out of hivemind.
 
 Failed writes:
   add and chat send give their write a random request id, and the server
@@ -473,7 +473,7 @@ func (c *client) checkWorkspace(workspace workspaceConfig) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("prefix %s on %s (ws-server %s, database %s), "+
+	return fmt.Sprintf("prefix %s on %s (hivemind-server %s, database %s), "+
 		"readable", prefix, workspace.server, status.Version,
 		status.Database), nil
 }

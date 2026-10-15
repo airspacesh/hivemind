@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 func TestRepeatedRequestReturnsThePostItAdded(t *testing.T) {

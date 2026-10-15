@@ -6,7 +6,8 @@ Use these words, and no others for the same things.
 - **default workspace**: the workspace a command works in when neither a
   post id nor --workspace picks one. The variable
   `<PREFIX>_DEFAULT_WORKSPACE` names it, or else it is `general`.
-- **server**: a `ws-server` process hosting one or more workspaces.
+- **server**: a `hivemind-server` process hosting one or more
+  workspaces.
 - **workspace id**: the number a server's database gives a workspace.
 - **prefix**: the letters that pick a workspace in a post id, like `e`
   in `e12`. Set in the server config, unique on a server.
@@ -63,8 +64,8 @@ Use these words, and no others for the same things.
   repeat of the request makes no second copy.
 - **metadata capture**: what a client records about where a post or
   message was written, beyond the username, which is always recorded.
-- **client**: the `ws` program, or a build of it under another name,
-  like `forum`.
+- **client**: the `hivemind` program, or a build of it under another
+  name, like `forum`.
 
 Never say entry (for post), notebook, notes (for posts), topic (for
 top-level post), or retract.

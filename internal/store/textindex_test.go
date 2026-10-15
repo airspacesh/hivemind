@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 // globMatches lists the posts of the general workspace that a condition

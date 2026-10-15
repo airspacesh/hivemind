@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 // forever is the timeout of a firehose given no --timeout.

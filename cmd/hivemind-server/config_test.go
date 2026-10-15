@@ -24,7 +24,7 @@ func writeConfig(t *testing.T, text string, mode os.FileMode) string {
 
 func TestConfigReadsWorkspacesAndDefaults(t *testing.T) {
 	path := writeConfig(t, `
-db: /srv/workstream/ws.db
+db: /srv/hivemind/hivemind.db
 workspaces:
   personal:
     prefix: p
@@ -58,7 +58,7 @@ func TestConfigRefusesWhatItDoesNotKnow(t *testing.T) {
 		want string
 	}{
 		{"misspelt auth key", `
-db: /srv/workstream/ws.db
+db: /srv/hivemind/hivemind.db
 workspaces:
   personal:
     prefix: p
@@ -66,7 +66,7 @@ workspaces:
       secrte: s3cret
 `, "secrte"},
 		{"misspelt auth block", `
-db: /srv/workstream/ws.db
+db: /srv/hivemind/hivemind.db
 workspaces:
   personal:
     prefix: p
@@ -74,14 +74,14 @@ workspaces:
       secret: s3cret
 `, "auht"},
 		{"unknown top-level key", `
-db: /srv/workstream/ws.db
+db: /srv/hivemind/hivemind.db
 port: 7139
 workspaces:
   general:
     prefix: e
 `, "port"},
 		{"shared prefix", `
-db: /srv/workstream/ws.db
+db: /srv/hivemind/hivemind.db
 workspaces:
   general:
     prefix: e
@@ -89,7 +89,7 @@ workspaces:
     prefix: e
 `, "both have prefix e"},
 		{"empty secret", `
-db: /srv/workstream/ws.db
+db: /srv/hivemind/hivemind.db
 workspaces:
   personal:
     prefix: p
@@ -108,7 +108,7 @@ workspaces:
 func TestConfigPathAndDBTakeTheHomeDirectoryForALeadingTilde(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	text := "db: ~/server/ws.db\nworkspaces:\n  e:\n    prefix: e\n"
+	text := "db: ~/server/hivemind.db\nworkspaces:\n  e:\n    prefix: e\n"
 	if err := os.WriteFile(filepath.Join(home, "config.yml"),
 		[]byte(text), 0o600); err != nil {
 		t.Fatal(err)
@@ -117,15 +117,15 @@ func TestConfigPathAndDBTakeTheHomeDirectoryForALeadingTilde(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(home, "server/ws.db"); config.DB != want {
+	if want := filepath.Join(home, "server/hivemind.db"); config.DB != want {
 		t.Fatalf("db = %q, want %q", config.DB, want)
 	}
 }
 
 func TestConfigHoldingASecretMustBeReadableByItsOwnerAlone(t *testing.T) {
-	secret := "db: /srv/ws/ws.db\nworkspaces:\n  p:\n    prefix: p\n" +
+	secret := "db: /srv/hivemind.db\nworkspaces:\n  p:\n    prefix: p\n" +
 		"    auth:\n      secret: s3cret\n"
-	open := "db: /srv/ws/ws.db\nworkspaces:\n  e:\n    prefix: e\n"
+	open := "db: /srv/hivemind.db\nworkspaces:\n  e:\n    prefix: e\n"
 	for _, test := range []struct {
 		text string
 		mode os.FileMode
@@ -173,7 +173,8 @@ func TestStartupWarnsOfOpenWorkspacesBeyondLoopbackAndLostOnes(t *testing.T) {
 
 func TestTimeoutIsADuration(t *testing.T) {
 	config, err := loadConfig(writeConfig(t,
-		"db: /srv/ws/ws.db\ntimeout: 90s\nworkspaces:\n  e:\n    prefix: e\n",
+		"db: /srv/hivemind.db\ntimeout: 90s\nworkspaces:\n"+
+			"  e:\n    prefix: e\n",
 		0o600))
 	if err != nil {
 		t.Fatal(err)

@@ -1,4 +1,4 @@
-// Package store owns the SQLite database behind ws-server.
+// Package store owns the SQLite database behind hivemind-server.
 package store
 
 import (
@@ -14,13 +14,13 @@ import (
 
 	sqlite "modernc.org/sqlite"
 
-	"github.com/airspacesh/workstream/internal/api"
+	"github.com/airspacesh/hivemind/internal/api"
 )
 
 var (
 	ErrPostNotFound    = errors.New("post not found")
 	ErrMetadataLimit   = errors.New("metadata pair limit reached")
-	ErrInvalidDatabase = errors.New("invalid workstream database")
+	ErrInvalidDatabase = errors.New("invalid hivemind database")
 )
 
 const (
