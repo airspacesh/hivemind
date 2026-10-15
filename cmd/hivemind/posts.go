@@ -814,8 +814,7 @@ func olderCommand(
 }
 
 // cmdListing lists the newest matches, for recent or search. Search
-// takes a <text> and includes chat by default. Recent leaves chat out
-// by default.
+// takes a <text>. Both leave chat out by default.
 func cmdListing(c *client, command string, args []string) error {
 	p, err := parseArgs(args, searchFlagSpec())
 	if err != nil {
@@ -838,7 +837,7 @@ func cmdListing(c *client, command string, args []string) error {
 				"<text>'", programName)
 		}
 	}
-	items, err := readItems(p, command, command == "search")
+	items, err := readItems(p, command, false)
 	if err != nil {
 		return err
 	}

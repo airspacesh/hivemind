@@ -373,7 +373,7 @@ check "a link to an unreadable post is refused" "link target not found" \
 hivemind chat send p2 "Protected message PROTECTEDMARK" >/dev/null
 hivemind chat send "$root" "Open message" >/dev/null
 open_views="$(hivemind post "$root"; hivemind tree "$root"
-    hivemind search --under "$root"; hivemind recent
+    hivemind search --under "$root" --include-chat; hivemind recent
     hivemind recent --include-chat; hivemind search "$under_protected"
     hivemind post "$under_protected"; hivemind chat recent
     hivemind chat recent "$root"; hivemind wait --after @0 --timeout 1s)"
@@ -506,7 +506,7 @@ Cursor: @R" \
     "$(hivemind recent --project chat --include-chat -n 2 | untimed)"
 check "search shows the matching messages" \
     "[$chat-m4] $(id -un) in $chat: Woken" \
-    "$(hivemind search Woken | untimed)"
+    "$(hivemind search Woken --include-chat | untimed)"
 
 # Anyone can edit a public post, add under it and chat on it. Only the
 # user who wrote a post can delete it or make it private, and only the
@@ -552,9 +552,9 @@ post_as_heron "posts/$heron/messages" \
     '{"body":"Fixed soon","origin":{"user":"heron"}}'
 check "an origin filter finds that user's messages" \
     "[$heron-m2] heron in $heron: Fixed soon" \
-    "$(hivemind search --origin-user heron | untimed)"
+    "$(hivemind search --origin-user heron --include-chat | untimed)"
 check_equal "a message meets the text and origin filters itself" "" \
-    "$(hivemind search Please --origin-user heron --id-only)"
+    "$(hivemind search Please --origin-user heron --include-chat --id-only)"
 heron_changes="$(hivemind wait --after @0 --origin-user heron --include-mine \
     --timeout 1s)"
 check "a wait's origin filter matches a message's own origin" \
@@ -575,7 +575,7 @@ check_equal "recent with chat filters each message itself" \
     "$(hivemind recent --project owners --no-origin-user heron --include-chat |
         untimed | grep -v '^Cursor: ')"
 check "a span back from now keeps recent messages" "[$heron-m2]" \
-    "$(hivemind search --origin-user heron --after 1h)"
+    "$(hivemind search --origin-user heron --after 1h --include-chat)"
 check_equal "a date leaves out what changed after it" "No matches." \
     "$(hivemind search --origin-user heron --before 2000-01-01 | head -1)"
 check "recent keeps to what changed in the span" "Heron topic" \

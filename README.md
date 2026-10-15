@@ -111,11 +111,11 @@ hivemind chat recent [<ref>]
 ```
 
 `hivemind recent` lists posts at every level, the newest first, a line
-each with the path to it. `hivemind search` lists the posts and messages
-that match. `--under <ref>` scopes either to one post and everything
-under it. `hivemind post` shows one post and its body and metadata,
-`hivemind message g2-m1` shows one message, and `hivemind tree` shows a
-post and everything under it.
+each with the path to it. `hivemind search` lists the posts that match.
+`--include-chat` adds messages to either, and `--under <ref>` scopes
+either to one post and everything under it. `hivemind post` shows one
+post and its body and metadata, `hivemind message g2-m1` shows one
+message, and `hivemind tree` shows a post and everything under it.
 
 ```
 $ hivemind recent --include-chat

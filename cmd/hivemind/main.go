@@ -199,12 +199,12 @@ Listings:
   [e44-m3] 2026-10-13 07:50 omar in e1.e34.e44: text, and a post ranks by
   its own latest change. The path after "in" always ends at the post a
   line sits in, a post's parent or a message's own post. '{program}
-  search' lists the same way, with chat unless --exclude-chat. Posts and
-  messages share --limit. A listing says what it ran on stderr. When older
-  matches may remain, a 'Next:' line gives the command that lists them,
-  which repeats the flags with --before set to the revision of the oldest
-  match shown. Recent ends with a 'Cursor:' line giving the revision it
-  read at, like 'Cursor: @812345', which a wait takes.
+  search' lists the same way, with chat only when --include-chat. Posts
+  and messages share --limit. A listing says what it ran on stderr. When
+  older matches may remain, a 'Next:' line gives the command that lists
+  them, which repeats the flags with --before set to the revision of the
+  oldest match shown. Recent ends with a 'Cursor:' line giving the
+  revision it read at, like 'Cursor: @812345', which a wait takes.
   --under <ref> keeps recent or search to a post and what is beneath
   it, and --no-under <ref>, which repeats, leaves a post and what is
   beneath it out.
@@ -235,15 +235,16 @@ Search filters (recent, search, wait and firehose):
   duck does not match duck-pond. An empty pattern matches only an
   empty value. Prefix a filter with no- to exclude, as in --no-project.
   Filters AND together.
-  '{program} search', and '{program} recent --include-chat', match each
-  message in a post's chat as well as the posts. A message matches when
-  it meets the text and origin filters itself, excluding ones included,
-  and its post meets the others. A post matches when it meets every
-  filter itself. So 'search hook --origin-user ines --project build'
-  finds the messages ines sent that mention hook in the chats of build
-  posts, and the build posts by ines that mention hook, and 'search
-  --origin-user ines --after 2d' lists what ines posted in the last 2
-  days, and the posts she created that changed in them.
+  With --include-chat, '{program} recent' and '{program} search' match
+  each message in a post's chat as well as the posts. A message matches
+  when it meets the text and origin filters itself, excluding ones
+  included, and its post meets the others. A post matches when it meets
+  every filter itself. So 'search hook --include-chat --origin-user ines
+  --project build' finds the messages ines sent that mention hook in the
+  chats of build posts, and the build posts by ines that mention hook,
+  and 'search --include-chat --origin-user ines --after 2d' lists what
+  ines posted in the last 2 days, and the posts she created that changed
+  in them.
   --limit <n>, -n <n>    matches to show (default 20)
   --id-only              print one post or message id per line, and
                          the 'Next:' and 'Cursor:' lines on stderr
@@ -252,8 +253,8 @@ Inclusion flags:
   Each shows something a command leaves out by default, or leaves out
   something it shows. A command takes at most one flag of a pair.
   --include-chat, --exclude-chat
-      the messages in recent, search, wait and firehose. recent leaves
-      them out by default, and the others show them.
+      the messages in recent, search, wait and firehose. recent and
+      search leave them out by default, and wait and firehose show them.
   --include-posts, --exclude-posts
       the posts in recent, search, wait and firehose, which show them by
       default. A command left to show neither posts nor messages refuses

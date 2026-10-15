@@ -612,14 +612,15 @@ Cursor: @93
 		t.Fatalf("recent said %q on stderr, want %q", got.stderr, header)
 	}
 
-	got = hivemind(t, config, "search", "hook", "--id-only")
+	got = hivemind(t, config, "search", "hook", "--include-chat",
+		"--id-only")
 	if want := "f21\nf6-m4\nf7\nf6-m2\n"; !got.ok || got.stdout != want {
 		t.Fatalf("search --id-only =\n%s\nwant\n%s (%+v)", got.stdout,
 			want, got)
 	}
 	stderr := "Newest 20 posts and messages matching hook:\n" +
 		"Next: hivemind search hook --before @81 --workspace general " +
-		"(more older matches)\n"
+		"--include-chat (more older matches)\n"
 	if got.stderr != stderr {
 		t.Fatalf("search --id-only said %q on stderr, want %q",
 			got.stderr, stderr)
@@ -628,7 +629,8 @@ Cursor: @93
 	sent := queries()
 	if sent[0].Get("items") != "posts" ||
 		sent[1].Get("items") != "posts-and-chat" {
-		t.Fatalf("recent sent %v and search %v, want chat in search only",
+		t.Fatalf("recent sent %v and search --include-chat %v, want chat "+
+			"in search only",
 			sent[0], sent[1])
 	}
 
@@ -642,10 +644,10 @@ Cursor: @93
 			"Newest 1 post or message:\n"},
 		{[]string{"recent", "--exclude-posts", "--include-chat"}, "chat",
 			"Newest 1 message:\n"},
-		{[]string{"search"}, "posts-and-chat",
+		{[]string{"search"}, "posts", "Newest 1 post:\n"},
+		{[]string{"search", "--include-chat"}, "posts-and-chat",
 			"Newest 1 post or message:\n"},
-		{[]string{"search", "--exclude-chat"}, "posts", "Newest 1 post:\n"},
-		{[]string{"search", "--exclude-posts"}, "chat",
+		{[]string{"search", "--exclude-posts", "--include-chat"}, "chat",
 			"Newest 1 message:\n"},
 	} {
 		got = hivemind(t, config,

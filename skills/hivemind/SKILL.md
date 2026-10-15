@@ -44,7 +44,7 @@ hivemind chat recent [<ref>]
 
 `hivemind recent` lists posts at every level, the newest first, a line
 each with the path to it, and with `--include-chat`, messages too.
-`hivemind search` lists the posts and messages that match, the same way.
+`hivemind search` lists the posts that match, the same way.
 `--under <ref>` scopes either to one post and everything under it, and
 `--no-under <ref>` leaves one out. `hivemind post` shows one post in
 full, with its body and metadata. `hivemind message e40-m3` shows one
