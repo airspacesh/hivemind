@@ -448,7 +448,8 @@ func (s *Store) Messages(
 	if err != nil {
 		return api.ChatPage{}, err
 	}
-	where.excludeOrigin("m", exclude)
+	where.excludeOrigin("m.origin_user", "m.origin_claude_session",
+		exclude)
 	where.addChat(post, since, filter)
 
 	v, err := s.begin(ctx, access, true)

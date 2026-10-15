@@ -49,23 +49,37 @@ func revisionSeen(ctx context.Context, tx *sql.Tx) (int64, error) {
 const revisionsPerRead = 10000
 
 // OriginKey names whose a change is by the user and Claude Code session
-// of its origin, compared exactly. An empty session is a value of its
-// own, so a key with none names only the changes written outside a
+// of whoever made it, compared exactly. An empty session is a value of
+// its own, so a key with none names only the changes written outside a
 // session.
 type OriginKey struct {
 	User          string
 	ClaudeSession string
 }
 
-// excludeOrigin leaves out the rows of table alias whose origin has the
-// key, when there is one.
-func (builder *whereBuilder) excludeOrigin(alias string, key *OriginKey) {
+// excludeOrigin leaves out the rows whose origin, the user and Claude
+// Code session the two expressions give, has the key, when there is
+// one.
+func (builder *whereBuilder) excludeOrigin(
+	user, session string, key *OriginKey,
+) {
 	if key == nil {
 		return
 	}
-	builder.clauses = append(builder.clauses, `NOT (`+alias+
-		`.origin_user = ? AND `+alias+`.origin_claude_session = ?)`)
+	builder.clauses = append(builder.clauses,
+		`NOT (`+user+` = ? AND `+session+` = ?)`)
 	builder.args = append(builder.args, key.User, key.ClaudeSession)
+}
+
+// postChangeMaker gives a column of the origin of whoever made the
+// latest change to a post e: the maker of the version that change made,
+// or else the post's own origin, since only its owner makes a change
+// that makes no version, a delete or a change of who can read it.
+func postChangeMaker(column string) string {
+	return `coalesce((
+		SELECT pv.` + column + ` FROM post_versions AS pv
+		WHERE pv.workspace_id = e.workspace_id AND pv.post_id = e.id
+			AND pv.revision = e.revision), e.` + column + `)`
 }
 
 // addUnder keeps to posts e that are the post under or lie beneath it,
@@ -123,7 +137,7 @@ type changeKey struct {
 
 // readChangeKeys reads the changes of a workspace after the revision
 // since and up to through that match a filter, leaving out those whose
-// origin has the key exclude, at most limit of them, oldest first. The
+// maker has the key exclude, at most limit of them, oldest first. The
 // filter's Items says whether to read the changes to posts, to messages,
 // or to both. A post's change matches as the post, and a message's as a
 // message in its chat. The changes to posts the reader cannot read, and
@@ -143,7 +157,8 @@ func (v view) readChangeKeys(
 	}
 	postWhere.addUnder(filter.Under)
 	postWhere.addNotUnder(filter.NotUnder)
-	postWhere.excludeOrigin("e", exclude)
+	postWhere.excludeOrigin(postChangeMaker("origin_user"),
+		postChangeMaker("origin_claude_session"), exclude)
 	postWhere.clauses = append(postWhere.clauses, `e.workspace_id = ?`,
 		`e.revision > ?`, `e.revision <= ?`, visibleClause("e"))
 	postWhere.args = append(postWhere.args, workspace, since, through,
@@ -155,7 +170,8 @@ func (v view) readChangeKeys(
 	}
 	messageWhere.addUnder(filter.Under)
 	messageWhere.addNotUnder(filter.NotUnder)
-	messageWhere.excludeOrigin("m", exclude)
+	messageWhere.excludeOrigin("m.origin_user", "m.origin_claude_session",
+		exclude)
 	messageWhere.clauses = append(messageWhere.clauses,
 		`m.workspace_id = ?`, `m.revision > ?`, `m.revision <= ?`,
 		visibleClause("e"))

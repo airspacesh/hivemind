@@ -272,7 +272,8 @@ func (s *Store) Add(
 	if err := v.writeLinks(ctx, key, nil, nil, req.Links); err != nil {
 		return api.Post{}, false, err
 	}
-	if err := v.recordVersion(ctx, key, req.Origin, now); err != nil {
+	if err := v.recordVersion(ctx, key, req.Origin, now,
+		revision); err != nil {
 		return api.Post{}, false, err
 	}
 	added := postState{owner: req.Origin.User}
@@ -291,15 +292,16 @@ func (s *Store) Add(
 }
 
 // editContent updates a post's own fields, sets its modified and
-// activity times to now, and moves its revisions. A change to links
-// alone leaves them all as they are, so organising old posts does not
-// reorder listings or show in the changes feed.
+// activity times to now, and moves its revisions to the change's, which
+// it returns. A change to links alone leaves them all as they are, so
+// organising old posts does not reorder listings or show in the changes
+// feed.
 func (v view) editContent(
 	ctx context.Context, key Key, req api.EditPostRequest, now string,
-) error {
+) (int64, error) {
 	revision, err := nextRevision(ctx, v.tx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	query := `UPDATE posts SET modified_utc = ?, activity_utc = ?,
 		revision = ?, activity_revision = ?`
@@ -319,9 +321,9 @@ func (v view) editContent(
 	query += ` WHERE workspace_id = ? AND id = ?`
 	args = append(args, key.Workspace, key.ID)
 	if _, err := v.tx.ExecContext(ctx, query, args...); err != nil {
-		return fmt.Errorf("editing post: %w", err)
+		return 0, fmt.Errorf("editing post: %w", err)
 	}
-	return nil
+	return revision, nil
 }
 
 // NotOwnerError refuses a change that only the user who wrote the post
@@ -620,12 +622,14 @@ func (s *Store) Edit(
 		return api.Post{}, err
 	}
 	now := nowUTC()
+	var revision int64
 	if req.ChangesContent() || visibilityChanged {
-		if err := v.editContent(ctx, key, req, now); err != nil {
+		if revision, err = v.editContent(ctx, key, req, now); err != nil {
 			return api.Post{}, err
 		}
 	}
-	if err := v.recordVersion(ctx, key, req.Origin, now); err != nil {
+	if err := v.recordVersion(ctx, key, req.Origin, now,
+		revision); err != nil {
 		return api.Post{}, err
 	}
 
@@ -670,7 +674,7 @@ func (s *Store) Delete(
 	}
 
 	empty := ""
-	if err := v.editContent(ctx, key, api.EditPostRequest{
+	if _, err := v.editContent(ctx, key, api.EditPostRequest{
 		Subject: &empty, Body: &empty,
 	}, nowUTC()); err != nil {
 		return api.Post{}, err

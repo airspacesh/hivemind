@@ -352,11 +352,13 @@ Changes:
   the cursor. The search filters and --under match a post's change
   against the post, and a message's change as in a search, so the text
   and origin filters match the message itself and the others its post.
-  A change is yours as in chat wait, by the origin of the post or
-  message. An edit or delete keeps the origin, so it counts as a change
-  by the session that added the post or sent the message. The cursor
-  passes every change the wait checked, matching or not, so wait on from
-  it. It polls as chat wait does.
+  A change is yours as in chat wait, by the origin of whoever made it.
+  An add or edit of a post counts as the user and session that made it,
+  so another user's edit of your post wakes your wait. A delete of a
+  post, or making it private or public, counts as the session that added
+  the post. A message's edit or delete counts as the session that sent
+  it. The cursor passes every change the wait checked, matching or not,
+  so wait on from it. It polls as chat wait does.
   '{program} firehose' prints every change that matches its filters as
   it arrives, each batch followed by its cursor, until interrupted or
   --timeout passes.

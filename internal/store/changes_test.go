@@ -377,12 +377,12 @@ func TestFilteredChangesShowEachMatchOnceAtAnyLimitAndSpan(t *testing.T) {
 	postFrom(t, store, pond.Ref, "honk", bare)
 	addTo(t, store, "general", api.AddPostRequest{
 		Project: "pond", Subject: "reeds", Origin: heron})
-	// An edit stores no origin, so the post keeps its creator's key.
+	// The edit's origin, not the post's, decides whose change it is.
 	subject := "pond, edited"
 	if _, err := store.Edit(context.Background(), everyAccess(store),
 		store.mustKey(pond.Ref), api.EditPostRequest{
 			Subject: &subject,
-			Origin:  api.Origin{User: testUser}}); err != nil {
+			Origin:  bare}); err != nil {
 		t.Fatal(err)
 	}
 	latest := latestRevision(t, store)
@@ -409,9 +409,9 @@ func TestFilteredChangesShowEachMatchOnceAtAnyLimitAndSpan(t *testing.T) {
 			[]string{"e1-m1"}},
 		{"the lead session's", Filter{},
 			&OriginKey{User: testUser, ClaudeSession: "lead"},
-			[]string{"e2", "e2-m1", "e1-m2", "e3"}},
+			[]string{"e2", "e2-m1", "e1-m2", "e3", "e1"}},
 		{"no session's", Filter{}, &OriginKey{User: testUser},
-			[]string{"e1-m1", "e2-m1", "e3", "e1"}},
+			[]string{"e1-m1", "e2-m1", "e3"}},
 		{"nothing", Filter{Project: []FieldCond{{Value: "sea"}}}, nil,
 			[]string{}},
 	} {
@@ -531,6 +531,60 @@ func TestExcludedOriginKeysMatchExactly(t *testing.T) {
 		if !reflect.DeepEqual(got, test.want) {
 			t.Fatalf("excluding %+v read %v, want %v", test.exclude, got,
 				test.want)
+		}
+	}
+}
+
+// A post's change is mine when I made it, by the origin of the edit
+// that made it, so the post's owner sees another user's edit of it. An
+// edit of links alone is no change, and a delete is the owner's.
+func TestAPostChangeIsMineByWhoeverMadeIt(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	alice := api.Origin{User: "alice", ClaudeSession: "a"}
+	bob := api.Origin{User: "bob", ClaudeSession: "b"}
+	post := addTo(t, store, "general",
+		api.AddPostRequest{Subject: "plan", Origin: alice})
+	other := mustAdd(t, store, "other", "", nil)
+	key := store.mustKey(post.Ref)
+	subject := "plan, revised"
+
+	for _, step := range []struct {
+		name  string
+		write func() error
+		mine  api.Origin
+	}{
+		{"alice adds", func() error { return nil }, alice},
+		{"bob edits", func() error {
+			_, err := store.Edit(ctx, everyAccess(store), key,
+				api.EditPostRequest{Subject: &subject, Origin: bob})
+			return err
+		}, bob},
+		{"alice links", func() error {
+			_, err := store.Edit(ctx, everyAccess(store), key,
+				api.EditPostRequest{Origin: alice,
+					AddLinks: []api.Link{link("see", other.Ref)}})
+			return err
+		}, bob},
+		{"alice deletes", func() error {
+			_, err := store.Delete(ctx, everyAccess(store), key,
+				api.DeleteRequest{User: "alice"})
+			return err
+		}, alice},
+	} {
+		if err := step.write(); err != nil {
+			t.Fatalf("%s: %v", step.name, err)
+		}
+		for _, origin := range []api.Origin{alice, bob} {
+			exclude := OriginKey{User: origin.User,
+				ClaudeSession: origin.ClaudeSession}
+			got, _ := readAllMatching(t, store, 0,
+				Filter{Items: api.PostsOnly}, &exclude, 10, revisionsPerRead)
+			shown := slices.Contains(got, post.Ref.String())
+			if shown == (origin == step.mine) {
+				t.Fatalf("after %s, %s's feed shows %s: %t", step.name,
+					origin.User, post.Ref, shown)
+			}
 		}
 	}
 }

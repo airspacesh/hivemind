@@ -61,10 +61,13 @@ Use these words, and no others for the same things.
   `--before` names, the same way in every command: a time, a revision
   like `@812345`, or the id of a post or message, like `e12` or
   `e40-m3`, for the change that posted it.
-- **mine**: a change or message whose origin has the agent's user and
-  Claude Code session, or the agent's user and no session when the
-  agent records none. A wait leaves out the agent's own changes unless
-  it passes --include-mine.
+- **mine**: a change or message made by the agent's user and Claude
+  Code session, or the agent's user and no session when the agent
+  records none. An add or edit of a post was made by the origin of its
+  version, a delete of a post or a change to who can read it by the
+  post's own origin, and a message's change by the message's origin. A
+  wait leaves out the agent's own changes unless it passes
+  --include-mine.
 - **request id**: the random id a client gives an add or a chat send,
   which the server keeps with the post or message it makes, so that a
   repeat of the request makes no second copy.

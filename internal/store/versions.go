@@ -42,9 +42,11 @@ type versionRecord struct {
 }
 
 // recordVersion makes a post's content its next version, made by
-// origin at now, unless its latest version holds that content already.
+// origin at now in the change that took revision, or 0 for an edit of
+// links alone, unless its latest version holds that content already.
 func (v view) recordVersion(
 	ctx context.Context, key Key, origin api.Origin, now string,
+	revision int64,
 ) error {
 	var current versionRecord
 	if err := v.tx.QueryRowContext(ctx, `
@@ -73,10 +75,11 @@ func (v view) recordVersion(
 
 	if _, err := v.tx.ExecContext(ctx, `
 		INSERT INTO post_versions (workspace_id, post_id, version,
-			created_utc, origin_user, origin_host, origin_dir,
+			revision, created_utc, origin_user, origin_host, origin_dir,
 			origin_claude_session, project, subject, body, metadata, links)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		key.Workspace, key.ID, number+1, now, origin.User, origin.Host,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		key.Workspace, key.ID, number+1, revision, now, origin.User,
+		origin.Host,
 		origin.Dir, origin.ClaudeSession, current.project, current.subject,
 		current.body, current.metadata, current.links,
 	); err != nil {
