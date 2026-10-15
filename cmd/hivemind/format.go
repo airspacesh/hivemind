@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/airspacesh/hivemind/internal/api"
+	"github.com/airspacesh/hivemind/internal/names"
 )
 
 // lineTimeLayout is how a post or message line shows its time, in a
@@ -112,15 +113,26 @@ func pathTo(ancestors []api.PostRef, post api.Ref) []api.PostRef {
 	return append(slices.Clone(ancestors), api.PostRef{Ref: post})
 }
 
+// writer names who wrote something by its user, followed by the agent
+// name when it was written from a Claude Code session, like
+// paddyl/glad-crane.
+func writer(o api.Origin) string {
+	if o.ClaudeSession == "" {
+		return o.User
+	}
+	return o.User + "/" + names.Agent(o.ClaudeSession)
+}
+
 // lineHead starts the line of a post or message with its ref, a time,
 // who wrote it, and the path to the post, like [e44] 2026-10-13 07:45
 // ines in e1.e34.
 func lineHead(
-	ref fmt.Stringer, at time.Time, user string, ancestors []api.PostRef,
+	ref fmt.Stringer, at time.Time, origin api.Origin,
+	ancestors []api.PostRef,
 ) string {
 	head := fmt.Sprintf("[%s] %s", ref, at.Local().Format(lineTimeLayout))
-	if user != "" {
-		head += " " + user
+	if who := writer(origin); who != "" {
+		head += " " + who
 	}
 	return head + placeLabel(ancestors)
 }
@@ -132,7 +144,7 @@ func printPostLine(
 	indent, suffix string,
 ) {
 	fmt.Printf("%s%s%s%s%s%s\n", indent,
-		lineHead(post.Ref, at, post.Origin.User, ancestors),
+		lineHead(post.Ref, at, post.Origin, ancestors),
 		privateLabel(post.PrivateTo),
 		headedSubject(post.Subject, post.Deleted),
 		supersededLabel(post.SupersededBy), suffix)
@@ -186,16 +198,17 @@ func printMatches(matches []api.Match, metadataKeys []string) {
 	}
 }
 
-// author names who wrote something: the user, and the host when the
-// writer's metadata capture recorded it.
+// author names who wrote something, as writer does, and the host when
+// the writer's metadata capture recorded it.
 func author(o api.Origin) string {
+	who := writer(o)
 	switch {
 	case o.Host == "":
-		return o.User
-	case o.User == "":
+		return who
+	case who == "":
 		return o.Host
 	default:
-		return o.User + "@" + o.Host
+		return who + "@" + o.Host
 	}
 }
 
@@ -311,7 +324,7 @@ func printPostDetail(d api.PostDetail) {
 // prints the post, with only what a version records.
 func printPostVersion(v api.PostVersion) {
 	fmt.Printf("%s%s\n", lineHead(v.Ref, v.Version.Created,
-		v.Version.Origin.User, nil), headedSubject(v.Subject, v.Deleted))
+		v.Version.Origin, nil), headedSubject(v.Subject, v.Deleted))
 	fmt.Println()
 	fmt.Println(versionLine(v.Version))
 	fmt.Println("Project: " + v.Project)
@@ -386,7 +399,7 @@ func printTree(tree api.TreeResponse, root api.Ref, metadataKeys []string) {
 func printMessage(
 	m api.Message, ancestors []api.PostRef, at time.Time, indent string,
 ) {
-	head := indent + lineHead(m.Ref(), at, m.Origin.User, ancestors)
+	head := indent + lineHead(m.Ref(), at, m.Origin, ancestors)
 	if m.Deleted {
 		fmt.Println(head + " (deleted)")
 		return

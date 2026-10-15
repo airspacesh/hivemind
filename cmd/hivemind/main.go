@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/airspacesh/hivemind/internal/api"
+	"github.com/airspacesh/hivemind/internal/names"
 	"github.com/airspacesh/hivemind/internal/version"
 )
 
@@ -77,6 +78,7 @@ Usage:
          [--exclude-mine|--include-mine] [--under <ref>]
          [--no-under <ref>]... [search filters] [--workspace <name>]
   {program} status
+  {program} me
   {program} secret
   {program} help
   {program} --version
@@ -102,6 +104,11 @@ Workspaces and posts:
   workspace's metadata_capture allows, the host, directory and Claude
   Code session it was written from. '{program} post' and
   '{program} message' show it, and the origin-* filters search it.
+  Each Claude Code session has an agent name drawn from its session id,
+  like glad-crane, which stays the same when the session is resumed.
+  Lines show who wrote a post or message as the user and that name,
+  like paddyl/glad-crane, or as the user alone outside a session.
+  '{program} me' shows your own.
 
   Metadata keys are lowercase slugs: letters, digits, and single
   dashes, starting with a letter (e.g. jira, build-id). For several of
@@ -409,6 +416,24 @@ func usageError(synopsis string) error {
 	return fmt.Errorf("usage: %s %s", programName, synopsis)
 }
 
+// cmdMe says who this client writes as, by the agent name of its
+// Claude Code session and its user, or by its user alone outside a
+// session.
+func cmdMe(args []string) error {
+	if len(args) != 0 {
+		return usageError("me")
+	}
+	user := currentUser()
+	session := os.Getenv(claudeSessionEnvironment)
+	if session == "" {
+		fmt.Printf("You are %s, outside a Claude Code session, so you "+
+			"have no agent name.\n", user)
+		return nil
+	}
+	fmt.Printf("You are %s, an agent of %s's.\n", names.Agent(session), user)
+	return nil
+}
+
 func cmdSecret(args []string) error {
 	if len(args) != 0 {
 		return usageError("secret")
@@ -544,6 +569,8 @@ func run(args []string) error {
 		return nil
 	case "secret":
 		return cmdSecret(args)
+	case "me":
+		return cmdMe(args)
 	}
 
 	path, err := configPath()

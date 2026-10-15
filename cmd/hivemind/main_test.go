@@ -422,21 +422,23 @@ func TestSearchUnderTakesItsPostsWorkspace(t *testing.T) {
 }
 
 // The chat overview marks how many older messages a post has before the
-// ones it shows, and how to read them.
+// ones it shows, and how to read them. A line names who wrote from a
+// Claude Code session by user and agent name.
 func TestOverviewMarksEarlierMessages(t *testing.T) {
 	when := time.Date(2026, 10, 9, 5, 20, 0, 0, time.UTC)
-	message := func(number int64) api.Message {
+	message := func(number int64, session string) api.Message {
 		return api.Message{Post: api.Ref{Prefix: "e", ID: 1},
 			Number: number, Created: when, Modified: when, Body: "quack",
-			Origin: api.Origin{User: "duck"}}
+			Origin: api.Origin{User: "duck", ClaudeSession: session}}
 	}
 	server := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
 		reply(w, http.StatusOK, api.ChatOverview{Chats: []api.PostChat{
 			{Post: api.Post{Ref: api.Ref{Prefix: "e", ID: 1},
 				Subject: "Why?", Created: when, Modified: when,
 				Origin: api.Origin{User: "heron"}},
-				Messages: []api.Message{message(7), message(8)},
-				Earlier:  6},
+				Messages: []api.Message{message(7, ""),
+					message(8, "lead")},
+				Earlier: 6},
 		}, Revision: 31})
 	})
 	config := writeConfig(t, "workspaces:\n  general:\n    server: "+
@@ -445,7 +447,7 @@ func TestOverviewMarksEarlierMessages(t *testing.T) {
 	want := "[e1] 2026-10-09 05:20 heron: Why?\n" +
 		"  ... 6 earlier (hivemind chat read e1 --after e1-m0)\n" +
 		"  [e1-m7] 2026-10-09 05:20 duck: quack\n" +
-		"  [e1-m8] 2026-10-09 05:20 duck: quack\n" +
+		"  [e1-m8] 2026-10-09 05:20 duck/graceful-cello: quack\n" +
 		"Cursor: @31\n"
 	if !got.ok || got.stdout != want {
 		t.Fatalf("overview =\n%s\nwant\n%s (%+v)", got.stdout, want, got)

@@ -108,6 +108,8 @@ hivemind() { HIVEMIND_CONFIG="$hivemind_config" "$repo/bin/hivemind" "$@"; }
 # leave out their own changes.
 lead() { CLAUDE_CODE_SESSION_ID=lead hivemind "$@"; }
 peer() { CLAUDE_CODE_SESSION_ID=peer hivemind "$@"; }
+# How a line names what peer wrote, by the user and peer's agent name.
+peer_writer="$(id -un)/convenient-molasses"
 forum() { "$test_dir/bin/forum" "$@"; }
 
 failures=0
@@ -492,13 +494,13 @@ check_equal "recent counts the messages posted since its oldest match" \
     "[$chat] $(id -un): Chat thread (1 new message)" \
     "$(hivemind recent --project chat -n 1 | untimed | head -1)"
 check_equal "recent with chat shares the limit with messages" \
-    "[$chat-m4] $(id -un) in $chat: Woken
+    "[$chat-m4] $peer_writer in $chat: Woken
 [$race-m27] $(id -un) in $race: Within the hour
 Next: hivemind recent --before @R --workspace general --limit 2 --project chat --include-chat (more older matches)
 Cursor: @R" \
     "$(hivemind recent --project chat --include-chat -n 2 | untimed)"
 check "search shows the matching messages" \
-    "[$chat-m4] $(id -un) in $chat: Woken" \
+    "[$chat-m4] $peer_writer in $chat: Woken" \
     "$(hivemind search Woken --include-chat | untimed)"
 
 # Anyone can edit a public post, add under it and chat on it. Only the
@@ -819,7 +821,7 @@ sleep 1
 mark="$(date +%Y-%m-%dT%H:%M:%S%:z)"
 marked="$(peer add "After the mark" --project marks | added)"
 check_equal "a wait from a time shows the changes from that time on" \
-    "[$marked] $(id -un): After the mark" \
+    "[$marked] $peer_writer: After the mark" \
     "$(hivemind wait --after "$mark" --timeout 1s | grep '^\[' | untimed)"
 (sleep 1.5 && peer chat send "$chat" "Changed" >/dev/null) &
 sender_pid=$!
@@ -854,7 +856,7 @@ listed="$(hivemind recent --project chat | cursor_of)"
 peer chat send "$chat" "After the listing" >/dev/null
 since_listing="$(hivemind wait --after "$listed" --timeout 1s)"
 check_equal "a wait from a listing's cursor shows only what came after" \
-    "[$chat-m7] $(id -un) in $chat: After the listing" \
+    "[$chat-m7] $peer_writer in $chat: After the listing" \
     "$(echo "$since_listing" | grep '^\[' | untimed)"
 last_read="$(hivemind chat read "$chat" --after "$chat-m6" | tail -1 |
     sed 's/^\[\([a-z0-9-]*\)\].*/\1/')"
@@ -862,7 +864,7 @@ written="$(hivemind add "Written" --project chat | added)"
 peer chat send "$chat" "After the write" >/dev/null
 check_equal "a wait from a chat read's last message shows what came after" \
     "[$written] $(id -un): Written
-[$chat-m8] $(id -un) in $chat: After the write" \
+[$chat-m8] $peer_writer in $chat: After the write" \
     "$(hivemind wait --after "$last_read" --include-mine --timeout 1s |
         grep '^\[' | untimed)"
 check_equal "a wait without chat shows only the posts" \
@@ -870,11 +872,11 @@ check_equal "a wait without chat shows only the posts" \
     "$(hivemind wait --after "$last_read" --include-mine --exclude-chat \
         --timeout 1s | grep '^\[' | untimed)"
 check_equal "a wait without posts shows only the messages" \
-    "[$chat-m8] $(id -un) in $chat: After the write" \
+    "[$chat-m8] $peer_writer in $chat: After the write" \
     "$(hivemind wait --after "$last_read" --include-mine --exclude-posts \
         --timeout 1s | grep '^\[' | untimed)"
 check_equal "a wait from a written post shows only what came after" \
-    "[$chat-m8] $(id -un) in $chat: After the write" \
+    "[$chat-m8] $peer_writer in $chat: After the write" \
     "$(hivemind wait --after "$written" --include-mine --timeout 1s |
         grep '^\[' | untimed)"
 
@@ -886,15 +888,15 @@ sent="$(hivemind chat send "$chat" "Waited after" | sent_id)"
 peer chat delete "$chat-m5" >/dev/null
 peer chat send "$written" "In another chat" >/dev/null
 check_equal "a wait from a message id shows exactly what came after" \
-    "[$chat-m5] $(id -un) in $chat (deleted)
-[$written-m1] $(id -un) in $written: In another chat" \
+    "[$chat-m5] $peer_writer in $chat (deleted)
+[$written-m1] $peer_writer in $written: In another chat" \
     "$(hivemind wait --after "$sent" --include-mine --timeout 1s |
         grep '^\[' | untimed)"
 waited="$(hivemind add "Waited post" --project chat | added)"
 peer chat send "$chat" "After the post" >/dev/null
 peer edit "$waited" --subject "Waited post, edited" >/dev/null
 check_equal "a wait from an edited post's id shows what came after it was added" \
-    "[$chat-m10] $(id -un) in $chat: After the post
+    "[$chat-m10] $peer_writer in $chat: After the post
 [$waited] $(id -un): Waited post, edited" \
     "$(hivemind wait --after "$waited" --include-mine --timeout 1s |
         grep '^\[' | untimed)"
@@ -905,8 +907,8 @@ check "a wait from an id in another workspace reads on from its posting" \
     "$(hivemind wait --after "$sent" --workspace personal --timeout 1s)"
 check_equal "a listing after an id keeps to what changed after its posting" \
     "[$waited] $(id -un): Waited post, edited
-[$chat-m10] $(id -un) in $chat: After the post
-[$written-m1] $(id -un) in $written: In another chat" \
+[$chat-m10] $peer_writer in $chat: After the post
+[$written-m1] $peer_writer in $written: In another chat" \
     "$(hivemind recent --project chat --include-chat --after "$sent" |
         grep '^\[' | untimed)"
 check_equal "a chat read after another post keeps to what came after it" \
