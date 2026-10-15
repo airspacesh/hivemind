@@ -70,6 +70,13 @@ func (m *metadataCapture) UnmarshalYAML(node *yaml.Node) error {
 // error, since a typo could send posts somewhere unintended.
 type configFile struct {
 	Workspaces map[string]workspaceFile `yaml:"workspaces"`
+	Listings   listingsFile             `yaml:"listings"`
+}
+
+// listingsFile is how listings show posts. IncludeMetadata names the
+// metadata keys whose values end a post's line, in that order.
+type listingsFile struct {
+	IncludeMetadata []string `yaml:"include_metadata"`
 }
 
 type workspaceFile struct {
@@ -98,6 +105,9 @@ type clientConfig struct {
 	path string
 	// workspaces are in the order the file lists them.
 	workspaces []workspaceConfig
+	// listingMetadata names the metadata keys whose values end a post's
+	// line in recent, search and tree, in order.
+	listingMetadata []string
 }
 
 var errNoConfig = errors.New("no config file")
@@ -252,7 +262,8 @@ func loadConfig(path string) (clientConfig, error) {
 			"must name at least one workspace", path)
 	}
 
-	config := clientConfig{path: path}
+	config := clientConfig{path: path,
+		listingMetadata: file.Listings.IncludeMetadata}
 	owners := map[string]string{}
 	holdsSecret := false
 	for _, name := range names {

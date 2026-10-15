@@ -1014,6 +1014,8 @@ workspaces:
   general:
     server: $main_url
     metadata_capture: none
+listings:
+  include_metadata: [status, missing, jira]
 EOF
 forum_post="$(cd "$test_dir/private-project" &&
     CLAUDE_CODE_SESSION_ID=private-session-id \
@@ -1036,6 +1038,13 @@ check_equal "forum help never suggests hivemind" "" \
 check "forum chat continues with forum" \
     "Next: forum chat read $forum_post --after $forum_post-m1" \
     "$(forum chat read "$forum_post" --limit 1)"
+listed="$(forum add "Ducks fly south" --project listed --meta status=outdated \
+    --jira QUACK-7 | added)"
+check_equal "a listing line ends with the configured metadata in order" \
+    "[$listed] $(id -un): Ducks fly south [outdated] [QUACK-7]" \
+    "$(forum recent --project listed | untimed | grep -v '^Cursor: ')"
+check "a tree line ends with the configured metadata" \
+    "Ducks fly south [outdated] [QUACK-7]" "$(forum tree "$listed")"
 check "forum post points at forum chat" \
     "see 'forum chat recent $forum_post'" "$(forum post "$forum_post")"
 check "a forum usage error names forum" "usage: forum post <ref>" \

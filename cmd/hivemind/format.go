@@ -138,6 +138,18 @@ func printPostLine(
 		supersededLabel(post.SupersededBy), suffix)
 }
 
+// metadataLabel shows the value of each of keys a post has, in order,
+// like " [outdated]".
+func metadataLabel(metadata map[string]string, keys []string) string {
+	label := ""
+	for _, key := range keys {
+		if value, ok := metadata[key]; ok {
+			label += " [" + value + "]"
+		}
+	}
+	return label
+}
+
 func newMessagesLabel(count int) string {
 	switch count {
 	case 0:
@@ -160,15 +172,16 @@ func printMatchRefs(page api.MatchPage) {
 }
 
 // printMatches prints the matches of a listing a line each, with the
-// path to each one's post.
-func printMatches(matches []api.Match) {
+// path to each one's post, and each post's values of metadataKeys.
+func printMatches(matches []api.Match, metadataKeys []string) {
 	for _, m := range matches {
 		if m.Message != nil {
 			printMessage(*m.Message, pathTo(m.Ancestors, m.Post.Ref), m.At,
 				"")
 		} else {
 			printPostLine(m.Post, m.Ancestors, m.At, "",
-				newMessagesLabel(m.NewMessages))
+				newMessagesLabel(m.NewMessages)+
+					metadataLabel(m.Post.Metadata, metadataKeys))
 		}
 	}
 }
@@ -330,8 +343,8 @@ func printMessageDetail(d api.MessageDetail) {
 
 // printTree prints a post's subtree, each post indented under its
 // parent, with the path to the post above it and a marker wherever the
-// tree was cut.
-func printTree(tree api.TreeResponse, root api.Ref) {
+// tree was cut. Each post's line ends with its values of metadataKeys.
+func printTree(tree api.TreeResponse, root api.Ref, metadataKeys []string) {
 	if len(tree.Ancestors) > 0 {
 		fmt.Println("Path: " + formatPath(tree.Ancestors))
 	}
@@ -347,7 +360,8 @@ func printTree(tree api.TreeResponse, root api.Ref) {
 	var printFrom func(post api.TreePost, depth int)
 	printFrom = func(post api.TreePost, depth int) {
 		indent := strings.Repeat("  ", depth)
-		printPostLine(post.Post, nil, post.Modified, indent, "")
+		printPostLine(post.Post, nil, post.Modified, indent,
+			metadataLabel(post.Metadata, metadataKeys))
 		if post.MoreBelow > 0 {
 			fmt.Printf("%s  ... %d more below %s\n", indent, post.MoreBelow,
 				post.Ref)

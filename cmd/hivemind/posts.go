@@ -676,7 +676,7 @@ func cmdTree(c *client, args []string) error {
 	if err := c.do(t, "GET", path, nil, &tree); err != nil {
 		return err
 	}
-	printTree(tree, ref)
+	printTree(tree, ref, c.config.listingMetadata)
 	return nil
 }
 
@@ -903,7 +903,7 @@ func cmdListing(c *client, command string, args []string) error {
 		if len(page.Matches) == 0 {
 			fmt.Println("No matches.")
 		}
-		printMatches(page.Matches)
+		printMatches(page.Matches, c.config.listingMetadata)
 	}
 	if page.More {
 		oldest := page.Matches[len(page.Matches)-1].Revision

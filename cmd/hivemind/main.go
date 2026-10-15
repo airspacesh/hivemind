@@ -88,8 +88,8 @@ Workspaces and posts:
   which is key=value pairs such as jira. Every post needs a project. A
   post's id is its workspace's prefix and a number, like e12, and is
   called <ref> above. Keep the subject to a headline and put detail in
-  the body. Listings show only the subject, and '{program} post' shows
-  the rest.
+  the body. Listings show only the subject, and the metadata the config
+  names under listings, and '{program} post' shows the rest.
 
   A command that takes a <ref> works in that post's workspace. With
   --parent, add works in the parent's, and with --under, recent, search,
@@ -209,6 +209,9 @@ Listings:
   most --limit posts, marking where it was cut. Each post's line shows
   who wrote it, as recent's do. A superseded post shows only above the
   posts under it, unless --include-superseded shows it.
+  In recent, search and tree, a post's line ends with its value of each
+  key the config's listings.include_metadata names, in that order, like
+  [outdated] for include_metadata: [status].
   '{program} list-projects' lists the --limit most recently active
   projects, each with the number of its posts created in the last 90
   days, and their share of the workspace's. When the limit leaves some
@@ -372,6 +375,10 @@ Config:
                                      # hostname, directory and session
       personal:
         server: http://other-host:7140
+    listings:
+      include_metadata: [status]     # optional, metadata keys whose
+                                     # values end a post's line in
+                                     # recent, search and tree
 
   A config holding a secret must be readable by its owner alone. A
   workspace's secret goes only to its own server, for that workspace.
