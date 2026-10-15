@@ -26,39 +26,68 @@ func assertNotOwner(t *testing.T, err error, want string) {
 	}
 }
 
-func TestOnlyThePosterCanEditOrDeleteAPost(t *testing.T) {
+func TestAnyoneCanEditAPublicPostButOnlyThePosterCanDeleteIt(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	topic := addAs(t, store, "alice", "topic")
 	other := addAs(t, store, "alice", "other")
 	key := store.mustKey(topic.Ref)
 	subject := "taken over"
-	refusal := "e1 was posted by alice, so only alice can edit or " +
-		"delete it"
 
 	for _, req := range []api.EditPostRequest{
 		{Subject: &subject, User: "bob"},
-		{Subject: &subject, User: "Alice"},
 		{Metadata: map[string]string{"jira": "QUACK-1"}, User: "bob"},
 		{AddLinks: []api.Link{link("see", other.Ref)}, User: "bob"},
-		{RemoveLinkNames: []string{api.ParentLink}, User: "bob"},
+		{AddLinks: []api.Link{link(api.ParentLink, other.Ref)},
+			User: "Alice"},
 	} {
-		_, err := store.Edit(ctx, everyAccess(store), key, req)
-		assertNotOwner(t, err, refusal)
+		if _, err := store.Edit(ctx, everyAccess(store), key,
+			req); err != nil {
+			t.Fatalf("another user's edit %+v = %v", req, err)
+		}
 	}
-	_, err := store.Delete(ctx, everyAccess(store), key,
-		api.DeleteRequest{User: "bob"})
-	assertNotOwner(t, err, refusal)
-	if got := mustGet(t, store, topic.Ref); got.Subject != "topic" ||
-		len(got.Metadata) != 0 || len(got.Links) != 0 ||
-		!got.Modified.Equal(topic.Modified) {
-		t.Fatalf("a refused change changed the post: %+v", got)
+	got := mustGet(t, store, topic.Ref)
+	if got.Subject != subject || got.Metadata["jira"] != "QUACK-1" ||
+		len(got.Links) != 2 {
+		t.Fatalf("other users' edits left %+v", got)
 	}
 
-	edited, err := store.Edit(ctx, everyAccess(store), key,
-		api.EditPostRequest{Subject: &subject, User: "alice"})
-	if err != nil || edited.Subject != subject {
-		t.Fatalf("the poster's own edit = %+v, %v", edited, err)
+	private := true
+	_, err := store.Edit(ctx, everyAccess(store), key,
+		api.EditPostRequest{Private: &private, User: "bob"})
+	assertNotOwner(t, err,
+		"e1 was posted by alice, so only alice can make it private or public")
+	_, err = store.Delete(ctx, everyAccess(store), key,
+		api.DeleteRequest{User: "bob"})
+	assertNotOwner(t, err,
+		"e1 was posted by alice, so only alice can delete it")
+	if got := mustGet(t, store, topic.Ref); got.Deleted || got.Private {
+		t.Fatalf("a refused change changed the post: %+v", got)
+	}
+}
+
+// Another user cannot read a private post, so the server refuses their
+// edit as post not found. An edit that reads as the owner but names
+// another editor is refused too.
+func TestOnlyThePosterCanEditAPrivatePost(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	private := addAsUnder(t, store, "alice", "private", nil, true)
+	child := addAsUnder(t, store, "alice", "child", &private.Ref, false)
+	subject := "taken over"
+
+	for _, post := range []api.Post{private, child} {
+		_, err := store.Edit(ctx, accessAs(store, "alice"),
+			store.mustKey(post.Ref),
+			api.EditPostRequest{Subject: &subject, User: "bob"})
+		assertNotOwner(t, err, post.Ref.String()+
+			" was posted by alice, so only alice can edit it")
+		got, err := store.Detail(ctx, accessAs(store, "alice"),
+			store.mustKey(post.Ref))
+		if err != nil || got.Subject == subject {
+			t.Fatalf("a refused edit changed %s: %+v, %v", post.Ref, got,
+				err)
+		}
 	}
 }
 
@@ -115,7 +144,7 @@ func TestOnlyThePosterCanEditOrDeleteAMessage(t *testing.T) {
 	}
 }
 
-func TestNobodyCanEditOrDeleteWhatRecordsNoUser(t *testing.T) {
+func TestNobodyCanDeleteWhatRecordsNoUser(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	post, _, err := store.Add(ctx, everyAccess(store),
@@ -127,15 +156,11 @@ func TestNobodyCanEditOrDeleteWhatRecordsNoUser(t *testing.T) {
 	message := postAs(t, store, "", post.Ref, "anonymous")
 	key := store.mustKey(post.Ref)
 
-	subject := "claimed"
-	postRefusal := "e1 records no user, so nobody can edit or delete it"
+	postRefusal := "e1 records no user, so nobody can delete it"
 	messageRefusal := "e1-m1 records no user, so nobody can edit or " +
 		"delete it"
 	for _, user := range []string{"duck", ""} {
-		_, err := store.Edit(ctx, everyAccess(store), key,
-			api.EditPostRequest{Subject: &subject, User: user})
-		assertNotOwner(t, err, postRefusal)
-		_, err = store.Delete(ctx, everyAccess(store), key,
+		_, err := store.Delete(ctx, everyAccess(store), key,
 			api.DeleteRequest{User: user})
 		assertNotOwner(t, err, postRefusal)
 		_, _, err = store.EditMessage(ctx, everyAccess(store), key,

@@ -350,7 +350,7 @@ func TestAPostOthersPostedUnderCannotBeMadePrivate(t *testing.T) {
 
 	_, err := setPrivate(store, "bob", topic.Ref, true)
 	assertNotOwner(t, err, "e1 was posted by alice, so only alice can "+
-		"edit or delete it")
+		"make it private or public")
 }
 
 // What others deleted under a post no longer keeps it public. It

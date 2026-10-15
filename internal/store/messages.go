@@ -252,7 +252,7 @@ func (s *Store) EditMessage(
 		return api.Message{}, false, err
 	}
 	if err := checkEditor(message.Ref(), message.Origin.User,
-		req.User); err != nil {
+		req.User, "edit or delete it"); err != nil {
 		return api.Message{}, false, err
 	}
 	if message.Deleted {
@@ -303,7 +303,7 @@ func (s *Store) DeleteMessage(
 		return api.Message{}, err
 	}
 	if err := checkEditor(message.Ref(), message.Origin.User,
-		req.User); err != nil {
+		req.User, "edit or delete it"); err != nil {
 		return api.Message{}, err
 	}
 	if message.Deleted {

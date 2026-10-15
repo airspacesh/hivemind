@@ -156,11 +156,11 @@ func TestRefusedEditsTakeNoRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	subject := "taken"
+	private := true
 	if _, err := store.Edit(ctx, everyAccess(store),
 		store.mustKey(post.Ref), api.EditPostRequest{
-			Subject: &subject, User: "heron"}); err == nil {
-		t.Fatal("another user edited the post")
+			Private: &private, User: "heron"}); err == nil {
+		t.Fatal("another user made the post private")
 	}
 	if _, _, err := store.EditMessage(ctx, everyAccess(store),
 		store.mustKey(post.Ref),

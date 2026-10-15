@@ -322,28 +322,31 @@ func (v view) editContent(
 	return nil
 }
 
-// NotOwnerError refuses an edit or delete by anyone but the user who
-// wrote the post or message it changes. Nobody can change one that
-// records no user.
+// NotOwnerError refuses a change that only the user who wrote the post
+// or message can make, by anyone else. Nobody can make it to one that
+// records no user. action says what the change does to it, like
+// "delete it".
 type NotOwnerError struct {
 	posted string
 	owner  string
+	action string
 }
 
 func (e *NotOwnerError) Error() string {
 	if e.owner == "" {
-		return e.posted + " records no user, so nobody can edit or " +
-			"delete it"
+		return fmt.Sprintf("%s records no user, so nobody can %s",
+			e.posted, e.action)
 	}
-	return fmt.Sprintf("%s was posted by %s, so only %s can edit or "+
-		"delete it", e.posted, e.owner, e.owner)
+	return fmt.Sprintf("%s was posted by %s, so only %s can %s",
+		e.posted, e.owner, e.owner, e.action)
 }
 
-// checkEditor refuses an edit or delete by editor of something owner
-// posted, unless they are the same user.
-func checkEditor(posted fmt.Stringer, owner, editor string) error {
+// checkEditor refuses a change by editor to something owner posted,
+// unless they are the same user. action says what the change does.
+func checkEditor(posted fmt.Stringer, owner, editor, action string) error {
 	if owner == "" || owner != editor {
-		return &NotOwnerError{posted: posted.String(), owner: owner}
+		return &NotOwnerError{posted: posted.String(), owner: owner,
+			action: action}
 	}
 	return nil
 }
@@ -531,8 +534,9 @@ func (v view) writeVisibility(
 }
 
 // Edit overwrites a post's fields and changes its metadata and links.
-// No earlier text is kept. Only the user who wrote the post can edit
-// it, and nobody can edit a deleted post.
+// No earlier text is kept. Anyone can edit a public post. Only the user
+// who wrote the post can edit it while it is private or under a private
+// post, or make it private or public. Nobody can edit a deleted post.
 func (s *Store) Edit(
 	ctx context.Context,
 	access Access,
@@ -555,8 +559,17 @@ func (s *Store) Edit(
 		return api.Post{}, err
 	}
 	ref := v.store.mustRef(key)
-	if err := checkEditor(ref, state.owner, req.User); err != nil {
-		return api.Post{}, err
+	if state.privateTo != "" {
+		if err := checkEditor(ref, state.owner, req.User,
+			"edit it"); err != nil {
+			return api.Post{}, err
+		}
+	}
+	if req.Private != nil {
+		if err := checkEditor(ref, state.owner, req.User,
+			"make it private or public"); err != nil {
+			return api.Post{}, err
+		}
 	}
 	if state.deleted {
 		return api.Post{}, &DeletedError{deleted: ref.String()}
@@ -613,8 +626,8 @@ func (s *Store) Delete(
 	if err != nil {
 		return api.Post{}, err
 	}
-	if err := checkEditor(v.store.mustRef(key), state.owner,
-		req.User); err != nil {
+	if err := checkEditor(v.store.mustRef(key), state.owner, req.User,
+		"delete it"); err != nil {
 		return api.Post{}, err
 	}
 	if state.deleted {

@@ -131,8 +131,10 @@ Editing and deleting:
   all, as (deleted). '{program} post' and '{program} message' show one
   by its id, and wait and firehose show a delete as a change.
 
-  Only the user who wrote a post or message can edit or delete it. To
-  suggest a change to someone else's, send a message in its chat.
+  Anyone can edit a public post. Only the user who wrote a post can
+  delete it, make it private or public, or edit it while it is private.
+  Only the user who wrote a message can edit or delete it. To suggest a
+  change you cannot make, send a message in the post's chat.
 
 Private posts:
   'add --private' adds a post only you can read, and 'edit <ref>

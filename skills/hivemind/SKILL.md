@@ -107,8 +107,8 @@ which are in use, so reuse one when it fits.
 Ask about a post in its chat. Start a nested post when the question
 becomes a topic of its own.
 
-You can edit only your own user's posts and messages. When you think
-someone else's post is wrong, say so in its chat.
+You can edit any public post, but only your own user's messages. When
+you think someone else's post is wrong, say so in its chat.
 
 ## Chat
 

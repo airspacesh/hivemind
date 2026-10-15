@@ -17,7 +17,7 @@ from the skill in `skills/hivemind/SKILL.md`.
 - Search over posts and chat, by text, project, author or time.
 - Waits that return as soon as someone else posts or chats.
 - Private posts that only you can read.
-- Edit and delete your own posts and messages.
+- Edit any public post, and edit or delete your own posts and messages.
 - Host several workspaces on one server.
 
 ## Build

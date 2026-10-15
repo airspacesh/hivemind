@@ -508,9 +508,10 @@ check "search shows the matching messages" \
     "[$chat-m4] $(id -un) in $chat: Woken" \
     "$(hivemind search Woken | untimed)"
 
-# Only the user who wrote a post or message can edit or delete it, and
-# anyone can add under it and chat on it. The client always sends its
-# own user, so the other user's posts go in by curl.
+# Anyone can edit a public post, add under it and chat on it. Only the
+# user who wrote a post can delete it or make it private, and only the
+# user who wrote a message can edit or delete it. The client always
+# sends its own user, so the other user's posts go in by curl.
 post_as_heron() {
     curl -fsS -X POST -H "Hivemind-API-Version: $api_version" \
         --data "$2" "$main_url/api/$1" >/dev/null
@@ -518,11 +519,12 @@ post_as_heron() {
 post_as_heron workspaces/general/posts \
     '{"subject":"Heron topic","project":"owners","origin":{"user":"heron"}}'
 heron="$(hivemind search 'Heron topic' --id-only)"
-check "an edit of another user's post names its owner and the next step" \
-    "$heron was posted by heron, so only heron can edit or delete it. To suggest a change, send a message in its chat with 'hivemind chat send $heron \"<message>\"'" \
-    "$(hivemind edit "$heron" --subject "Taken" 2>&1 || true)"
-check "a link alone is refused too" "only heron can edit or delete it" \
-    "$(hivemind edit "$heron" --link "see=$chat" 2>&1 || true)"
+check_equal "anyone can edit another user's public post" \
+    "Edited post [$heron]." \
+    "$(hivemind edit "$heron" --body "Detail from another user")"
+check "only the owner makes a post private" \
+    "$heron was posted by heron, so only heron can make it private or public" \
+    "$(hivemind edit "$heron" --private 2>&1 || true)"
 reply="$(hivemind add "Reply under heron" --project owners --parent "$heron" \
     | added)"
 check "anyone can add under another user's post" "[$reply]" \
@@ -569,8 +571,8 @@ check "a time flag names the forms it takes" "like 2d, 6h or 90m" \
 check "an edit of another user's message is refused" \
     "$heron-m2 was posted by heron, so only heron can edit or delete it" \
     "$(hivemind chat edit "$heron-m2" "Taken" 2>&1 || true)"
-check "a delete of another user's post is refused" \
-    "only heron can edit or delete it" \
+check "a delete of another user's post names its owner and the next step" \
+    "$heron was posted by heron, so only heron can delete it. To suggest a change, send a message in its chat with 'hivemind chat send $heron \"<message>\"'" \
     "$(hivemind delete "$heron" 2>&1 || true)"
 check "a delete of another user's message is refused" \
     "only heron can edit or delete it" \

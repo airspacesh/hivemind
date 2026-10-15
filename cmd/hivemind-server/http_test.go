@@ -369,7 +369,7 @@ func TestRefusedEditsAndDeletesOverHTTP(t *testing.T) {
 		status int
 		code   api.ErrorCode
 	}{
-		{"PATCH", "/api/posts/e1", `{"subject":"taken","user":"heron"}`,
+		{"PATCH", "/api/posts/e1", `{"private":true,"user":"heron"}`,
 			403, api.CodeNotOwner},
 		{"PATCH", "/api/posts/e1/messages/1",
 			`{"body":"taken","user":"heron"}`, 403, api.CodeNotOwner},
@@ -399,7 +399,7 @@ func TestRefusedEditsAndDeletesOverHTTP(t *testing.T) {
 		{"PATCH", "/api/posts/e1/messages/1",
 			`{"body":"back","user":"duck"}`, 409, api.CodeDeleted},
 		{"PATCH", "/api/posts/e1", `{"subject":"back","user":"heron"}`,
-			403, api.CodeNotOwner},
+			409, api.CodeDeleted},
 		{"DELETE", "/api/posts/e1", `{"user":"duck"}`, 200, ""},
 		{"DELETE", "/api/posts/e1/messages/1", `{"user":"duck"}`, 200,
 			""},
