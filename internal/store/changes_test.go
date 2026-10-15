@@ -90,7 +90,8 @@ func TestChangesListAChangeAgainOnlyWhenItChangesAfterTheCursor(t *testing.T) {
 		subject := "edited"
 		if _, err := store.Edit(ctx, everyAccess(store),
 			store.mustKey(post.Ref),
-			api.EditPostRequest{Subject: &subject, User: testUser},
+			api.EditPostRequest{Subject: &subject,
+				Origin: api.Origin{User: testUser}},
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -117,7 +118,7 @@ func TestChangesLeaveOutEditsToLinksAlone(t *testing.T) {
 	if _, err := store.Edit(context.Background(), everyAccess(store),
 		store.mustKey(child.Ref), api.EditPostRequest{
 			AddLinks: []api.Link{link("parent", parent.Ref)},
-			User:     testUser,
+			Origin:   api.Origin{User: testUser},
 		}); err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +160,7 @@ func TestRefusedEditsTakeNoRevision(t *testing.T) {
 	private := true
 	if _, err := store.Edit(ctx, everyAccess(store),
 		store.mustKey(post.Ref), api.EditPostRequest{
-			Private: &private, User: "heron"}); err == nil {
+			Private: &private, Origin: api.Origin{User: "heron"}}); err == nil {
 		t.Fatal("another user made the post private")
 	}
 	if _, _, err := store.EditMessage(ctx, everyAccess(store),
@@ -241,7 +242,7 @@ func TestChangesStayInTheirWorkspace(t *testing.T) {
 	if _, err := store.Edit(context.Background(), everyAccess(store),
 		store.mustKey(open.Ref), api.EditPostRequest{
 			AddLinks: []api.Link{link("see", private.Ref)},
-			User:     testUser,
+			Origin:   api.Origin{User: testUser},
 		}); err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +381,8 @@ func TestFilteredChangesShowEachMatchOnceAtAnyLimitAndSpan(t *testing.T) {
 	subject := "pond, edited"
 	if _, err := store.Edit(context.Background(), everyAccess(store),
 		store.mustKey(pond.Ref), api.EditPostRequest{
-			Subject: &subject, User: testUser}); err != nil {
+			Subject: &subject,
+			Origin:  api.Origin{User: testUser}}); err != nil {
 		t.Fatal(err)
 	}
 	latest := latestRevision(t, store)

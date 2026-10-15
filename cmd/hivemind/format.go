@@ -222,6 +222,31 @@ func printBacklinks(backlinks []api.Link) {
 	}
 }
 
+// versionLine says which version of a post a read shows, who made it,
+// and when.
+func versionLine(v api.Version) string {
+	line := fmt.Sprintf("Version: %d,", v.Number)
+	if maker := author(v.Origin); maker != "" {
+		line += " by " + maker
+	}
+	return line + " at " + localTimeDetail(v.Created)
+}
+
+func printMetadataAndLinks(metadata map[string]string, links []api.Link) {
+	if len(metadata) > 0 {
+		fmt.Println("Metadata:")
+		for _, key := range sortedMetaKeys(metadata) {
+			fmt.Printf("  %s: %s\n", key, metadata[key])
+		}
+	}
+	if len(links) > 0 {
+		fmt.Println("Links:")
+		for _, link := range links {
+			fmt.Printf("  %s %s\n", link.Name, link.Ref)
+		}
+	}
+}
+
 func printPostDetail(d api.PostDetail) {
 	post := d.Post
 	printPostLine(post, nil, post.Modified, "", "")
@@ -233,6 +258,7 @@ func printPostDetail(d api.PostDetail) {
 	} else {
 		fmt.Println("Modified: " + localTimeDetail(post.Modified))
 	}
+	fmt.Println(versionLine(*post.Version))
 	if !d.Activity.Equal(post.Modified) {
 		fmt.Println("Subtree activity: " + localTimeDetail(d.Activity))
 	}
@@ -247,18 +273,7 @@ func printPostDetail(d api.PostDetail) {
 	if len(d.Ancestors) > 0 {
 		fmt.Println("Path: " + formatPath(d.Ancestors))
 	}
-	if len(post.Metadata) > 0 {
-		fmt.Println("Metadata:")
-		for _, key := range sortedMetaKeys(post.Metadata) {
-			fmt.Printf("  %s: %s\n", key, post.Metadata[key])
-		}
-	}
-	if len(post.Links) > 0 {
-		fmt.Println("Links:")
-		for _, link := range post.Links {
-			fmt.Printf("  %s %s\n", link.Name, link.Ref)
-		}
-	}
+	printMetadataAndLinks(post.Metadata, post.Links)
 	printBacklinks(d.Backlinks)
 	if d.Children > 0 {
 		fmt.Printf("Children: %d (see '%s tree %s')\n", d.Children,
@@ -276,6 +291,21 @@ func printPostDetail(d api.PostDetail) {
 	if post.Body != "" {
 		fmt.Println()
 		fmt.Println(post.Body)
+	}
+}
+
+// printPostVersion prints one version of a post as printPostDetail
+// prints the post, with only what a version records.
+func printPostVersion(v api.PostVersion) {
+	fmt.Printf("%s%s\n", lineHead(v.Ref, v.Version.Created,
+		v.Version.Origin.User, nil), headedSubject(v.Subject, v.Deleted))
+	fmt.Println()
+	fmt.Println(versionLine(v.Version))
+	fmt.Println("Project: " + v.Project)
+	printMetadataAndLinks(v.Metadata, v.Links)
+	if v.Body != "" {
+		fmt.Println()
+		fmt.Println(v.Body)
 	}
 }
 

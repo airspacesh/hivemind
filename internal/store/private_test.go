@@ -16,7 +16,8 @@ func setPrivate(
 	store *Store, user string, ref api.Ref, private bool,
 ) (api.Post, error) {
 	return store.Edit(context.Background(), accessAs(store, user),
-		store.mustKey(ref), api.EditPostRequest{Private: &private, User: user})
+		store.mustKey(ref), api.EditPostRequest{Private: &private,
+			Origin: api.Origin{User: user}})
 }
 
 func mustSetPrivate(
@@ -104,7 +105,8 @@ func TestOnlyTheOwnerReadsAPrivatePostAndWhatIsUnderIt(t *testing.T) {
 	postAs(t, store, "alice", draft.Ref, "SECRET message")
 	if _, err := store.Edit(ctx, accessAs(store, "alice"),
 		store.mustKey(topic.Ref), api.EditPostRequest{
-			AddLinks: []api.Link{link("see", draft.Ref)}, User: "alice",
+			AddLinks: []api.Link{link("see", draft.Ref)},
+			Origin:   api.Origin{User: "alice"},
 		}); err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +294,7 @@ func TestMovingAPostTakesTheVisibilityOfItsNewParent(t *testing.T) {
 	moved := addAsUnder(t, store, "alice", "moved", nil, false)
 	child := addAsUnder(t, store, "alice", "child", &moved.Ref, false)
 	move := func(parent *api.Ref) (api.Post, error) {
-		req := api.EditPostRequest{User: "alice"}
+		req := api.EditPostRequest{Origin: api.Origin{User: "alice"}}
 		if parent != nil {
 			req.AddLinks = []api.Link{link(api.ParentLink, *parent)}
 		} else {

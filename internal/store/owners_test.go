@@ -35,11 +35,13 @@ func TestAnyoneCanEditAPublicPostButOnlyThePosterCanDeleteIt(t *testing.T) {
 	subject := "taken over"
 
 	for _, req := range []api.EditPostRequest{
-		{Subject: &subject, User: "bob"},
-		{Metadata: map[string]string{"jira": "QUACK-1"}, User: "bob"},
-		{AddLinks: []api.Link{link("see", other.Ref)}, User: "bob"},
+		{Subject: &subject, Origin: api.Origin{User: "bob"}},
+		{Metadata: map[string]string{"jira": "QUACK-1"},
+			Origin: api.Origin{User: "bob"}},
+		{AddLinks: []api.Link{link("see", other.Ref)},
+			Origin: api.Origin{User: "bob"}},
 		{AddLinks: []api.Link{link(api.ParentLink, other.Ref)},
-			User: "Alice"},
+			Origin: api.Origin{User: "Alice"}},
 	} {
 		if _, err := store.Edit(ctx, everyAccess(store), key,
 			req); err != nil {
@@ -48,13 +50,15 @@ func TestAnyoneCanEditAPublicPostButOnlyThePosterCanDeleteIt(t *testing.T) {
 	}
 	got := mustGet(t, store, topic.Ref)
 	if got.Subject != subject || got.Metadata["jira"] != "QUACK-1" ||
-		len(got.Links) != 2 {
-		t.Fatalf("other users' edits left %+v", got)
+		len(got.Links) != 2 || got.Version.Number != 5 ||
+		got.Version.Origin.User != "Alice" {
+		t.Fatalf("other users' edits left %+v at version %+v", got,
+			got.Version)
 	}
 
 	private := true
 	_, err := store.Edit(ctx, everyAccess(store), key,
-		api.EditPostRequest{Private: &private, User: "bob"})
+		api.EditPostRequest{Private: &private, Origin: api.Origin{User: "bob"}})
 	assertNotOwner(t, err,
 		"e1 was posted by alice, so only alice can make it private or public")
 	_, err = store.Delete(ctx, everyAccess(store), key,
@@ -79,7 +83,8 @@ func TestOnlyThePosterCanEditAPrivatePost(t *testing.T) {
 	for _, post := range []api.Post{private, child} {
 		_, err := store.Edit(ctx, accessAs(store, "alice"),
 			store.mustKey(post.Ref),
-			api.EditPostRequest{Subject: &subject, User: "bob"})
+			api.EditPostRequest{Subject: &subject,
+				Origin: api.Origin{User: "bob"}})
 		assertNotOwner(t, err, post.Ref.String()+
 			" was posted by alice, so only alice can edit it")
 		got, err := store.Detail(ctx, accessAs(store, "alice"),

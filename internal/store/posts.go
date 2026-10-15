@@ -272,6 +272,9 @@ func (s *Store) Add(
 	if err := v.writeLinks(ctx, key, nil, nil, req.Links); err != nil {
 		return api.Post{}, false, err
 	}
+	if err := v.recordVersion(ctx, key, req.Origin, now); err != nil {
+		return api.Post{}, false, err
+	}
 	added := postState{owner: req.Origin.User}
 	if _, err := v.writeVisibility(ctx, key, added,
 		&req.Private); err != nil {
@@ -287,18 +290,17 @@ func (s *Store) Add(
 	return post, true, nil
 }
 
-// editContent updates a post's own fields, its modified and activity
-// times, and its revisions. A change to links alone leaves them all as
-// they are, so organising old posts does not reorder listings or show
-// in the changes feed.
+// editContent updates a post's own fields, sets its modified and
+// activity times to now, and moves its revisions. A change to links
+// alone leaves them all as they are, so organising old posts does not
+// reorder listings or show in the changes feed.
 func (v view) editContent(
-	ctx context.Context, key Key, req api.EditPostRequest,
+	ctx context.Context, key Key, req api.EditPostRequest, now string,
 ) error {
 	revision, err := nextRevision(ctx, v.tx)
 	if err != nil {
 		return err
 	}
-	now := nowUTC()
 	query := `UPDATE posts SET modified_utc = ?, activity_utc = ?,
 		revision = ?, activity_revision = ?`
 	args := []any{now, now, revision, revision}
@@ -534,9 +536,11 @@ func (v view) writeVisibility(
 }
 
 // Edit overwrites a post's fields and changes its metadata and links.
-// No earlier text is kept. Anyone can edit a public post. Only the user
-// who wrote the post can edit it while it is private or under a private
-// post, or make it private or public. Nobody can edit a deleted post.
+// An edit that changes any of them makes the post's next version, and
+// the versions before keep what it overwrote. Anyone can edit a public
+// post. Only the user who wrote the post can edit it while it is
+// private or under a private post, or make it private or public. Nobody
+// can edit a deleted post.
 func (s *Store) Edit(
 	ctx context.Context,
 	access Access,
@@ -560,13 +564,13 @@ func (s *Store) Edit(
 	}
 	ref := v.store.mustRef(key)
 	if state.privateTo != "" {
-		if err := checkEditor(ref, state.owner, req.User,
+		if err := checkEditor(ref, state.owner, req.Origin.User,
 			"edit it"); err != nil {
 			return api.Post{}, err
 		}
 	}
 	if req.Private != nil {
-		if err := checkEditor(ref, state.owner, req.User,
+		if err := checkEditor(ref, state.owner, req.Origin.User,
 			"make it private or public"); err != nil {
 			return api.Post{}, err
 		}
@@ -592,15 +596,22 @@ func (s *Store) Edit(
 	if err != nil {
 		return api.Post{}, err
 	}
+	now := nowUTC()
 	if req.ChangesContent() || visibilityChanged {
-		if err := v.editContent(ctx, key, req); err != nil {
+		if err := v.editContent(ctx, key, req, now); err != nil {
 			return api.Post{}, err
 		}
+	}
+	if err := v.recordVersion(ctx, key, req.Origin, now); err != nil {
+		return api.Post{}, err
 	}
 
 	post, err := v.getPost(ctx, key)
 	if err != nil {
 		return api.Post{}, fmt.Errorf("reading edited post: %w", err)
+	}
+	if post.Version, err = v.currentVersion(ctx, key); err != nil {
+		return api.Post{}, err
 	}
 	if err := v.tx.Commit(); err != nil {
 		return api.Post{}, fmt.Errorf("committing edited post: %w", err)
@@ -609,10 +620,11 @@ func (s *Store) Edit(
 }
 
 // Delete clears a post's subject and body, removes its metadata, and
-// marks it deleted, and no earlier text is kept. Its id, project,
-// origin, creation time, links and chat stay, so the posts under it
-// stay in place. Deleting a deleted post changes nothing. Only the user
-// who wrote the post can delete it.
+// marks it deleted, and clears the same from every version of it, so no
+// earlier text is kept. Its id, project, origin, creation time, links
+// and chat stay, so the posts under it stay in place. Deleting a
+// deleted post changes nothing. Only the user who wrote the post can
+// delete it.
 func (s *Store) Delete(
 	ctx context.Context, access Access, key Key, req api.DeleteRequest,
 ) (api.Post, error) {
@@ -637,7 +649,7 @@ func (s *Store) Delete(
 	empty := ""
 	if err := v.editContent(ctx, key, api.EditPostRequest{
 		Subject: &empty, Body: &empty,
-	}); err != nil {
+	}, nowUTC()); err != nil {
 		return api.Post{}, err
 	}
 	if _, err := v.tx.ExecContext(ctx, `
@@ -651,6 +663,9 @@ func (s *Store) Delete(
 		key.Workspace, key.ID,
 	); err != nil {
 		return api.Post{}, fmt.Errorf("removing metadata: %w", err)
+	}
+	if err := v.purgeVersions(ctx, key); err != nil {
+		return api.Post{}, err
 	}
 	post, err := v.getPost(ctx, key)
 	if err != nil {

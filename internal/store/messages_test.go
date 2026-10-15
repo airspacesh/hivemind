@@ -343,7 +343,8 @@ func TestEveryWriteKeepsActivityCurrent(t *testing.T) {
 
 	project := "lake"
 	if _, err := store.Edit(ctx, everyAccess(store), store.mustKey(nest.Ref),
-		api.EditPostRequest{Project: &project, User: testUser}); err != nil {
+		api.EditPostRequest{Project: &project,
+			Origin: api.Origin{User: testUser}}); err != nil {
 		t.Fatal(err)
 	}
 	checkActivity("editing a post")
@@ -393,6 +394,8 @@ func TestOverviewGroupsTheNewestMessagesByPost(t *testing.T) {
 	}
 }
 
+// An edit keeps a post's earlier text in its versions, until a delete
+// clears them, but keeps no earlier text of a message.
 func TestOverwrittenTextLeavesNoCopyInTheDatabase(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -404,9 +407,11 @@ func TestOverwrittenTextLeavesNoCopyInTheDatabase(t *testing.T) {
 	subject := "short"
 	if _, err := store.Edit(ctx, everyAccess(store),
 		store.mustKey(post.Ref),
-		api.EditPostRequest{Subject: &subject, User: testUser}); err != nil {
+		api.EditPostRequest{Subject: &subject,
+			Origin: api.Origin{User: testUser}}); err != nil {
 		t.Fatal(err)
 	}
+	mustDelete(t, store, post.Ref)
 	if _, _, err := store.EditMessage(ctx, everyAccess(store),
 		store.mustKey(post.Ref),
 		message.Number, ownEdit("short")); err != nil {

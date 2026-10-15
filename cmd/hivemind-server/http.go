@@ -83,6 +83,9 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	case errors.Is(err, store.ErrMessageNotFound):
 		status, code, message = http.StatusNotFound,
 			api.CodeMessageNotFound, err.Error()
+	case errors.Is(err, store.ErrVersionNotFound):
+		status, code, message = http.StatusNotFound,
+			api.CodeVersionNotFound, err.Error()
 	case errors.Is(err, store.ErrLinkNotFound):
 		status, code, message = http.StatusNotFound,
 			api.CodeLinkNotFound, err.Error()
@@ -285,11 +288,11 @@ func (h *handler) postKey(
 
 // logRequests logs one line per request from facts the server
 // controls: the method, the matched route, a configured workspace, a
-// ref with a configured prefix, a message number, the names of known
-// query parameters, the status, and the sizes. It never logs a body, a
-// query value, a raw path, or an error message, because each can carry
-// text a client sent, and an edit must leave no copy of what it
-// overwrote.
+// ref with a configured prefix, a message or version number, the names
+// of known query parameters, the status, and the sizes. It never logs a
+// body, a query value, a raw path, or an error message, because each
+// can carry text a client sent, and a delete, or an edit of a message,
+// must leave no copy of what it overwrote.
 func (h *handler) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := &countingReader{ReadCloser: r.Body}

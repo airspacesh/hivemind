@@ -36,7 +36,7 @@ Usage:
          [--supersedes <ref>]... [--link <name>=<ref>]...
          [--unlink <name>[=<ref>]]... [--private|--public]
   {program} delete <ref>
-  {program} post <ref>
+  {program} post <ref> [--version <n>]
   {program} message <ref>-m<n>
   {program} tree <ref> [--limit 30]
          [--include-superseded|--exclude-superseded]
@@ -117,12 +117,20 @@ Editing and deleting:
   removes it, as in --meta jira= or --jira "". The project can change
   but not be removed. A post's id, times and origin cannot change.
 
+  A post is at version 1 when added, and each edit that changes its
+  project, subject, body, metadata or links makes its next version.
+  Making it private or public makes none. The server keeps every
+  version. '{program} post <ref>' shows the current version and who
+  made it when, and '{program} post <ref> --version <n>' shows an
+  earlier one in full. A version's links leave out the posts you cannot
+  read now.
+
   '{program} delete <ref>' deletes a post. Its subject, body and
-  metadata are removed for good. Its id, project, links, origin and chat
-  stay, and the posts under it stay in place. A message deleted with
-  '{program} chat delete <ref>-m<n>' loses its text for good, and keeps
-  its number and place. Deleting again changes nothing. A deleted post
-  or message cannot be edited.
+  metadata are removed for good, from every version. Its id, project,
+  links, origin and chat stay, and the posts under it stay in place. A
+  message deleted with '{program} chat delete <ref>-m<n>' loses its
+  text for good, and keeps its number and place. Deleting again changes
+  nothing. A deleted post or message cannot be edited.
 
   Deleted posts and messages drop out of every listing, but the posts
   under a deleted post and the messages in its chat stay. A tree keeps a
@@ -172,7 +180,7 @@ Links:
                       '{program} post' still shows it.
   Neither may loop. --unlink depends-on=e40 removes one link, and
   --unlink depends-on every link of that name. Editing only links
-  leaves the modified time alone.
+  makes a new version but leaves the modified time alone.
 
 Listings:
   '{program} recent' lists the newest posts that match its filters, at

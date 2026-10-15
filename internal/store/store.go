@@ -341,6 +341,42 @@ BEGIN
 	VALUES ((new.workspace_id << 32) | new.post_order, lower(new.body));
 END`
 
+// createPostVersions keeps every version of every post, the current
+// one included, which the posts row holds too. A row holds what
+// versionContent selects of the post as that version left it, and the
+// origin and time of the add or edit that made it. A delete clears the
+// subject, body and metadata of all of a post's versions.
+const createPostVersions = `
+CREATE TABLE post_versions (
+	workspace_id INTEGER NOT NULL,
+	post_id INTEGER NOT NULL,
+	version INTEGER NOT NULL,
+	created_utc TEXT NOT NULL,
+	origin_user TEXT NOT NULL,
+	origin_host TEXT NOT NULL,
+	origin_dir TEXT NOT NULL,
+	origin_claude_session TEXT NOT NULL,
+	project TEXT NOT NULL,
+	subject TEXT NOT NULL,
+	body TEXT NOT NULL,
+	metadata TEXT NOT NULL,
+	links TEXT NOT NULL,
+	PRIMARY KEY (workspace_id, post_id, version),
+	FOREIGN KEY (workspace_id, post_id) REFERENCES posts(workspace_id, id)
+)`
+
+// startPostVersions gives each post of a database that predates
+// post_versions its version 1, as the post is now, made by its own
+// origin when it was last modified, since only that user could edit it.
+const startPostVersions = `
+INSERT INTO post_versions (workspace_id, post_id, version, created_utc,
+	origin_user, origin_host, origin_dir, origin_claude_session,
+	project, subject, body, metadata, links)
+SELECT e.workspace_id, e.id, 1, e.modified_utc, e.origin_user,
+	e.origin_host, e.origin_dir, e.origin_claude_session, ` +
+	versionContent + `
+FROM posts AS e`
+
 type schemaObject struct {
 	typ   string
 	name  string
@@ -441,6 +477,13 @@ var schemaSteps = []schemaStep{
 				normalizeSchemaSQL(createMessageTextUpdate)},
 		}, textIndexObjects("post_text", createPostText),
 			textIndexObjects("message_text", createMessageText)),
+	},
+	{
+		statements: []string{createPostVersions, startPostVersions},
+		objects: []schemaObject{
+			{"table", "post_versions", "post_versions",
+				normalizeSchemaSQL(createPostVersions)},
+		},
 	},
 }
 

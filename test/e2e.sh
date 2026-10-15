@@ -520,8 +520,18 @@ post_as_heron workspaces/general/posts \
     '{"subject":"Heron topic","project":"owners","origin":{"user":"heron"}}'
 heron="$(hivemind search 'Heron topic' --id-only)"
 check_equal "anyone can edit another user's public post" \
-    "Edited post [$heron]." \
+    "Edited post [$heron], now at version 2." \
     "$(hivemind edit "$heron" --body "Detail from another user")"
+check "post shows who made the current version" \
+    "Version: 2, by $(id -un)@" "$(hivemind post "$heron")"
+heron_v1="$(hivemind post "$heron" --version 1)"
+check "an earlier version shows who made it" "Version: 1, by heron at " \
+    "$heron_v1"
+check_equal "an earlier version keeps its own text" "" \
+    "$(echo "$heron_v1" | grep 'Detail from another user' || true)"
+check "a version past the current one is not found" \
+    "$heron has no version 3" \
+    "$(hivemind post "$heron" --version 3 2>&1 || true)"
 check "only the owner makes a post private" \
     "$heron was posted by heron, so only heron can make it private or public" \
     "$(hivemind edit "$heron" --private 2>&1 || true)"
@@ -624,7 +634,7 @@ check_equal "another user's wait leaves out private posts" "" \
     "$(read_as_heron "workspaces/general/changes?after=$before_private" |
         grep -o 'Private draft' || true)"
 check_equal "edit --public shows the post to everyone" \
-    "Edited post [$draft].
+    "Edited post [$draft], now at version 1.
 Everyone can read it." "$(hivemind edit "$draft" --public)"
 check "another user reads a post made public, and what is under it" \
     '"subject":"Draft detail"' "$(read_as_heron "posts/$detail")"
@@ -639,7 +649,7 @@ curl -fsS -X DELETE -H "Hivemind-API-Version: $api_version" \
     --data '{"user":"heron"}' \
     "$main_url/api/posts/$draft/messages/$looks_good" >/dev/null
 check_equal "a post whose other messages are deleted can be made private" \
-    "Edited post [$draft].
+    "Edited post [$draft], now at version 1.
 Only $(id -un) can read it." "$(hivemind edit "$draft" --private)"
 check "the other user then loses the deleted message too" \
     '"code":"post_not_found"' \
@@ -658,6 +668,7 @@ hivemind chat send "$gadwall" "Before" >/dev/null
 hivemind chat send "$gadwall" "The code is 4417" >/dev/null
 hivemind chat send "$gadwall" "After" >/dev/null
 hivemind chat send "$gadwall" "Oops" >/dev/null
+hivemind edit "$gadwall" --body "Code 4418" >/dev/null
 before_delete="$(hivemind wait --after @0 --include-mine --timeout 1s |
     cursor_of)"
 deleted_post="$(hivemind delete "$gadwall")"
@@ -680,6 +691,11 @@ check_equal "a deleted post keeps no body or metadata" "" \
     "$(echo "$gadwall_post" |
         grep -E 'Gadwall|4417|QUACK|Metadata|Modified' || true)"
 check "a deleted post keeps its origin" "From: $(id -un)@" "$gadwall_post"
+gadwall_v1="$(hivemind post "$gadwall" --version 1)"
+check "a deleted post's earlier version shows as deleted" \
+    "[$gadwall] $(id -un) (deleted)" "$(echo "$gadwall_v1" | untimed)"
+check_equal "a deleted post's earlier versions keep no text" "" \
+    "$(echo "$gadwall_v1" | grep -E 'Gadwall|4417|QUACK|Metadata' || true)"
 check "a child's path shows its deleted parent" "> $gadwall (deleted)" \
     "$(hivemind post "$egg")"
 untimed() { sed -E 's/\] [0-9-]{10} [0-9]{2}:[0-9]{2}:? /] /'; }
@@ -995,10 +1011,11 @@ EOF
 forum_post="$(cd "$test_dir/private-project" &&
     CLAUDE_CODE_SESSION_ID=private-session-id \
         forum add "Forum question" --project chat | added)"
-check_equal "forum records the user alone" \
+check_equal "forum records the user alone, in the post and its version" \
     "\"origin\":{\"user\":\"$(id -un)\"}" \
     "$(curl -fsS -H "Hivemind-API-Version: $api_version" \
-        "$main_url/api/posts/$forum_post" | grep -o '"origin":{[^}]*}')"
+        "$main_url/api/posts/$forum_post" | grep -o '"origin":{[^}]*}' |
+        sort -u)"
 forum chat send "$forum_post" "Forum reply" >/dev/null
 forum chat send "$forum_post" "Another forum reply" >/dev/null
 check_equal "the private context never reached the server" "" \

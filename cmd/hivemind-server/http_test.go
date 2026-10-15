@@ -369,8 +369,9 @@ func TestRefusedEditsAndDeletesOverHTTP(t *testing.T) {
 		status int
 		code   api.ErrorCode
 	}{
-		{"PATCH", "/api/posts/e1", `{"private":true,"user":"heron"}`,
-			403, api.CodeNotOwner},
+		{"PATCH", "/api/posts/e1",
+			`{"private":true,"origin":{"user":"heron"}}`, 403,
+			api.CodeNotOwner},
 		{"PATCH", "/api/posts/e1/messages/1",
 			`{"body":"taken","user":"heron"}`, 403, api.CodeNotOwner},
 		{"DELETE", "/api/posts/e1", `{"user":"heron"}`, 403,
@@ -384,22 +385,24 @@ func TestRefusedEditsAndDeletesOverHTTP(t *testing.T) {
 		{"DELETE", "/api/posts/e1", `{}`, 400, api.CodeBadRequest},
 		{"DELETE", "/api/posts/e1/messages/1", `{}`, 400,
 			api.CodeBadRequest},
-		{"PATCH", "/api/posts/e1", `{"subject":"kept","user":"duck"}`,
-			200, ""},
+		{"PATCH", "/api/posts/e1",
+			`{"subject":"kept","origin":{"user":"duck"}}`, 200, ""},
 		{"PATCH", "/api/posts/e1/messages/1",
 			`{"body":"kept","user":"duck"}`, 200, ""},
 		{"DELETE", "/api/posts/e1", `{"user":"duck"}`, 200, ""},
 		{"DELETE", "/api/posts/e1/messages/1", `{"user":"duck"}`, 200,
 			""},
-		{"PATCH", "/api/posts/e1", `{"subject":"back","user":"duck"}`,
-			409, api.CodeDeleted},
 		{"PATCH", "/api/posts/e1",
-			`{"remove_link_names":["see"],"user":"duck"}`, 409,
+			`{"subject":"back","origin":{"user":"duck"}}`, 409,
 			api.CodeDeleted},
+		{"PATCH", "/api/posts/e1",
+			`{"remove_link_names":["see"],"origin":{"user":"duck"}}`,
+			409, api.CodeDeleted},
 		{"PATCH", "/api/posts/e1/messages/1",
 			`{"body":"back","user":"duck"}`, 409, api.CodeDeleted},
-		{"PATCH", "/api/posts/e1", `{"subject":"back","user":"heron"}`,
-			409, api.CodeDeleted},
+		{"PATCH", "/api/posts/e1",
+			`{"subject":"back","origin":{"user":"heron"}}`, 409,
+			api.CodeDeleted},
 		{"DELETE", "/api/posts/e1", `{"user":"duck"}`, 200, ""},
 		{"DELETE", "/api/posts/e1/messages/1", `{"user":"duck"}`, 200,
 			""},
@@ -418,6 +421,7 @@ func TestRefusedEditsAndDeletesOverHTTP(t *testing.T) {
 
 // No request names an origin or creation time but the one that adds a
 // post or posts a message, so they stay as that request recorded them.
+// An edit's origin is the origin of the version it makes.
 func TestNoRequestChangesAnOriginOverHTTP(t *testing.T) {
 	s := startServer(t, testConfig(t))
 	origin := `{"user":"duck","host":"nest","dir":"/pond",` +
@@ -446,7 +450,6 @@ func TestNoRequestChangesAnOriginOverHTTP(t *testing.T) {
 			path   string
 			body   string
 		}{
-			{"PATCH", "/api/posts/e1", `"subject":"x","user":"duck"`},
 			{"PATCH", "/api/posts/e1/messages/1", `"body":"x","user":"duck"`},
 			{"DELETE", "/api/posts/e1", `"user":"duck"`},
 			{"DELETE", "/api/posts/e1/messages/1", `"user":"duck"`},
@@ -459,8 +462,9 @@ func TestNoRequestChangesAnOriginOverHTTP(t *testing.T) {
 			}
 		}
 	}
-	s.must(t, "PATCH", "/api/posts/e1", `{"subject":"x","user":"duck"}`,
-		"", http.StatusOK)
+	s.must(t, "PATCH", "/api/posts/e1",
+		`{"subject":"x","origin":{"user":"heron","host":"elsewhere"}}`, "",
+		http.StatusOK)
 	s.must(t, "DELETE", "/api/posts/e1", `{"user":"duck"}`, "",
 		http.StatusOK)
 	s.must(t, "DELETE", "/api/posts/e1/messages/1", `{"user":"duck"}`, "",
@@ -594,7 +598,7 @@ func TestChangesAfterAnIDOverHTTP(t *testing.T) {
 	s.must(t, "POST", "/api/workspaces/general/posts", postBody("later"),
 		"", http.StatusCreated)
 	s.must(t, "PATCH", "/api/posts/e1", `{"subject":"seen, edited",`+
-		`"user":"duck"}`, "", http.StatusOK)
+		`"origin":{"user":"duck"}}`, "", http.StatusOK)
 
 	changesAfter := func(after string) string {
 		t.Helper()
@@ -670,7 +674,8 @@ func TestPrivatePostsAreNotFoundForOthersOverHTTP(t *testing.T) {
 		{"GET", "/api/workspaces/general/posts?under=e1", ""},
 		{"POST", "/api/posts/e1/messages",
 			`{"body":"hi","origin":{"user":"bob"}}`},
-		{"PATCH", "/api/posts/e1", `{"private":false,"user":"bob"}`},
+		{"PATCH", "/api/posts/e1",
+			`{"private":false,"origin":{"user":"bob"}}`},
 		{"DELETE", "/api/posts/e1", `{"user":"bob"}`},
 	} {
 		text := bob.must(t, request.method, request.path, request.body,
@@ -687,7 +692,8 @@ func TestPrivatePostsAreNotFoundForOthersOverHTTP(t *testing.T) {
 	bob.must(t, "POST", "/api/posts/e2/messages",
 		`{"body":"hi","origin":{"user":"bob"}}`, "", http.StatusCreated)
 	text = alice.must(t, "PATCH", "/api/posts/e2",
-		`{"private":true,"user":"alice"}`, "", http.StatusConflict)
+		`{"private":true,"origin":{"user":"alice"}}`, "",
+		http.StatusConflict)
 	if code := errorCode(t, text); code != api.CodeConflict {
 		t.Errorf("making a post bob chatted on private gave %s, want %s",
 			code, api.CodeConflict)
@@ -761,7 +767,8 @@ func TestRequestLogKeepsNoClientText(t *testing.T) {
 			`"project":"PROJECTMARK","origin":{"user":"duck","dir":"/"}}`,
 			personalSecret, http.StatusCreated},
 		{"PATCH", "/api/posts/e1", `{"subject":"NEWSUBJECTMARK",` +
-			`"body":"NEWBODYMARK","user":"duck"}`, "", http.StatusOK},
+			`"body":"NEWBODYMARK","origin":{"user":"duck"}}`, "",
+			http.StatusOK},
 		{"POST", "/api/posts/e1/messages",
 			`{"body":"MESSAGEMARK","origin":{"user":"duck"}}`, "",
 			http.StatusCreated},

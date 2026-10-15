@@ -185,7 +185,7 @@ func TestLinkingToAnUnreadablePostIsRefusedAsMissing(t *testing.T) {
 	if _, err := w.store.Edit(ctx, w.openAccess(t),
 		w.store.mustKey(w.openRoot.Ref), api.EditPostRequest{
 			AddLinks: []api.Link{link("see", w.secretSee.Ref)},
-			User:     testUser,
+			Origin:   api.Origin{User: testUser},
 		}); !errors.Is(err, ErrLinkTarget) {
 		t.Fatalf("editing in a link to an unreadable post = %v", err)
 	}

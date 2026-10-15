@@ -104,7 +104,7 @@ func (w *forestWriter) write() {
 	case choice < 3 && !w.deleted[post.Ref.String()]:
 		subject := fmt.Sprintf("edited %d %s", w.writes, w.word())
 		edit := api.EditPostRequest{Subject: &subject,
-			User: post.Origin.User}
+			Origin: post.Origin}
 		switch choice {
 		case 0:
 			edit.Metadata = map[string]string{"jira": ""}

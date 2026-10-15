@@ -512,7 +512,9 @@ func cmdEdit(c *client, args []string) error {
 	if request.AddLinks, err = c.collectLinks(t, p); err != nil {
 		return err
 	}
-	request.User = currentUser()
+	if request.Origin, err = captureOrigin(t.capture); err != nil {
+		return err
+	}
 	if err := request.Validate(); err != nil {
 		return err
 	}
@@ -521,7 +523,8 @@ func cmdEdit(c *client, args []string) error {
 		return uncertainWrite(explainNotOwner(err, ref), "The edit",
 			programName+" post "+ref.String())
 	}
-	fmt.Printf("Edited post [%s].\n", post.Ref)
+	fmt.Printf("Edited post [%s], now at version %d.\n", post.Ref,
+		post.Version.Number)
 	printWhoCanRead(post, request.Private != nil)
 	return nil
 }
@@ -575,20 +578,37 @@ func cmdMessage(c *client, args []string) error {
 }
 
 func cmdPost(c *client, args []string) error {
-	if len(args) != 1 {
-		return usageError("post <ref>")
-	}
-	ref, err := api.ParseRef(args[0])
+	p, err := parseArgs(args, flagSpec{strs: []string{"--version"}})
 	if err != nil {
-		if _, messageErr := api.ParseMessageRef(args[0]); messageErr == nil {
+		return err
+	}
+	if len(p.pos) != 1 {
+		return usageError("post <ref> [--version <n>]")
+	}
+	ref, err := api.ParseRef(p.pos[0])
+	if err != nil {
+		if _, messageErr := api.ParseMessageRef(p.pos[0]); messageErr == nil {
 			return fmt.Errorf("%w. Run '%s message %s' to show a message",
-				err, programName, args[0])
+				err, programName, p.pos[0])
 		}
 		return err
 	}
 	t, err := c.resolve(ref)
 	if err != nil {
 		return err
+	}
+	if p.has("--version") {
+		number, err := parsePositive("--version", p.strs["--version"])
+		if err != nil {
+			return err
+		}
+		var version api.PostVersion
+		path := postPath(ref, fmt.Sprintf("/versions/%d", number))
+		if err := c.do(t, "GET", path, nil, &version); err != nil {
+			return err
+		}
+		printPostVersion(version)
+		return nil
 	}
 	var detail api.PostDetail
 	if err := c.do(t, "GET", postPath(ref, ""), nil, &detail); err != nil {

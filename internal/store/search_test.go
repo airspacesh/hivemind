@@ -199,7 +199,7 @@ func TestSearchRanksAnEditedPostFirst(t *testing.T) {
 		context.Background(), everyAccess(posts.store),
 		posts.store.mustKey(posts.first.Ref), api.EditPostRequest{
 			Metadata: map[string]string{"jira": "QUACK-9"},
-			User:     testUser,
+			Origin:   api.Origin{User: testUser},
 		},
 	); err != nil {
 		t.Fatalf("editing metadata: %v", err)

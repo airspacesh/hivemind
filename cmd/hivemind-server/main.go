@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -194,6 +195,7 @@ func (h *handler) routes() http.Handler {
 	route("GET /api/posts/{ref}", h.getPost)
 	route("PATCH /api/posts/{ref}", h.editPost)
 	route("DELETE /api/posts/{ref}", h.deletePost)
+	route("GET /api/posts/{ref}/versions/{n}", h.getVersion)
 	route("GET /api/posts/{ref}/tree", h.tree)
 	route("POST /api/posts/{ref}/messages", h.postMessage)
 	route("GET /api/posts/{ref}/messages", h.listMessages)
@@ -351,6 +353,27 @@ func (h *handler) getPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+func (h *handler) getVersion(w http.ResponseWriter, r *http.Request) {
+	if !requireNoQuery(w, r) {
+		return
+	}
+	number, err := strconv.ParseInt(r.PathValue("n"), 10, 64)
+	if err != nil || number <= 0 {
+		writeBadRequest(w, "the version number must be a positive integer")
+		return
+	}
+	access, key, ok := h.pathPost(w, r)
+	if !ok {
+		return
+	}
+	version, err := h.store.Version(r.Context(), access, key, number)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, version)
 }
 
 func (h *handler) editPost(w http.ResponseWriter, r *http.Request) {

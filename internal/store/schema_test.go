@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -209,6 +210,49 @@ func TestOpenRejectsUnrecognizedDatabases(t *testing.T) {
 				t.Fatalf("Open error = %q, want text %q", err, test.want)
 			}
 		})
+	}
+}
+
+// A database from before post versions opens with each post at version
+// 1, as it was, made by its own user when it was last modified.
+func TestOpenMigratesADatabaseFromBeforeVersions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v1.db")
+	const added, edited = "2026-10-01T00:00:00.000000000Z",
+		"2026-10-02T00:00:00.000000000Z"
+	statements := append(slices.Clone(schemaSteps[0].statements),
+		fmt.Sprintf(`PRAGMA application_id = %d`, applicationID),
+		`PRAGMA user_version = 1`,
+		`INSERT INTO workspaces (id, name, prefix) VALUES (1, 'general', 'e')`,
+		`UPDATE revision_counter SET revision = 3`,
+		`INSERT INTO posts (workspace_id, id, created_utc, modified_utc,
+			activity_utc, revision, activity_revision, posted_revision,
+			project, subject, body, origin_user, origin_host)
+		VALUES
+			(1, 1, '`+added+`', '`+added+`', '`+added+`', 1, 1, 1,
+				'pond', 'parent', '', 'alice', 'nest'),
+			(1, 2, '`+added+`', '`+edited+`', '`+edited+`', 3, 3, 2,
+				'pond', 'plan', 'details', 'alice', 'nest')`,
+		`INSERT INTO post_metadata (workspace_id, post_id, key, value)
+		VALUES (1, 2, 'status', 'draft')`,
+		`INSERT INTO post_links VALUES (1, 2, 'parent', 1, 1)`,
+	)
+	rawExec(t, path, strings.Join(statements, ";\n"))
+
+	store := openStoreAt(t, path, testBusyTimeout)
+	plan := api.Ref{Prefix: "e", ID: 2}
+	got := mustVersion(t, store, plan, 1)
+	want := api.PostVersion{Ref: plan, Project: "pond", Subject: "plan",
+		Body: "details", Metadata: map[string]string{"status": "draft"},
+		Links: []api.Link{link(api.ParentLink, api.Ref{Prefix: "e", ID: 1})},
+		Version: api.Version{Number: 1, Created: got.Version.Created,
+			Origin: api.Origin{User: "alice", Host: "nest"}}}
+	if !reflect.DeepEqual(got, want) || got.Version.Created.Format(
+		timeLayout) != edited {
+		t.Fatalf("migrated version 1 is\n%+v\nwant\n%+v at %s", got, want,
+			edited)
+	}
+	if current := mustGet(t, store, plan).Version; *current != got.Version {
+		t.Fatalf("the migrated post is at %+v, want version 1", current)
 	}
 }
 

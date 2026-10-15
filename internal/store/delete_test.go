@@ -63,6 +63,12 @@ func TestDeleteClearsAPostButKeepsItsPlace(t *testing.T) {
 	})
 	child := addChild(t, store, "child", post.Ref)
 	message := mustPostMessage(t, store, post.Ref, "hi")
+	body := "more details"
+	if _, err := store.Edit(context.Background(), everyAccess(store),
+		store.mustKey(post.Ref), api.EditPostRequest{Body: &body,
+			Origin: api.Origin{User: "heron"}}); err != nil {
+		t.Fatal(err)
+	}
 	cursor := readChanges(t, store, 0, 100).Cursor
 
 	deleted := mustDelete(t, store, post.Ref)
@@ -78,6 +84,16 @@ func TestDeleteClearsAPostButKeepsItsPlace(t *testing.T) {
 	}
 	if !deleted.Modified.After(post.Modified) {
 		t.Fatalf("delete left the modified time at %v", deleted.Modified)
+	}
+	for number := int64(1); number <= 2; number++ {
+		version := mustVersion(t, store, post.Ref, number)
+		if !version.Deleted || version.Subject != "" ||
+			version.Body != "" || len(version.Metadata) != 0 ||
+			version.Project != post.Project ||
+			!reflect.DeepEqual(version.Links, post.Links) {
+			t.Fatalf("version %d of the deleted post is %+v", number,
+				version)
+		}
 	}
 	detail := mustGet(t, store, post.Ref)
 	if detail.Children != 1 || detail.Messages != 1 {
@@ -164,8 +180,9 @@ func TestNobodyCanEditWhatIsDeleted(t *testing.T) {
 
 	subject := "back"
 	for _, req := range []api.EditPostRequest{
-		{Subject: &subject, User: testUser},
-		{AddLinks: []api.Link{link("see", other.Ref)}, User: testUser},
+		{Subject: &subject, Origin: api.Origin{User: testUser}},
+		{AddLinks: []api.Link{link("see", other.Ref)},
+			Origin: api.Origin{User: testUser}},
 	} {
 		_, err := store.Edit(ctx, everyAccess(store), key, req)
 		var refused *DeletedError

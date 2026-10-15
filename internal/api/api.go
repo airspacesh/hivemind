@@ -56,6 +56,15 @@ type Origin struct {
 	ClaudeSession string `json:"claude_session,omitempty"`
 }
 
+// Version is one version of a post: its number, counted from 1 when
+// the post was added, and who made it and when, by the add or edit that
+// changed the post's project, subject, body, metadata or links.
+type Version struct {
+	Number  int64     `json:"number"`
+	Created time.Time `json:"created"`
+	Origin  Origin    `json:"origin"`
+}
+
 // Post is a post with its own fields. A deleted post has no subject,
 // body or metadata, and cannot be edited. Revision is the revision of
 // the post's own latest change, which set Modified. Private says the
@@ -78,6 +87,23 @@ type Post struct {
 	PrivateTo string            `json:"private_to,omitempty"`
 	// SupersededBy lists the posts that supersede this one.
 	SupersededBy []Ref `json:"superseded_by,omitempty"`
+	// Version is the post's current version. Only a read or an edit of
+	// the post alone gets it, since listings show no versions.
+	Version *Version `json:"version,omitempty"`
+}
+
+// PostVersion is a post's project, subject, body, metadata and links as
+// one of its versions had them. A deleted post's versions have no
+// subject, body or metadata.
+type PostVersion struct {
+	Ref      Ref               `json:"ref"`
+	Version  Version           `json:"version"`
+	Project  string            `json:"project"`
+	Subject  string            `json:"subject"`
+	Body     string            `json:"body,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+	Links    []Link            `json:"links,omitempty"`
+	Deleted  bool              `json:"deleted,omitempty"`
 }
 
 // PostRef names a post in a path of ancestors. A post the request
@@ -272,9 +298,10 @@ type EditPostRequest struct {
 	RemoveLinkNames []string `json:"remove_link_names,omitempty"`
 	// Private makes the post private when true, and public when false.
 	Private *bool `json:"private,omitempty"`
-	// User is the user making the edit, who must be the user that
-	// wrote the post.
-	User string `json:"user"`
+	// Origin records who makes the edit, and where, as the version it
+	// makes keeps it. Only the user who wrote the post can edit it while
+	// it is private, or make it private or public.
+	Origin Origin `json:"origin"`
 }
 
 // ChangesContent reports whether the edit changes the post itself,
@@ -381,6 +408,7 @@ const (
 	CodeUnknownPrefix      ErrorCode = "unknown_prefix"
 	CodePostNotFound       ErrorCode = "post_not_found"
 	CodeMessageNotFound    ErrorCode = "message_not_found"
+	CodeVersionNotFound    ErrorCode = "version_not_found"
 	CodeLinkNotFound       ErrorCode = "link_not_found"
 	CodeLinkTargetNotFound ErrorCode = "link_target_not_found"
 	CodeConflict           ErrorCode = "conflict"

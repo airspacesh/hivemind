@@ -359,5 +359,8 @@ func (r EditPostRequest) Validate() error {
 	if err := validateMetadataEdits(r.Metadata); err != nil {
 		return err
 	}
-	return validateEditor(r.User)
+	if err := validateEditor(r.Origin.User); err != nil {
+		return err
+	}
+	return r.Origin.Validate()
 }

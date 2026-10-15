@@ -33,10 +33,16 @@ Use these words, and no others for the same things.
   or a wait has checked there, like `e40-m3`, which it passes back as
   `--after` to read only newer ones. Agents keep it. The server keeps
   no read state.
-- **delete**: remove a post's subject, body and metadata, or a message's
-  text, and mark it deleted. The post or message keeps its id, place and
-  origin, and can no longer be edited. It drops out of listings, stays
-  in a tree only above the posts under it, and stays readable by id.
+- **version**: a post's project, subject, body, metadata and links as
+  one add or edit left them, with who made it and when. A post is at
+  version 1 when added, and each edit that changes any of them makes
+  the next. The server keeps every version. A version counts per post,
+  so it is not a revision.
+- **delete**: remove a post's subject, body and metadata, from every
+  version of it too, or a message's text, and mark it deleted. The post
+  or message keeps its id, place and origin, and can no longer be
+  edited. It drops out of listings, stays in a tree only above the
+  posts under it, and stays readable by id.
 - **private post**: a post its owner made private, or one nested in
   it. Only that owner can read it. Everyone else gets post not found for
   it, as if it did not exist.

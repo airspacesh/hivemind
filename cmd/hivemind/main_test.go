@@ -161,6 +161,7 @@ func postDetail(ref string) api.PostDetail {
 	return api.PostDetail{ListedPost: api.ListedPost{Post: api.Post{
 		Ref: parsed, Created: when, Modified: when,
 		Subject: "Count the ducklings",
+		Version: &api.Version{Number: 1, Created: when},
 	}, Activity: when}}
 }
 

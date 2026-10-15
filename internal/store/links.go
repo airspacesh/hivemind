@@ -414,8 +414,9 @@ func (v view) ancestors(
 	return path, nil
 }
 
-// Detail returns a post with its place in its tree, the links that
-// point at it, its child count, and a summary of its chat.
+// Detail returns a post with its current version, its place in its
+// tree, the links that point at it, its child count, and a summary of
+// its chat.
 func (s *Store) Detail(
 	ctx context.Context, access Access, key Key,
 ) (api.PostDetail, error) {
@@ -427,6 +428,9 @@ func (s *Store) Detail(
 
 	post, err := v.getPost(ctx, key)
 	if err != nil {
+		return api.PostDetail{}, err
+	}
+	if post.Version, err = v.currentVersion(ctx, key); err != nil {
 		return api.PostDetail{}, err
 	}
 	listed, err := v.listPost(ctx, post)
