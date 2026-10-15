@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/airspacesh/hivemind/internal/api"
 )
@@ -272,7 +273,11 @@ func (s *Store) Add(
 	if err := v.writeLinks(ctx, key, nil, nil, req.Links); err != nil {
 		return api.Post{}, false, err
 	}
-	if err := v.recordVersion(ctx, key, req.Origin, now,
+	content, err := v.readContent(ctx, key)
+	if err != nil {
+		return api.Post{}, false, err
+	}
+	if err := v.recordVersion(ctx, key, 1, content, req.Origin, now,
 		revision); err != nil {
 		return api.Post{}, false, err
 	}
@@ -291,37 +296,52 @@ func (s *Store) Add(
 	return post, true, nil
 }
 
-// editContent updates a post's own fields, sets its modified and
-// activity times to now, and moves its revisions to the change's, which
-// it returns. A change to links other than the parent leaves them all
-// as they are, so linking old posts does not reorder listings or show
-// in the changes feed.
-func (v view) editContent(
-	ctx context.Context, key Key, req api.EditPostRequest, now string,
-) (int64, error) {
+// writeFields overwrites the project, subject and body an edit gives.
+func (v view) writeFields(
+	ctx context.Context, key Key, req api.EditPostRequest,
+) error {
+	var sets []string
+	var args []any
+	if req.Project != nil {
+		sets = append(sets, `project = ?`)
+		args = append(args, *req.Project)
+	}
+	if req.Subject != nil {
+		sets = append(sets, `subject = ?`)
+		args = append(args, *req.Subject)
+	}
+	if req.Body != nil {
+		sets = append(sets, `body = ?`)
+		args = append(args, *req.Body)
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	args = append(args, key.Workspace, key.ID)
+	if _, err := v.tx.ExecContext(ctx, `UPDATE posts SET `+
+		strings.Join(sets, `, `)+` WHERE workspace_id = ? AND id = ?`,
+		args...); err != nil {
+		return fmt.Errorf("editing post: %w", err)
+	}
+	return nil
+}
+
+// touchPost takes the next revision for a change to a post, which it
+// returns, and moves the post's revisions and its modified and activity
+// times to the change's.
+func (v view) touchPost(ctx context.Context, key Key, now string) (int64,
+	error) {
 	revision, err := nextRevision(ctx, v.tx)
 	if err != nil {
 		return 0, err
 	}
-	query := `UPDATE posts SET modified_utc = ?, activity_utc = ?,
-		revision = ?, activity_revision = ?`
-	args := []any{now, now, revision, revision}
-	if req.Project != nil {
-		query += `, project = ?`
-		args = append(args, *req.Project)
-	}
-	if req.Subject != nil {
-		query += `, subject = ?`
-		args = append(args, *req.Subject)
-	}
-	if req.Body != nil {
-		query += `, body = ?`
-		args = append(args, *req.Body)
-	}
-	query += ` WHERE workspace_id = ? AND id = ?`
-	args = append(args, key.Workspace, key.ID)
-	if _, err := v.tx.ExecContext(ctx, query, args...); err != nil {
-		return 0, fmt.Errorf("editing post: %w", err)
+	if _, err := v.tx.ExecContext(ctx, `
+		UPDATE posts SET modified_utc = ?, activity_utc = ?, revision = ?,
+			activity_revision = ?
+		WHERE workspace_id = ? AND id = ?`,
+		now, now, revision, revision, key.Workspace, key.ID,
+	); err != nil {
+		return 0, fmt.Errorf("changing post: %w", err)
 	}
 	return revision, nil
 }
@@ -553,18 +573,18 @@ func (v view) writeVisibility(
 // Edit overwrites a post's fields and changes its metadata and links.
 // An edit that changes its fields, metadata or parent makes the post's
 // next version, and the versions before keep what it overwrote. Other
-// links are not versioned. Anyone can edit a public post. Only the user
-// who wrote the post can edit it while it is private or under a private
-// post, or make it private or public. Nobody can edit a deleted post.
+// links are not versioned. An edit that changes nothing a version
+// records, nor who can read the post, makes no version and no change.
+// Anyone can edit a public post. Only the user who wrote the post can
+// edit it while it is private or under a private post, or make it
+// private or public. Nobody can edit a deleted post.
 func (s *Store) Edit(
 	ctx context.Context,
 	access Access,
 	key Key,
 	req api.EditPostRequest,
 ) (api.Post, error) {
-	if !req.ChangesContent() && len(req.AddLinks) == 0 &&
-		len(req.RemoveLinks) == 0 && len(req.RemoveLinkNames) == 0 &&
-		req.Private == nil {
+	if req.EditsNothing() {
 		return api.Post{}, errors.New("nothing to edit")
 	}
 	v, err := s.begin(ctx, access, false)
@@ -603,6 +623,9 @@ func (s *Store) Edit(
 				current: current.Number, expected: *req.ExpectedVersion}
 		}
 	}
+	if err := v.writeFields(ctx, key, req); err != nil {
+		return api.Post{}, err
+	}
 	if len(req.Metadata) > 0 {
 		if err := v.writeMetadata(ctx, key, req.Metadata); err != nil {
 			return api.Post{}, err
@@ -614,23 +637,32 @@ func (s *Store) Edit(
 	}
 	// A post that becomes public, or private, changes for its readers,
 	// as an edit of its content does, so it moves to the top of the
-	// listings and shows in the changes feed. A move into or out of a
-	// private tree counts too.
+	// listings and shows in the changes feed.
 	visibilityChanged, err := v.writeVisibility(ctx, key, state,
 		req.Private)
 	if err != nil {
 		return api.Post{}, err
 	}
-	now := nowUTC()
-	var revision int64
-	if req.ChangesContent() || visibilityChanged {
-		if revision, err = v.editContent(ctx, key, req, now); err != nil {
+	content, err := v.readContent(ctx, key)
+	if err != nil {
+		return api.Post{}, err
+	}
+	number, latest, err := v.latestVersion(ctx, key)
+	if err != nil {
+		return api.Post{}, err
+	}
+	if content != latest || visibilityChanged {
+		now := nowUTC()
+		revision, err := v.touchPost(ctx, key, now)
+		if err != nil {
 			return api.Post{}, err
 		}
-	}
-	if err := v.recordVersion(ctx, key, req.Origin, now,
-		revision); err != nil {
-		return api.Post{}, err
+		if content != latest {
+			if err := v.recordVersion(ctx, key, number+1, content,
+				req.Origin, now, revision); err != nil {
+				return api.Post{}, err
+			}
+		}
 	}
 
 	post, err := v.getPost(ctx, key)
@@ -673,14 +705,12 @@ func (s *Store) Delete(
 		return v.getPost(ctx, key)
 	}
 
-	empty := ""
-	if _, err := v.editContent(ctx, key, api.EditPostRequest{
-		Subject: &empty, Body: &empty,
-	}, nowUTC()); err != nil {
+	if _, err := v.touchPost(ctx, key, nowUTC()); err != nil {
 		return api.Post{}, err
 	}
 	if _, err := v.tx.ExecContext(ctx, `
-		UPDATE posts SET deleted = 1 WHERE workspace_id = ? AND id = ?`,
+		UPDATE posts SET subject = '', body = '', deleted = 1
+		WHERE workspace_id = ? AND id = ?`,
 		key.Workspace, key.ID,
 	); err != nil {
 		return api.Post{}, fmt.Errorf("marking post deleted: %w", err)

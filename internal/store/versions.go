@@ -39,48 +39,54 @@ type versionRecord struct {
 	parent   sql.NullInt64
 }
 
-// recordVersion makes a post's content its next version, made by
-// origin at now in the change that took revision, unless its latest
-// version holds that content already.
-func (v view) recordVersion(
-	ctx context.Context, key Key, origin api.Origin, now string,
-	revision int64,
-) error {
-	var current versionRecord
+// readContent reads what a version records of a post as it is now.
+func (v view) readContent(ctx context.Context, key Key) (versionRecord,
+	error) {
+	var content versionRecord
 	if err := v.tx.QueryRowContext(ctx, `
 		SELECT `+versionContent+` FROM posts AS e
 		WHERE e.workspace_id = ? AND e.id = ?`, key.Workspace, key.ID,
-	).Scan(&current.project, &current.subject, &current.body,
-		&current.metadata, &current.parent); err != nil {
-		return fmt.Errorf("reading the content of %s: %w",
+	).Scan(&content.project, &content.subject, &content.body,
+		&content.metadata, &content.parent); err != nil {
+		return versionRecord{}, fmt.Errorf("reading the content of %s: %w",
 			v.store.mustRef(key), err)
 	}
-	var latest versionRecord
+	return content, nil
+}
+
+// latestVersion reads the number and content of a post's latest
+// version.
+func (v view) latestVersion(ctx context.Context, key Key) (int64,
+	versionRecord, error) {
 	var number int64
-	err := v.tx.QueryRowContext(ctx, `
+	var content versionRecord
+	if err := v.tx.QueryRowContext(ctx, `
 		SELECT version, project, subject, body, metadata, parent_id
 		FROM post_versions WHERE workspace_id = ? AND post_id = ?
 		ORDER BY version DESC LIMIT 1`, key.Workspace, key.ID,
-	).Scan(&number, &latest.project, &latest.subject, &latest.body,
-		&latest.metadata, &latest.parent)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("reading the latest version of %s: %w",
-			v.store.mustRef(key), err)
+	).Scan(&number, &content.project, &content.subject, &content.body,
+		&content.metadata, &content.parent); err != nil {
+		return 0, versionRecord{}, fmt.Errorf("reading the latest "+
+			"version of %s: %w", v.store.mustRef(key), err)
 	}
-	if err == nil && latest == current {
-		return nil
-	}
+	return number, content, nil
+}
 
+// recordVersion records content as version number of a post, made by
+// origin at now in the change that took revision.
+func (v view) recordVersion(
+	ctx context.Context, key Key, number int64, content versionRecord,
+	origin api.Origin, now string, revision int64,
+) error {
 	if _, err := v.tx.ExecContext(ctx, `
 		INSERT INTO post_versions (workspace_id, post_id, version,
 			revision, created_utc, origin_user, origin_host, origin_dir,
 			origin_claude_session, project, subject, body, metadata,
 			parent_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		key.Workspace, key.ID, number+1, revision, now, origin.User,
-		origin.Host,
-		origin.Dir, origin.ClaudeSession, current.project, current.subject,
-		current.body, current.metadata, current.parent,
+		key.Workspace, key.ID, number, revision, now, origin.User,
+		origin.Host, origin.Dir, origin.ClaudeSession, content.project,
+		content.subject, content.body, content.metadata, content.parent,
 	); err != nil {
 		return fmt.Errorf("recording a version of %s: %w",
 			v.store.mustRef(key), err)

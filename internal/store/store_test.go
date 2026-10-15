@@ -309,29 +309,34 @@ func TestMutationRollsBackWhenResultCannotBeRead(t *testing.T) {
 func TestMetadataEditsRefreshModifiedAndApply(t *testing.T) {
 	ctx := context.Background()
 	tests := []struct {
-		name string
-		set  map[string]string
-		want map[string]string
+		name      string
+		set       map[string]string
+		want      map[string]string
+		refreshed bool
 	}{
 		{
 			"add",
 			map[string]string{"review": "done"},
 			map[string]string{"jira": "QUACK-1", "review": "done"},
+			true,
 		},
 		{
 			"overwrite",
 			map[string]string{"jira": "QUACK-2"},
 			map[string]string{"jira": "QUACK-2"},
+			true,
 		},
 		{
 			"remove",
 			map[string]string{"jira": ""},
 			map[string]string{},
+			true,
 		},
 		{
 			"remove a key that was never set",
 			map[string]string{"review": ""},
 			map[string]string{"jira": "QUACK-1"},
+			false,
 		},
 	}
 	for _, test := range tests {
@@ -352,8 +357,10 @@ func TestMetadataEditsRefreshModifiedAndApply(t *testing.T) {
 			if err != nil {
 				t.Fatalf("changing metadata: %v", err)
 			}
-			if got.Modified.Year() == 2000 {
-				t.Fatalf("modified was not refreshed: %v", got.Modified)
+			if refreshed := got.Modified.Year() != 2000; refreshed !=
+				test.refreshed {
+				t.Fatalf("modified is %v, want refreshed %t", got.Modified,
+					test.refreshed)
 			}
 			if fmt.Sprint(got.Metadata) != fmt.Sprint(test.want) {
 				t.Fatalf("metadata = %v, want %v", got.Metadata, test.want)

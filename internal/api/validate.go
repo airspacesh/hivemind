@@ -315,9 +315,7 @@ func (r AddPostRequest) Validate() error {
 }
 
 func (r EditPostRequest) Validate() error {
-	if !r.ChangesContent() && len(r.AddLinks) == 0 &&
-		len(r.RemoveLinks) == 0 && len(r.RemoveLinkNames) == 0 &&
-		r.Private == nil {
+	if r.EditsNothing() {
 		return fmt.Errorf("nothing to edit: provide project, subject, " +
 			"body, metadata, links, or whether it is private")
 	}

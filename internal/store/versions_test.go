@@ -141,3 +141,63 @@ func TestAnEditExpectingAnotherVersionIsRefused(t *testing.T) {
 			edited.Version, err)
 	}
 }
+
+// An edit that writes what the post holds already, its own parent
+// included, and removes a metadata key it lacks makes no version and no
+// change. It still checks the version it expects.
+func TestAnEditThatChangesNothingIsNoChange(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	parent := mustAdd(t, store, "parent", "", nil)
+	post := addTo(t, store, "general", api.AddPostRequest{
+		Project: "pond", Subject: "plan", Body: "draft",
+		Metadata: map[string]string{"status": "draft"},
+		Links:    []api.Link{link(api.ParentLink, parent.Ref)},
+		Origin:   api.Origin{User: "alice"},
+	})
+	key := store.mustKey(post.Ref)
+	project, subject, body, private := "pond", "plan, revised", "draft",
+		false
+	if _, err := store.Edit(ctx, everyAccess(store), key,
+		api.EditPostRequest{Subject: &subject,
+			Origin: api.Origin{User: "bob"}}); err != nil {
+		t.Fatal(err)
+	}
+	before := mustGet(t, store, post.Ref)
+	_, cursor := readAllChanges(t, store, 0, 10)
+	same := api.EditPostRequest{Project: &project, Subject: &subject,
+		Body: &body, Metadata: map[string]string{"status": "draft",
+			"jira": ""},
+		AddLinks: []api.Link{link(api.ParentLink, parent.Ref)},
+		Private:  &private, Origin: api.Origin{User: "alice"},
+	}
+
+	edited, err := store.Edit(ctx, everyAccess(store), key, same)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edited.Version.Number != 2 || edited.Revision != before.Revision ||
+		!edited.Modified.Equal(before.Modified) {
+		t.Fatalf("an edit that changed nothing left version %d, "+
+			"revision %d and modified %v, want 2, %d and %v",
+			edited.Version.Number, edited.Revision, edited.Modified,
+			before.Revision, before.Modified)
+	}
+	if after := mustGet(t, store, post.Ref); !reflect.DeepEqual(after,
+		before) {
+		t.Fatalf("an edit that changed nothing changed the post:\n%+v\n"+
+			"was\n%+v", after, before)
+	}
+	if got := changeIDs(readChanges(t, store, cursor, 10)); len(got) != 0 {
+		t.Fatalf("an edit that changed nothing showed as changes %v", got)
+	}
+
+	stale := int64(1)
+	same.ExpectedVersion = &stale
+	var conflict *VersionConflictError
+	if _, err := store.Edit(ctx, everyAccess(store), key,
+		same); !errors.As(err, &conflict) {
+		t.Fatalf("an edit that changes nothing, expecting version 1 = %v, "+
+			"want a refusal", err)
+	}
+}

@@ -86,8 +86,8 @@ func TestChangesListAChangeAgainOnlyWhenItChangesAfterTheCursor(t *testing.T) {
 	_, cursor := readAllChanges(t, store, 0, 10)
 
 	unseen := mustAdd(t, store, "unseen", "", nil)
-	for _, post := range []api.Post{unseen, seen, unseen} {
-		subject := "edited"
+	for i, post := range []api.Post{unseen, seen, unseen} {
+		subject := fmt.Sprintf("edited %d", i)
 		if _, err := store.Edit(ctx, everyAccess(store),
 			store.mustKey(post.Ref),
 			api.EditPostRequest{Subject: &subject,

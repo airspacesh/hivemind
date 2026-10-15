@@ -4,7 +4,6 @@ package api
 
 import (
 	"fmt"
-	"slices"
 	"time"
 )
 
@@ -308,15 +307,12 @@ type EditPostRequest struct {
 	Origin Origin `json:"origin"`
 }
 
-// ChangesContent reports whether the edit changes what a version of the
-// post records, its project, subject, body, metadata or parent, rather
-// than only its other links.
-func (r EditPostRequest) ChangesContent() bool {
-	isParent := func(link Link) bool { return link.Name == ParentLink }
-	return r.Project != nil || r.Subject != nil || r.Body != nil ||
-		len(r.Metadata) > 0 || slices.ContainsFunc(r.AddLinks, isParent) ||
-		slices.ContainsFunc(r.RemoveLinks, isParent) ||
-		slices.Contains(r.RemoveLinkNames, ParentLink)
+// EditsNothing reports whether the edit names nothing to change.
+func (r EditPostRequest) EditsNothing() bool {
+	return r.Project == nil && r.Subject == nil && r.Body == nil &&
+		len(r.Metadata) == 0 && len(r.AddLinks) == 0 &&
+		len(r.RemoveLinks) == 0 && len(r.RemoveLinkNames) == 0 &&
+		r.Private == nil
 }
 
 // Match is a match on a page of a listing. It is a post, or a message
