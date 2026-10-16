@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(scripts/build.sh:*)",
+      "Bash(test/e2e.sh:*)",
+      "Bash(bin/hivemind:*)",
+      "Bash(bin/hivemind-server:*)"
+    ]
+  }
+}
