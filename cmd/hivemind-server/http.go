@@ -609,7 +609,7 @@ func (h *handler) readBounds(
 	}
 
 	var since int64
-	if after != nil && after.Post == chat {
+	if after != nil && chat.ID != 0 && after.Post == chat {
 		since = after.Message
 		after = nil
 	}

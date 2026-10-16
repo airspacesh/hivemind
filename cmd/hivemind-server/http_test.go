@@ -684,6 +684,31 @@ func TestChangesAfterAnIDOverHTTP(t *testing.T) {
 	}
 }
 
+// A revision as after keeps a listing to what changed after it. A read
+// with no chat once took a revision for a cursor into that chat, and
+// listed everything.
+func TestListingsAfterARevisionLeaveOutEarlierPosts(t *testing.T) {
+	s := startServer(t, testConfig(t))
+	for _, subject := range []string{"one", "two", "three"} {
+		s.must(t, "POST", "/api/workspaces/general/posts",
+			postBody(subject), "", http.StatusCreated)
+	}
+
+	text := s.must(t, "GET", "/api/workspaces/general/posts?after=@2",
+		"", "", http.StatusOK)
+	var page api.MatchPage
+	if err := json.Unmarshal([]byte(text), &page); err != nil {
+		t.Fatal(err)
+	}
+	var subjects []string
+	for _, match := range page.Matches {
+		subjects = append(subjects, match.Post.Subject)
+	}
+	if got := strings.Join(subjects, " "); got != "three" {
+		t.Errorf("posts after @2 = %q, want %q", got, "three")
+	}
+}
+
 // Every read of a post private to alice, or of what is under it, is
 // refused to bob as if it did not exist, and so is any change.
 func TestPrivatePostsAreNotFoundForOthersOverHTTP(t *testing.T) {
