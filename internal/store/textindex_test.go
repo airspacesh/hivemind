@@ -156,8 +156,10 @@ func TestTextIndexFollowsEdits(t *testing.T) {
 	}
 }
 
-// An edit or delete overwrites text so it is gone, so the trigrams of
-// the old text must leave the index rather than wait in it for a merge.
+// A delete overwrites text so it is gone, so the trigrams of the old
+// text must leave the index rather than wait in it for a merge. An edit
+// overwrites a post's text through the same trigger, so its old text
+// leaves the index too, though the post's versions keep it.
 func TestTextIndexForgetsOverwrittenText(t *testing.T) {
 	store := openTestStore(t)
 	ctx := context.Background()

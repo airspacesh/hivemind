@@ -204,28 +204,6 @@ func (s *Store) PostMessage(
 	return message, true, nil
 }
 
-// overwriteMessage writes a message's text and whether it is deleted,
-// as one change.
-func overwriteMessage(
-	ctx context.Context, tx *sql.Tx, post Key, number int64, body string,
-	deleted bool,
-) error {
-	revision, err := nextRevision(ctx, tx)
-	if err != nil {
-		return err
-	}
-	now := nowUTC()
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE post_messages
-		SET body = ?, deleted = ?, modified_utc = ?, revision = ?
-		WHERE workspace_id = ? AND post_id = ? AND id = ?`,
-		body, deleted, now, revision, post.Workspace, post.ID, number,
-	); err != nil {
-		return fmt.Errorf("overwriting message: %w", err)
-	}
-	return recordChatActivity(ctx, tx, post, now, revision)
-}
-
 // DeleteMessage clears a message's text and marks it deleted, and no
 // earlier text is kept. The message keeps its number and its place in
 // the chat. Deleting a deleted message changes nothing. Only the user
@@ -251,15 +229,27 @@ func (s *Store) DeleteMessage(
 		return api.Message{}, err
 	}
 	if err := checkEditor(message.Ref(), message.Origin.User,
-		req.User, "delete it"); err != nil {
+		req.User, "delete it", ownerOnlyChange); err != nil {
 		return api.Message{}, err
 	}
 	if message.Deleted {
 		return message, nil
 	}
 
-	if err := overwriteMessage(ctx, tx, post, number, "",
-		true); err != nil {
+	revision, err := nextRevision(ctx, tx)
+	if err != nil {
+		return api.Message{}, err
+	}
+	now := nowUTC()
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE post_messages
+		SET body = '', deleted = 1, modified_utc = ?, revision = ?
+		WHERE workspace_id = ? AND post_id = ? AND id = ?`,
+		now, revision, post.Workspace, post.ID, number,
+	); err != nil {
+		return api.Message{}, fmt.Errorf("deleting message: %w", err)
+	}
+	if err := recordChatActivity(ctx, tx, post, now, revision); err != nil {
 		return api.Message{}, err
 	}
 	message, err = s.getMessage(ctx, tx, post, number)

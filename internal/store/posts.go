@@ -346,16 +346,27 @@ func (v view) touchPost(ctx context.Context, key Key, now string) (int64,
 	return revision, nil
 }
 
+// ownerOnlyReason says why only the user who wrote a post or message
+// can make a change to it.
+type ownerOnlyReason int
+
+const (
+	// ownerOnlyChange is a change that only the owner can ever make.
+	ownerOnlyChange ownerOnlyReason = iota
+	// ownerOnlyWorkspace is an edit that the post's workspace allows
+	// only its owner to make.
+	ownerOnlyWorkspace
+)
+
 // NotOwnerError refuses a change that only the user who wrote the post
 // or message can make, by anyone else. Nobody can make it to one that
 // records no user. action says what the change does to it, like
-// "delete it". byWorkspace says the post's workspace is what allows
-// only its owner to make the change.
+// "delete it", and reason says why only the owner can make it.
 type NotOwnerError struct {
-	posted      string
-	owner       string
-	action      string
-	byWorkspace bool
+	posted string
+	owner  string
+	action string
+	reason ownerOnlyReason
 }
 
 func (e *NotOwnerError) Error() string {
@@ -364,7 +375,7 @@ func (e *NotOwnerError) Error() string {
 		posted = e.posted + " records no user"
 	}
 	switch {
-	case e.byWorkspace:
+	case e.reason == ownerOnlyWorkspace:
 		return fmt.Sprintf("%s, and this workspace lets only a post's "+
 			"own user %s", posted, e.action)
 	case e.owner == "":
@@ -376,11 +387,15 @@ func (e *NotOwnerError) Error() string {
 }
 
 // checkEditor refuses a change by editor to something owner posted,
-// unless they are the same user. action says what the change does.
-func checkEditor(posted fmt.Stringer, owner, editor, action string) error {
+// unless they are the same user. action says what the change does, and
+// reason why only the owner can make it.
+func checkEditor(
+	posted fmt.Stringer, owner, editor, action string,
+	reason ownerOnlyReason,
+) error {
 	if owner == "" || owner != editor {
 		return &NotOwnerError{posted: posted.String(), owner: owner,
-			action: action}
+			action: action, reason: reason}
 	}
 	return nil
 }
@@ -623,36 +638,33 @@ func (s *Store) Edit(
 	switch {
 	case state.privateTo != "":
 		if err := checkEditor(ref, state.owner, req.Origin.User,
-			"edit it"); err != nil {
+			"edit it", ownerOnlyChange); err != nil {
 			return api.Post{}, err
 		}
 	case editors == PostEditorsOwner:
 		if err := checkEditor(ref, state.owner, req.Origin.User,
-			"edit it"); err != nil {
-			return api.Post{}, &NotOwnerError{posted: ref.String(),
-				owner: state.owner, action: "edit it", byWorkspace: true}
+			"edit it", ownerOnlyWorkspace); err != nil {
+			return api.Post{}, err
 		}
 	case editors != PostEditorsAnyone:
 		panic(fmt.Sprintf("unknown post editors %q", editors))
 	}
 	if req.Private != nil {
 		if err := checkEditor(ref, state.owner, req.Origin.User,
-			"make it private or public"); err != nil {
+			"make it private or public", ownerOnlyChange); err != nil {
 			return api.Post{}, err
 		}
 	}
 	if state.deleted {
 		return api.Post{}, &DeletedError{deleted: ref.String()}
 	}
-	if req.ExpectedVersion != nil {
-		current, err := v.currentVersion(ctx, key)
-		if err != nil {
-			return api.Post{}, err
-		}
-		if current.Number != *req.ExpectedVersion {
-			return api.Post{}, &VersionConflictError{post: ref.String(),
-				current: current.Number, expected: *req.ExpectedVersion}
-		}
+	latest, latestContent, err := v.latestVersion(ctx, key)
+	if err != nil {
+		return api.Post{}, err
+	}
+	if req.ExpectedVersion != nil && latest.Number != *req.ExpectedVersion {
+		return api.Post{}, &VersionConflictError{post: ref.String(),
+			current: latest.Number, expected: *req.ExpectedVersion}
 	}
 	if err := v.writeFields(ctx, key, req); err != nil {
 		return api.Post{}, err
@@ -678,19 +690,21 @@ func (s *Store) Edit(
 	if err != nil {
 		return api.Post{}, err
 	}
-	number, latest, err := v.latestVersion(ctx, key)
-	if err != nil {
-		return api.Post{}, err
-	}
-	if content != latest || visibilityChanged {
+	version := latest
+	if content != latestContent || visibilityChanged {
 		now := nowUTC()
 		revision, err := v.touchPost(ctx, key, now)
 		if err != nil {
 			return api.Post{}, err
 		}
-		if content != latest {
-			if err := v.recordVersion(ctx, key, number+1, content,
-				req.Origin, now, revision); err != nil {
+		if content != latestContent {
+			version = api.Version{Number: latest.Number + 1,
+				Origin: req.Origin}
+			if err := v.recordVersion(ctx, key, version.Number, content,
+				version.Origin, now, revision); err != nil {
+				return api.Post{}, err
+			}
+			if version.Created, err = parseTime(now); err != nil {
 				return api.Post{}, err
 			}
 		}
@@ -700,9 +714,7 @@ func (s *Store) Edit(
 	if err != nil {
 		return api.Post{}, fmt.Errorf("reading edited post: %w", err)
 	}
-	if post.Version, err = v.currentVersion(ctx, key); err != nil {
-		return api.Post{}, err
-	}
+	post.Version = &version
 	if err := v.tx.Commit(); err != nil {
 		return api.Post{}, fmt.Errorf("committing edited post: %w", err)
 	}
@@ -729,7 +741,7 @@ func (s *Store) Delete(
 		return api.Post{}, err
 	}
 	if err := checkEditor(v.store.mustRef(key), state.owner, req.User,
-		"delete it"); err != nil {
+		"delete it", ownerOnlyChange); err != nil {
 		return api.Post{}, err
 	}
 	if state.deleted {

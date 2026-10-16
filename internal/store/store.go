@@ -651,8 +651,8 @@ func sqliteDSN(
 	query := url.Values{}
 	query.Set("mode", "rwc")
 	query.Add("_pragma", "foreign_keys(1)")
-	// secure_delete zeroes freed space, so text an edit overwrites is
-	// not left behind in the database file's free pages.
+	// secure_delete zeroes freed space, so text a delete clears is not
+	// left behind in the database file's free pages.
 	query.Add("_pragma", "secure_delete(1)")
 	query.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", msecs))
 	query.Add("_pragma", fmt.Sprintf("mmap_size(%d)", mmapSizeBytes))

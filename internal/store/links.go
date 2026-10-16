@@ -430,9 +430,11 @@ func (s *Store) Detail(
 	if err != nil {
 		return api.PostDetail{}, err
 	}
-	if post.Version, err = v.currentVersion(ctx, key); err != nil {
+	version, _, err := v.latestVersion(ctx, key)
+	if err != nil {
 		return api.PostDetail{}, err
 	}
+	post.Version = &version
 	listed, err := v.listPost(ctx, post)
 	if err != nil {
 		return api.PostDetail{}, err

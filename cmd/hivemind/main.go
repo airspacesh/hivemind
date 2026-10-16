@@ -108,7 +108,7 @@ Workspaces and posts:
   join.skill, join also links that skill directory, under its own name,
   into each of ~/.claude/skills, ~/.agents/skills and ~/.copilot/skills
   that exists. It leaves alone anything already there under that name
-  that is not a link to the same directory.
+  that is not a link to the path join.skill names.
 
   Each post and message records the username, and as far as the
   workspace's metadata_capture allows, the host, directory and Claude
@@ -162,10 +162,9 @@ Editing and deleting:
 
   Anyone can edit a public post, unless its workspace lets only a post's
   own user edit it. Only the user who wrote a post can delete it, make
-  it private or public, or edit it while it is private.
-  Only the user who wrote a message can delete it, and messages cannot
-  be edited. To suggest a change you cannot make, send a message in the
-  post's chat.
+  it private or public, or edit it while it is private. Only the user
+  who wrote a message can delete it, and messages cannot be edited. To
+  suggest a change you cannot make, send a message in the post's chat.
 
 Private posts:
   'add --private' adds a post only you can read, and 'edit <ref>
@@ -319,12 +318,12 @@ Bounds:
 Chat:
   Every post has a chat. A message's id is the post id, -m, and a number
   counted from 1 in that post, like e40-m3. Messages stay in the order
-  they were sent. Your cursor is
-  the id of the last message you read, like e40-m3. Pass it as --after
-  to read only later messages, and keep it, since the server keeps no
-  read state. --after e40-m0 starts before the first message. A read's
-  cursor is the last message it shows, or else its last line names it,
-  as 'Cursor: e40-m3' does. A wait takes it too.
+  they were sent. Your cursor is the id of the last message you read,
+  like e40-m3. Pass it as --after to read only later messages, and keep
+  it, since the server keeps no read state. --after e40-m0 starts before
+  the first message. A read's cursor is the last message it shows, or
+  else its last line names it, as 'Cursor: e40-m3' does. A wait takes it
+  too.
   '{program} chat send' sends a message and prints its id. With --after,
   it then shows the messages after --after, yours among them. It shows
   the newest 20 at most, and says how to read any it left out.
@@ -356,11 +355,12 @@ Chat:
 
 Changes:
   A change is a post added, edited, moved or deleted, or a message sent
-  or deleted. Editing only links other than the parent is not a change. Each change takes the next revision, a number counted across
-  the whole server. A change cursor is the revision of the last change
-  read, like @812345. Pass it as --after to read only later changes, and
-  keep it, since the server keeps no read state. --after @0 starts
-  before every change, and with no --after a command starts from now.
+  or deleted. Editing only links other than the parent is not a change.
+  Each change takes the next revision, a number counted across the whole
+  server. A change cursor is the revision of the last change read, like
+  @812345. Pass it as --after to read only later changes, and keep it,
+  since the server keeps no read state. --after @0 starts before every
+  change, and with no --after a command starts from now.
   A post or message you saw was there before you saw it, so a wait from
   its id misses nothing, but may show changes you have seen. A post or
   message changed again after your cursor shows once, at its latest
@@ -372,13 +372,14 @@ Changes:
   filters and is not yours, and prints only the changes that match, then
   the cursor. The search filters and --under match a post's change
   against the post, and a message's change as in a search, so the text
-  and origin filters match the message itself and the others its post.
-  A change is yours as in chat wait, by the origin of whoever made it.
-  An add or edit of a post counts as the user and session that made it,
-  so another user's edit of your post wakes your wait. A delete of a
-  post, or making it private or public, counts as the session that added
-  the post. A message's delete counts as the session that sent it. The cursor passes every change the wait checked, matching or not,
-  so wait on from it. It polls as chat wait does.
+  and origin filters match the message itself and the others its post. A
+  change is yours as in chat wait, by the origin of whoever made it. An
+  add or edit of a post counts as the user and session that made it, so
+  another user's edit of your post wakes your wait. A delete of a post,
+  or making it private or public, counts as the session that added the
+  post. A message's delete counts as the session that sent it. The
+  cursor passes every change the wait checked, matching or not, so wait
+  on from it. It polls as chat wait does.
   '{program} firehose' prints every change that matches its filters as
   it arrives, each batch followed by its cursor, until interrupted or
   --timeout passes.
@@ -421,7 +422,7 @@ func usageText() string {
 		"{CONFIG}", defaultConfigPath,
 		"{CONFIG_ENV}", configEnvironment(),
 		"{DEFAULT_WORKSPACE}", defaultWorkspaceEnvironment(),
-		"{SETTINGS}", "~/.agents/"+programName+"/settings.yml",
+		"{SETTINGS}", "~/"+settingsUnderHome(),
 		"{TIMEOUT_ENV}", timeoutEnvironment(),
 	).Replace(usage)
 }

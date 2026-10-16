@@ -18,10 +18,8 @@ var ErrVersionNotFound = errors.New("version not found")
 // always reads as the same text, and the id of its parent, or NULL for
 // a top-level post.
 const versionContent = `e.project, e.subject, e.body,
-	(SELECT json_group_object(key, value) FROM (
-		SELECT key, value FROM post_metadata
-		WHERE workspace_id = e.workspace_id AND post_id = e.id
-		ORDER BY key)),
+	(SELECT json_group_object(key, value ORDER BY key) FROM post_metadata
+		WHERE workspace_id = e.workspace_id AND post_id = e.id),
 	(SELECT target_id FROM post_links
 		WHERE source_workspace_id = e.workspace_id AND source_id = e.id
 			AND name = 'parent')`
@@ -52,24 +50,6 @@ func (v view) readContent(ctx context.Context, key Key) (versionRecord,
 			v.store.mustRef(key), err)
 	}
 	return content, nil
-}
-
-// latestVersion reads the number and content of a post's latest
-// version.
-func (v view) latestVersion(ctx context.Context, key Key) (int64,
-	versionRecord, error) {
-	var number int64
-	var content versionRecord
-	if err := v.tx.QueryRowContext(ctx, `
-		SELECT version, project, subject, body, metadata, parent_id
-		FROM post_versions WHERE workspace_id = ? AND post_id = ?
-		ORDER BY version DESC LIMIT 1`, key.Workspace, key.ID,
-	).Scan(&number, &content.project, &content.subject, &content.body,
-		&content.metadata, &content.parent); err != nil {
-		return 0, versionRecord{}, fmt.Errorf("reading the latest "+
-			"version of %s: %w", v.store.mustRef(key), err)
-	}
-	return number, content, nil
 }
 
 // recordVersion records content as version number of a post, made by
@@ -111,28 +91,30 @@ func (v view) purgeVersions(ctx context.Context, key Key) error {
 const versionColumns = `version, created_utc, origin_user, origin_host,
 	origin_dir, origin_claude_session`
 
-// currentVersion reads which version a post is at, and who made it
-// when.
-func (v view) currentVersion(
-	ctx context.Context, key Key,
-) (*api.Version, error) {
+// latestVersion reads which version a post is at, who made it when, and
+// what it records.
+func (v view) latestVersion(ctx context.Context, key Key) (api.Version,
+	versionRecord, error) {
 	var version api.Version
 	var created string
+	var content versionRecord
 	if err := v.tx.QueryRowContext(ctx, `
-		SELECT `+versionColumns+` FROM post_versions
-		WHERE workspace_id = ? AND post_id = ?
+		SELECT `+versionColumns+`, project, subject, body, metadata,
+			parent_id
+		FROM post_versions WHERE workspace_id = ? AND post_id = ?
 		ORDER BY version DESC LIMIT 1`, key.Workspace, key.ID,
 	).Scan(&version.Number, &created, &version.Origin.User,
 		&version.Origin.Host, &version.Origin.Dir,
-		&version.Origin.ClaudeSession); err != nil {
-		return nil, fmt.Errorf("reading the version of %s: %w",
-			v.store.mustRef(key), err)
+		&version.Origin.ClaudeSession, &content.project, &content.subject,
+		&content.body, &content.metadata, &content.parent); err != nil {
+		return api.Version{}, versionRecord{}, fmt.Errorf("reading the "+
+			"latest version of %s: %w", v.store.mustRef(key), err)
 	}
 	var err error
 	if version.Created, err = parseTime(created); err != nil {
-		return nil, err
+		return api.Version{}, versionRecord{}, err
 	}
-	return &version, nil
+	return version, content, nil
 }
 
 // Version reads one version of a post the reader can read. Its one

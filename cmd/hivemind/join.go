@@ -34,14 +34,21 @@ func shortenHome(home, path string) string {
 // checkSkill checks that skill is a directory holding a SKILL.md.
 func checkSkill(config clientConfig) error {
 	info, err := os.Stat(config.joinSkill)
-	if err != nil || !info.IsDir() {
+	if err != nil {
+		return fmt.Errorf("checking join.skill in %s: %w", config.path, err)
+	}
+	if !info.IsDir() {
 		return fmt.Errorf("join.skill in %s names %s, which is not a "+
 			"directory", config.path, config.joinSkill)
 	}
+
 	_, err = os.Stat(filepath.Join(config.joinSkill, "SKILL.md"))
-	if err != nil {
+	if errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("join.skill in %s names %s, which holds no "+
 			"SKILL.md", config.path, config.joinSkill)
+	}
+	if err != nil {
+		return fmt.Errorf("checking join.skill in %s: %w", config.path, err)
 	}
 	return nil
 }

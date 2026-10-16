@@ -341,12 +341,18 @@ type settingsFile struct {
 	DefaultWorkspace string `yaml:"default_workspace"`
 }
 
+// settingsUnderHome is the settings file's path under the home
+// directory.
+func settingsUnderHome() string {
+	return filepath.Join(".agents", programName, "settings.yml")
+}
+
 func settingsPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("finding the settings file: %w", err)
 	}
-	return filepath.Join(home, ".agents", programName, "settings.yml"), nil
+	return filepath.Join(home, settingsUnderHome()), nil
 }
 
 // readSettings reads the settings at path, which are empty when there
