@@ -263,7 +263,7 @@ func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.Header.Set(version.APIHeader, "1")
+	request.Header.Set(version.APIHeader, strconv.Itoa(version.API+1))
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -273,7 +273,7 @@ func TestMissingThingsHaveDistinctCodes(t *testing.T) {
 	if response.StatusCode != 400 ||
 		errorCode(t, string(text)) != api.CodeAPIVersion ||
 		response.Header.Get(version.APIHeader) != strconv.Itoa(version.API) {
-		t.Fatalf("an old client got %d %s", response.StatusCode, text)
+		t.Fatalf("a client on another API version got %d %s", response.StatusCode, text)
 	}
 }
 

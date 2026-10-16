@@ -909,7 +909,7 @@ func TestResolutionStopsOnAnyOtherFailure(t *testing.T) {
 			fmt.Fprint(w, `{"workspaces": [`)
 		},
 		"another API version": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set(version.APIHeader, "1")
+			w.Header().Set(version.APIHeader, strconv.Itoa(version.API+1))
 			fmt.Fprint(w, `{"workspaces": []}`)
 		},
 	}
@@ -1032,7 +1032,7 @@ func TestUncertainWritesGiveTheCommandThatRepeatsThem(t *testing.T) {
 			fmt.Fprint(w, `{"ref":"e1"}`)
 		},
 		"another version": func(w http.ResponseWriter) {
-			w.Header().Set(version.APIHeader, "1")
+			w.Header().Set(version.APIHeader, strconv.Itoa(version.API+1))
 			w.WriteHeader(http.StatusCreated)
 		},
 		"truncated body": func(w http.ResponseWriter) {
